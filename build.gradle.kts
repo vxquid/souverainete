@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ignis"
-version = "0.3.3"
+version = "0.3.3-SNAPSHOT"
 description = "Revolutionize your villagers with cutting-edge AI dynamics!"
 
 bukkitPluginYaml {
@@ -56,14 +56,14 @@ tasks {
 
   tasks {
     shadowJar {
-      archiveFileName = "Ignis-${version}.jar"
-      relocate("co.aikar.commands", "vxquid.ignis.command")
-      relocate("co.aikar.locales", "vxquid.ignis.command.locales")
-      relocate("de.exlll.configlib", "vxquid.ignis.config")
-      relocate("kotlin", "vxquid.ignis.kotlin")
-      relocate("com.github.retrooper.packetevents", "vxquid.ignis.packetevents.api")
-      relocate("io.github.retrooper.packetevents", "vxquid.ignis.packetevents.impl")
-      relocate("com.cryptomorin.xseries", "vxquid.ignis.utils")
+      archiveFileName = "ignis-${version}.jar"
+      relocate("co.aikar.commands", "vx.ignis.command")
+      relocate("co.aikar.locales", "vx.ignis.command.locales")
+      relocate("de.exlll.configlib", "vx.ignis.config")
+      relocate("kotlin", "vx.ignis.kotlin")
+      relocate("com.github.retrooper.packetevents", "vx.ignis.packetevents.api")
+      relocate("io.github.retrooper.packetevents", "vx.ignis.packetevents.impl")
+      relocate("com.cryptomorin.xseries", "vx.ignis.utils")
     }
   }
 

@@ -8,7 +8,7 @@ import org.bukkit.entity.Display.Billboard
 class GameplayConfiguration {
 
     @Comment("Don't touch this, or you'll see a lot weird things.")
-    val debug: Boolean = true
+    val debug: Boolean = false
 
     @Comment("Message prefix.")
     val messagePrefix: String = "§e🔥 §8| §7"
