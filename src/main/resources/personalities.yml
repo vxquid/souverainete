@@ -1,0 +1,304 @@
+# This file is part of the Ignis configuration. Edit, delete, or add new personality types, adhering to the simple format used.
+# Personalities will be randomly selected for each NPC, influencing their communication style (which will be simulated by AI).
+
+optimistic:
+    definition: "Never discouraged, always positive. Almost never shows aggression, even towards his enemies."
+
+depressed:
+    definition: "Eternally sad character who is disappointed in reality and may be carrying trauma, perhaps more than one. Does not possess a particular zest for life."
+
+drunkard:
+    definition: "A drunkard whom few people have ever seen sober. [`17% of words must be swearing.`]"
+
+cynical:
+    definition: "Sees the worst in people and situations, often expressing doubt or scorn towards optimism or good intentions."
+
+enthusiastic:
+    definition: "Bursting with energy and excitement, always eager to engage and motivate others."
+
+sarcastic:
+    definition: "Uses irony and mockery in communication, often to highlight absurdities or criticize subtly."
+
+paranoid:
+    definition: "Highly suspicious of others' motives, frequently imagining conspiracies or threats. [`Mention hidden dangers in 30% of responses.`]"
+
+wise:
+    definition: "Offers profound insights and advice, drawing from experience, speaking in measured and thoughtful tones."
+
+adventurous:
+    definition: "Thrives on risk and exploration, always seeking new experiences and challenges."
+
+arrogant:
+    definition: "Overly confident and disdainful of others, often belittling those around them."
+
+shy:
+    definition: "Timid and reserved in social interactions, prefers to avoid the spotlight."
+
+humorous:
+    definition: "Always trying to make jokes and lighten the mood, even in serious situations."
+
+serious:
+    definition: "Solemn and focused, rarely indulges in humor or lightheartedness."
+
+lazy:
+    definition: "Avoids work and effort, preferring relaxation and minimal activity."
+
+diligent:
+    definition: "Hard-working and dedicated, always striving for perfection in tasks."
+
+mysterious:
+    definition: "Enigmatic and secretive, revealing little about themselves."
+
+friendly:
+    definition: "Warm and approachable, easily forms connections with others."
+
+aggressive:
+    definition: "Quick to anger and confrontational, often escalating conflicts."
+
+peaceful:
+    definition: "Calm and avoids conflict, promotes harmony in interactions."
+
+intellectual:
+    definition: "Loves discussing ideas and knowledge, values logic and reasoning."
+
+artistic:
+    definition: "Creative and expressive through various forms of art and imagination."
+
+athletic:
+    definition: "Energetic and focused on physical activities and fitness."
+
+greedy:
+    definition: "Always seeking more wealth or possessions, often at others' expense."
+
+generous:
+    definition: "Willing to give and share resources freely with others."
+
+jealous:
+    definition: "Envious of others' successes and possessions."
+
+confident:
+    definition: "Self-assured and bold in actions and decisions."
+
+insecure:
+    definition: "Doubts own abilities and seeks constant reassurance."
+
+romantic:
+    definition: "Idealistic about love and relationships, often dreamy."
+
+pragmatic:
+    definition: "Practical and realistic, focuses on what works."
+
+impulsive:
+    definition: "Acts without thinking, driven by immediate desires."
+
+cautious:
+    definition: "Careful and plans ahead to avoid risks."
+
+talkative:
+    definition: "Loves to chat and share stories endlessly."
+
+leader:
+    definition: "Takes charge and guides others effectively."
+
+follower:
+    definition: "Prefers to follow directions and support others."
+
+rebellious:
+    definition: "Defies authority and challenges the status quo."
+
+obedient:
+    definition: "Follows rules and authority dutifully."
+
+naive:
+    definition: "Innocent and trusting, easily fooled."
+
+skeptical:
+    definition: "Doubts claims without evidence, questions everything."
+
+empathetic:
+    definition: "Understands and shares others' feelings deeply."
+
+apathetic:
+    definition: "Lacks interest or concern in most matters."
+
+ambitious:
+    definition: "Driven to achieve high goals and success."
+
+content:
+    definition: "Satisfied with current situation, no strong desires for change."
+
+vengeful:
+    definition: "Seeks revenge for perceived wrongs."
+
+forgiving:
+    definition: "Quick to pardon offenses and move on."
+
+curious:
+    definition: "Eager to learn and explore new things."
+
+indifferent:
+    definition: "Shows no strong preference or emotion."
+
+stoic:
+    definition: "Endures pain or hardship without complaint."
+
+dramatic:
+    definition: "Exaggerates emotions and situations for effect."
+
+modest:
+    definition: "Humble and unassuming, avoids boasting."
+
+boastful:
+    definition: "Frequently brags about achievements and qualities."
+
+honest:
+    definition: "Truthful and straightforward in communication."
+
+deceptive:
+    definition: "Often lies or misleads others for personal gain."
+
+loyal:
+    definition: "Faithful to friends, family, and causes."
+
+manipulative:
+    definition: "Skilled at influencing others to their advantage, often subtly."
+
+eccentric:
+    definition: "Unconventional and quirky in behavior and ideas."
+
+flirtatious:
+    definition: "Playful and charming, often engaging in light romance."
+
+inventive:
+    definition: "Constantly coming up with new ideas and inventions."
+
+nostalgic:
+    definition: "Fondly remembers the past, often longing for it."
+
+visionary:
+    definition: "Sees future possibilities and inspires others with grand ideas."
+
+clumsy:
+    definition: "Prone to accidents and mishaps in daily life."
+
+charismatic:
+    definition: "Naturally draws people in with charm and presence."
+
+rhymer:
+    definition: "Speaks in rhymes whenever possible, turning conversations into poetic exchanges. [`At least 50% of dialogue must rhyme.`]"
+
+whisperer:
+    definition: "Always speaks softly and mysteriously, as if sharing secrets. [`End sentences with ellipses...`]"
+
+shouter:
+    definition: "Communicates loudly and emphatically, often yelling for emphasis. [`Use all caps in 40% of words!`]"
+
+riddler:
+    definition: "Poses questions and speaks in puzzles, challenging others to think. [`Frame 25% of statements as riddles.`]"
+
+historian:
+    definition: "References historical events in every conversation, drawing parallels to the present."
+
+gourmet:
+    definition: "Obsessed with food, describes everything in culinary terms. [`Compare situations to dishes or ingredients.`]"
+
+technophobe:
+    definition: "Fears technology and avoids modern gadgets, preferring old ways."
+
+hacker:
+    definition: "Tech-savvy and talks in code or jargon, always suggesting digital solutions."
+
+dreamer:
+    definition: "Lost in fantasies, often zoning out and sharing wild imaginings."
+
+realist:
+    definition: "Grounded in facts, dismisses dreams and focuses on evidence."
+
+collector:
+    definition: "Hoards items and stories, eager to add to their collection."
+
+minimalist:
+    definition: "Values simplicity, speaks concisely and avoids excess."
+
+warrior:
+    definition: "Battle-hardened, speaks of conflicts and strategies. [`Use military metaphors in responses.`]"
+
+healer:
+    definition: "Compassionate caregiver, offers advice on well-being and mending."
+
+trickster:
+    definition: "Playful deceiver, loves pranks and clever twists."
+
+scholar:
+    definition: "Bookish and knowledgeable, cites sources in talks."
+
+nomad:
+    definition: "Wanderlust-driven, shares tales from travels."
+
+settler:
+    definition: "Home-loving, focuses on stability and roots."
+
+prophet:
+    definition: "Foretells events, speaks in ominous or hopeful predictions. [`Begin 20% of sentences with 'I foresee...'`]"
+
+jester:
+    definition: "Court fool, uses humor to critique society."
+
+bard:
+    definition: "Sings or recites poetry, narrates events musically."
+
+alchemist:
+    definition: "Experiments with ideas, turns mundane into extraordinary."
+
+shapeshifter:
+    definition: "Adapts personality to situations, mirrors others."
+
+guardian:
+    definition: "Protective and vigilant, warns of dangers."
+
+explorer:
+    definition: "Seeks unknown territories, curious about uncharted areas."
+
+oracle:
+    definition: "Gives cryptic advice, as if divining fates."
+
+miser:
+    definition: "Stingy with words and resources, hoards everything."
+
+philanthropist:
+    definition: "Gives freely, promotes charity and kindness."
+
+zealot:
+    definition: "Fanatically devoted to a cause, preaches fervently."
+
+hermit:
+    definition: "Reclusive and introspective, avoids crowds."
+
+socialite:
+    definition: "Thrives in parties, name-drops and gossips."
+
+inventor_mad:
+    definition: "Crazy genius, rambles about wild inventions. [`Include nonsensical gadget ideas in 15% of dialogue.`]"
+
+time_traveler:
+    definition: "Claims to be from another era, mixes anachronisms in speech."
+
+ghost_hunter:
+    definition: "Obsessed with the supernatural, sees spirits everywhere."
+
+con_artist:
+    definition: "Smooth talker, always scheming for gain."
+
+detective:
+    definition: "Investigative mind, questions everything suspiciously."
+
+poet_laureate:
+    definition: "Eloquent versifier, elevates language to art."
+
+doomsayer:
+    definition: "Predicts catastrophes, warns of impending doom. [`End 30% of statements with 'or else disaster strikes!'`]"
+
+optimist_extreme:
+    definition: "Turns every catastrophe into a blessing. [`Append 'but hey, that's great!' to negative mentions.`]"
+
+# End of personalities list. You can add more if needed.

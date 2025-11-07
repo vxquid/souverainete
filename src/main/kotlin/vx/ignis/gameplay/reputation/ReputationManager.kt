@@ -1,0 +1,140 @@
+package vx.ignis.gameplay.reputation
+
+import org.bukkit.NamespacedKey
+import org.bukkit.entity.LivingEntity
+import org.bukkit.entity.Player
+import org.bukkit.persistence.PersistentDataType
+import vx.ignis.Ignis.Companion.plugin
+import java.util.*
+
+class ReputationManager {
+
+    private val reputationDisplayManager = ReputationDisplayManager(this)
+
+    fun getReputationMap(entity: LivingEntity): MutableMap<UUID, Int> {
+        val pdc = entity.persistentDataContainer
+        if (pdc.has(REP_KEY, PersistentDataType.STRING)) {
+            val str = pdc.get(REP_KEY, PersistentDataType.STRING)!!
+            return str.split(",").mapNotNull { part ->
+                val parts = part.split(":")
+                if (parts.size == 2) UUID.fromString(parts[0]) to parts[1].toInt() else null
+            }.toMap().toMutableMap()
+        }
+        return HashMap()
+    }
+
+    fun setReputationMap(entity: LivingEntity, map: Map<UUID, Int>) {
+        val pdc = entity.persistentDataContainer
+        if (map.isEmpty()) {
+            pdc.remove(REP_KEY)
+        } else {
+            val str = map.map { "${it.key}:${it.value}" }.joinToString(",")
+            pdc.set(REP_KEY, PersistentDataType.STRING, str)
+        }
+    }
+
+    fun addReputation(entity: LivingEntity, player: Player, value: Int) {
+
+        val statusUpdateMessage = plugin.language.getString("settlement-reputation.status-update")!!
+
+        val map = getReputationMap(entity)
+        val previousRep = map[player.uniqueId] ?: 0
+        val previousStatus = getPlayerReputationStatus(entity, player)
+        map[player.uniqueId] = previousRep + value
+        setReputationMap(entity, map)
+        val newStatus = getPlayerReputationStatus(entity, player)
+
+        // Уведомление об изменении репутации
+        if (plugin.gameplayManager.config.reputationChatNotification && value != 0) {
+            val entityDescription = entity.customName ?: "nearby inhabitants"
+            notifyReputationChange(player, value, entityDescription)
+        }
+
+        if (previousStatus != newStatus && plugin.gameplayManager.config.reputationChatNotification) {
+            val entityName = entity.customName ?: "nearby inhabitants"
+            val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.localizedName)
+            player.sendMessage(statusChangeMessage)
+            player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputationStatusUpdateSound, 1F, 1F)
+        }
+
+        // Обновление отображения BELOW_NAME
+        this.reputationDisplayManager.updateForPlayer(player, entity)
+    }
+
+    private fun notifyReputationChange(player: Player, aggregatedValue: Int, entityDescription: String) {
+        val increaseMessage = plugin.language.getString("settlement-reputation.increase")!!
+        val decreaseMessage = plugin.language.getString("settlement-reputation.decrease")!!
+
+        val reputationChangeMessage = (if (aggregatedValue > 0) increaseMessage else decreaseMessage)
+            .replace("{entity}", entityDescription)
+            .replace("{amount}", Math.abs(aggregatedValue).toString())
+        player.sendMessage(reputationChangeMessage)
+    }
+
+    fun setReputation(entity: LivingEntity, player: Player, value: Int) {
+        val statusUpdateMessage = plugin.language.getString("settlement-reputation.status-update")!!
+
+        val previousStatus = getPlayerReputationStatus(entity, player)
+        val map = getReputationMap(entity)
+        val previousRep = map[player.uniqueId] ?: 0
+        map[player.uniqueId] = value
+        setReputationMap(entity, map)
+        val newStatus = getPlayerReputationStatus(entity, player)
+
+        // Уведомление об изменении репутации (аналогично addReputation, если значение изменилось)
+        if (plugin.gameplayManager.config.reputationChatNotification && value != previousRep) {
+            val entityDescription = entity.customName ?: entity.type.name.lowercase().capitalize()
+            val changeValue = value - previousRep
+            notifyReputationChange(player, changeValue, entityDescription)
+        }
+
+        if (previousStatus != newStatus && plugin.gameplayManager.config.reputationChatNotification) {
+            val entityName = entity.customName ?: entity.type.name.lowercase().capitalize()
+            val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.localizedName)
+            player.sendMessage(statusChangeMessage)
+            player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputationStatusUpdateSound, 1F, 1F)
+        }
+
+        // Обновление отображения BELOW_NAME
+        this.reputationDisplayManager.updateForPlayer(player, entity)
+    }
+
+    enum class Reputation(val localizedName: String, val priceMultiplier: Double) {
+        EXALTED("Exalted", 0.6),
+        REVERED("Revered", 0.7),
+        HONORED("Honored", 0.9),
+        FRIENDLY("Friendly", 0.9),
+        NEUTRAL("Neutral", 1.0),
+        UNFRIENDLY("Unfriendly", 1.25),
+        HOSTILE("Hostile", 1.5),
+        EXILED("Exiled", 2.0)
+    }
+
+    fun getPlayerReputationStatus(entity: LivingEntity, player: Player): Reputation {
+        val reputation = getReputationMap(entity)[player.uniqueId] ?: 0
+        val config = plugin.gameplayManager.config
+
+        return when {
+            reputation >= config.reputationExaltedRequired -> Reputation.EXALTED
+            reputation >= config.reputationReveredRequired -> Reputation.REVERED
+            reputation >= config.reputationHonoredRequired -> Reputation.HONORED
+            reputation >= config.reputationFriendlyRequired -> Reputation.FRIENDLY
+            reputation >= config.reputationNeutralRequired -> Reputation.NEUTRAL
+            reputation >= config.reputationUnfriendlyRequired -> Reputation.UNFRIENDLY
+            reputation >= config.reputationHostileRequired -> Reputation.HOSTILE
+            reputation >= config.reputationExiledRequired -> Reputation.EXILED
+            else -> Reputation.EXILED
+        }
+    }
+
+    companion object {
+
+        val REP_KEY = NamespacedKey(plugin, "ReputationData")
+
+        fun LivingEntity.reputationOf(player: Player): Reputation {
+            return plugin.gameplayManager.reputationManager.getPlayerReputationStatus(this, player)
+        }
+
+    }
+
+}

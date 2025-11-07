@@ -1,0 +1,98 @@
+# Language file.
+# There is no need to translate this file manually. Automatic on-the-fly translation by AI will be used. But you can disable it in config.yml.
+
+# If the player has turned off immersive dialogs with the "/q dialogue format CHAT" command, they will see messages from villagers in the chat.
+villager-message-chat-format: "§8(villager) §6{villagerName}§7: §r{message}"
+
+# Reputation change messages.
+settlement-reputation:
+  increase: "§9Reputation with {entity} increased by {amount}."
+  decrease: "§9Reputation with {entity} decreased by {amount}."
+  status-update: "§eYour reputation with {entity} has shifted to {status}."
+
+quest:
+  finished: "You have finished the quest §6{quest}§7."
+  failed:
+    npcDeath: "Quest §6{quest} §7was failed; villager who gave you a quest is dead."
+    timeExpiration: "Quest §6{quest} §7was failed; quest duration expired."
+    finishedBySomeoneElse: "Quest §6{quest} §7was failed; it finished by someone else."
+    notActual: "Quest §6{quest} §7was failed; it's not actual anymore."
+  accepted: "You have accepted the quest §6{quest}§7."
+  limit: "You can't have more than §6{playerQuestLimit} §7quests."
+  already-accepted: "You already have this quest."
+
+reputation:
+  status:
+    exiled: "Exiled"
+    hostile: "Hostile"
+    unfriendly: "Unfriendly"
+    neutral: "Neutral"
+    friendly: "Friendly"
+    honored: "Honored"
+    revered: "Revered"
+    exalted: "Exalted"
+
+# Messages that are visible after using commands.
+command-message:
+
+  dialogue-format-changed: "Dialogue format has been set to §6{dialogueFormat}"
+  player-fame-changed: "§e{playerName}§7's fame has been changed to §3{newFame}"
+
+  verbose:
+    activated: "§aVerbose mode activated."
+    deactivated: "§cVerbose mode deactivated."
+
+info-messages:
+  quest-chat-info:
+    quest-giver: "NPC: §6{npcName}"
+    task-description: "Task Description: §f{desc}"
+    target-entity: "Target Entity: §e{entityType}"
+    drop-chance: "Drop Chance: §b{chance}%"
+  npc-conversation:
+    started: "You started a conversation with §6{npcName}§7. All chat messages will now be addressed to this NPC. Write something in the chat and wait for a reply. To exit the dialog mode, right-click on the NPC again."
+    ended: "Your conversation with §6{npcName} §7is over."
+    cooldown: "Hey, not so fast! There should be a little time between actions."
+    waiting-for-gift: "The next item you drop from your inventory will be gifted to §6{npcName}§7."
+    ai-overloaded: "§aAI is overloaded, response generation can take a bit of time..."
+  quest-command:
+    not-found: "You don't have a quest named §6{quest}§7."
+    removed: "Quest §6{quest} §7successfully removed."
+    tracking: "You're tracking a quest named §6{quest}§7."
+    amount: "You have §d{questAmount} §7quests."
+    statistics: "§6Questing Statistics"
+    totally-generated: "In total, §3{questCount} §7quests have been generated."
+    dqi-amount: "Total amount of dynamic quest items is §d{dqiAmount}§7."
+    completed: "You have completed §2{questsCompleted} §7quests."
+    failed: "You have failed §4{questsFailed} §7quests."
+    xp-earned: "You have earned §e{xpEarned}xp §7by completing quests."
+    hold-item: "You must hold something in your hand to use this command."
+    dqi-added: "You have added a new dynamic quest item for §6{entityType} §7entity type."
+    mm-dqi-added: "You have added a new dynamic quest item for §6{entityType} §7mythic mob."
+    ee-not-exist: "Entity type §6{entityType} §7doesn't exist."
+    deleted-dqi-by-ee: "Deleted §e{rowsAffected} §7dynamic quest items from §6{entityType}§7."
+    deleted-dqi-by-id: "Deleted dynamic quest item with ID §b{id}§7."
+    non-existent-id: "Deleted dynamic quest item failed; no item with ID §b{id}§7 found."
+
+# Interaction menu buttons.
+interaction-menu:
+
+  quests-button: "Quests"
+  trade-button: "Trade"
+  actions-button: "Actions"
+  talk-button: "Chat"
+  gift-button: "Gift"
+  interrupt-button: "Interrupt Conversation"
+  return-button: "Return"
+  accept-button: "Accept"
+  decline-button: "Decline"
+  close-button: "Close"
+
+# Error messages. THAT WAS AN ERROR.
+command-error-message:
+  player-not-found: "§cError! Player not found: §e{playerName} §c(online only)."
+  status-not-found: "§cError! Non-existent reputation status: §с{status}."
+  settlement-not-found: "§cError! Non-existent settlement: §с{settlementName}."
+
+# Success messages.
+command-success-message:
+  reputation-changed: "§7Reputation of §e{playerName} §7has been changed to §6{status}§7."
