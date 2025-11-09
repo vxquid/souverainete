@@ -9,13 +9,14 @@ plugins {
 }
 
 group = "ignis"
-version = "0.3.3-SNAPSHOT"
-description = "Revolutionize your villagers with cutting-edge AI dynamics!"
+version = "0.3.3.1-SNAPSHOT"
+description = "Let AI make your server alive with AI-generated NPCs, quests, towns, items and a lot more."
 
 bukkitPluginYaml {
   name = "Ignis"
   main = "vx.ignis.Ignis"
   load = BukkitPluginYaml.PluginLoadOrder.STARTUP
+  depend = listOf("packetevents")
   softDepend = listOf("MythicMobs")
   authors.add("vxquid")
   apiVersion = "1.21.10"
@@ -30,15 +31,16 @@ repositories {
   maven("https://mvn.lumine.io/repository/maven-public/") // MythicMobs repository
 }
 
+
 dependencies {
   paperweight.paperDevBundle("1.21.10-R0.1-SNAPSHOT")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")
-  implementation("com.github.retrooper:packetevents-spigot:2.10.0")
   implementation("com.github.cryptomorin:XSeries:13.3.3")
   implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT") // Annotations-based commands.
   implementation("de.exlll:configlib-paper:4.6.1") // Annotations-based configs.
+  compileOnly("com.github.retrooper:packetevents-spigot:2.10.0")
   compileOnly("io.lumine:Mythic-Dist:5.10.0")
 }
 
@@ -57,6 +59,7 @@ tasks {
   tasks {
     shadowJar {
       archiveFileName = "ignis-${version}.jar"
+      minimize()
       relocate("co.aikar.commands", "vx.ignis.command")
       relocate("co.aikar.locales", "vx.ignis.command.locales")
       relocate("de.exlll.configlib", "vx.ignis.config")

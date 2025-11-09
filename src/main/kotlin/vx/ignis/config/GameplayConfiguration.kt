@@ -82,6 +82,9 @@ class GameplayConfiguration {
     @Comment("Template for the reputation text. Placeholders: {npcName}, {repValue}, {status}")
     var reputationDisplayTextTemplate: String = "{npcName}'s Reputation: {repValue} ({status})"
 
+    @Comment("Show entry message on settlement entry.")
+    var trackPlayerSettlementEntry: Boolean = true
+
     enum class DialogueFormat {
         IMMERSIVE, CHAT, BOTH
     }

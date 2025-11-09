@@ -1,16 +1,10 @@
 package vx.ignis
 
 import co.aikar.commands.PaperCommandManager
-import com.github.retrooper.packetevents.PacketEvents
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import de.exlll.configlib.ConfigLib
 import de.exlll.configlib.YamlConfigurationProperties
-import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder
-import org.apache.logging.log4j.LogManager
-import org.apache.logging.log4j.core.Filter
-import org.apache.logging.log4j.core.Logger
-import org.apache.logging.log4j.core.filter.AbstractFilter
 import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.NamespacedKey
@@ -26,6 +20,8 @@ import vx.ignis.ai.ProviderManager
 import vx.ignis.command.DictionaryCommand
 import vx.ignis.command.QuestCommand
 import vx.ignis.gameplay.GameplayManager
+import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlements
+import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
 import vx.ignis.serialization.ItemStackSerializer
 import vx.ignis.serialization.LocationSerializer
 import vx.ignis.serialization.UUIDSerializer
@@ -54,22 +50,22 @@ class Ignis : JavaPlugin(), Listener {
         YamlConfiguration.loadConfiguration(File(super.getDataFolder(), "prices.yml"))
     }
 
+    var professions: YamlConfiguration = run {
+        super.saveResource("professions.yml", false)
+        YamlConfiguration.loadConfiguration(File(super.getDataFolder(), "professions.yml"))
+    }
+
     override fun onEnable() {
-
-        // Initialize PacketEvents
-        PacketEvents.setAPI(SpigotPacketEventsBuilder.build(this))
-        PacketEvents.getAPI().load()
-        PacketEvents.getAPI().init()
-
         RainbowColorTicker.init()
-
         this.providerManager = ProviderManager()
         this.server.pluginManager.registerEvents(this, this)
     }
 
     override fun onDisable() {
         gameplayManager.humanoidManager.protocolListener.debugOverlay.stopDebugOverlay()
-        PacketEvents.getAPI().terminate()
+        gameplayManager.allowedWorlds.forEach { world ->
+            world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.STRING, gson.toJson(settlements[world]?.map { it.data }))
+        }
         Bukkit.getWorlds().getOrNull(0)?.persistentDataContainer?.set(
             NamespacedKey(this, "ActualQuests"),
             PersistentDataType.LONG_ARRAY,

@@ -17,6 +17,8 @@ import vx.ignis.gameplay.humanoid.HumanoidManager
 import vx.ignis.gameplay.personality.PersonalityManager
 import vx.ignis.gameplay.quest.QuestManager
 import vx.ignis.gameplay.reputation.ReputationManager
+import vx.ignis.gameplay.settlement.SettlementManager
+import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.ignis.gameplay.trade.TradeHack
 import java.io.File
 
@@ -46,11 +48,16 @@ class GameplayManager(val firstWorld: World) : Listener {
     val interactionManager = InteractionManager()
     val tradeHack          = TradeHack()
     val humanoidManager    = HumanoidManager()
+    val professionManager  = ProfessionManager()
+    val settlementManager  = SettlementManager()
 
     @EventHandler
     private fun onWorldLoad(event: WorldLoadEvent) {
         if (config.allowedWorlds.contains(event.world.name)) {
             this.allowedWorlds.add(event.world)
+            this.settlementManager.handleWorldLoad(event.world).also {
+                if (!settlements.keys.contains(firstWorld)) settlementManager.handleWorldLoad(firstWorld)
+            }
         }
     }
 

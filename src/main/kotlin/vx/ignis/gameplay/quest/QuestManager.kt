@@ -29,7 +29,8 @@ import vx.ignis.gameplay.quest.ProgressTracker.Companion.questsCompleted
 import vx.ignis.gameplay.quest.ProgressTracker.Companion.questsFailed
 import vx.ignis.gameplay.quest.QuestManager.Quest.QuestItem
 import vx.ignis.gameplay.quest.pragma.QuestItemStrategy
-import vx.ignis.gameplay.quest.pragma.strategy.GatheringQuestItemStrategy
+import vx.ignis.gameplay.quest.pragma.strategy.MusicDiscQuestItemStrategy
+import vx.ignis.gameplay.quest.pragma.strategy.ProfessionItemGatheringQuestItemStrategy
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
 import vx.ignis.gameplay.trade.ScoreCalculator.calculateScore
@@ -122,7 +123,7 @@ class QuestManager : Listener {
         class QuestGenerationException : Exception("Error during quest generation!")
         val generator = QuestGenerationController(type, questGiver)
 
-        plugin.providerManager.client.sendPromptWithSchema(generator.prompt, GeneratedDataContainer::class)?.let { data ->
+        plugin.providerManager.client.sendPromptWithSchema(generator.prompt, GeneratedCharacterDataContainer::class)?.let { data ->
             val quest = Quest(
                 type,
                 type.questFamily,
@@ -207,7 +208,7 @@ class QuestManager : Listener {
         event.player.quests().find { it.questItem.getItemStack().isSimilar(event.recipe.ingredients.first()) }?.let { quest ->
             event.player.closeInventory()
             when (quest.type) {
-                QuestType.ITEM_GATHERING -> {
+                QuestType.PROFESSION_ITEM_GATHERING, QuestType.MUSIC_DISC -> {
                     this.finishQuest(event.player, event.merchant.questGiverEntity, quest)
                 }
             }
@@ -312,7 +313,7 @@ class QuestManager : Listener {
         val family: QuestFamily,
         val questItem: QuestItem,
         val giver: UUID,
-        val data: GeneratedDataContainer,
+        val data: GeneratedCharacterDataContainer,
         val name: String,
         val id: Long,
         val timeCreated: Long,
@@ -354,23 +355,24 @@ class QuestManager : Listener {
 
     }
 
-    data class GeneratedDataContainer(val questNames: List<String>,
-                                      val extraShortTaskDescription: String,
-                                      val shortRequiredQuestItemDescription: String,
-                                      val reputationBasedQuestDescriptions: List<String>,
-                                      val reputationBasedQuestFinishingDialogues: List<String>)
+    data class GeneratedCharacterDataContainer(val questNames: List<String>,
+                                               val extraShortTaskDescription: String,
+                                               val shortRequiredQuestItemDescription: String,
+                                               val reputationBasedQuestDescriptions: List<String>,
+                                               val reputationBasedQuestFinishingDialogues: List<String>)
 
     enum class QuestFamily(val questDescription: String) {
         GATHERING("To complete the quest, the player will need to obtain an item `{questItem}` in the amount of {questItemAmount} and bring it to the NPC. The NPC promises a reward ({rewardItem}) for the assistance, without specifying what exactly it will be. When generating the quest, be sure to thoughtfully consider this information. In addition to the previous requirements, follow these guidelines during the generation: {taskDescription}.")
     }
 
     enum class QuestType(val questFamily: QuestFamily, val strategy: QuestItemStrategy, val taskDescription: String) {
-        ITEM_GATHERING(QuestFamily.GATHERING, GatheringQuestItemStrategy(), "NPC requests an item. NPC should explain the task to the player by sharing the reason they need the quest item."),
+        PROFESSION_ITEM_GATHERING(QuestFamily.GATHERING, ProfessionItemGatheringQuestItemStrategy(), "NPC requests an item for their development — this quest is related to the NPC's profession leveling. Based on the quest item and the NPC profession, NPC should explain the task to the player by sharing the reason they need the quest item."),
+        MUSIC_DISC(QuestFamily.GATHERING, MusicDiscQuestItemStrategy(), "NPC wants a music disc and asks the player to find him one. The reason must be related to either personality or profession.")
     }
 
     companion object {
 
-        private fun String.replaceMap(replacements: Map<String, String>): String {
+        fun String.replaceMap(replacements: Map<String, String>): String {
             var result = this
             for ((key, value) in replacements) {
                 result = result.replace("{${key}}", value)

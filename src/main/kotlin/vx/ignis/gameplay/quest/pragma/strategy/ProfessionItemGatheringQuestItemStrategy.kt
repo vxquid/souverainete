@@ -5,7 +5,7 @@ import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.gameplay.dictionary.CustomItem
 import vx.ignis.gameplay.quest.pragma.QuestItemStrategy
 
-class GatheringQuestItemStrategy : QuestItemStrategy() {
+class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
 
     // Крайне простой квест. Квестовые предметы хранятся в пуле, который в будущем можно будет настроить.
     override fun get(questGiver: LivingEntity): CustomItem {

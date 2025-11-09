@@ -16,16 +16,19 @@ import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
 import vx.ignis.gameplay.personality.PersonalityManager.Gender
 import vx.ignis.gameplay.quest.QuestManager.Quest
+import vx.ignis.gameplay.settlement.Settlement
+import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.ignis.util.InventorySerializer
 import kotlin.jvm.optionals.getOrNull
 import kotlin.random.Random
 
 object LivingEntityExtend {
 
-    val voiceKey     = NamespacedKey(plugin, "VoiceSound")
-    val pitchKey     = NamespacedKey(plugin, "VoicePitch")
-    val questDataKey = NamespacedKey(plugin, "NPCQuestData")
-    val inventoryKey = NamespacedKey(plugin, "Inventory")
+    val voiceKey      = NamespacedKey(plugin, "VoiceSound")
+    val pitchKey      = NamespacedKey(plugin, "VoicePitch")
+    val questDataKey  = NamespacedKey(plugin, "NPCQuestData")
+    val inventoryKey  = NamespacedKey(plugin, "Inventory")
+    val settlementKey = NamespacedKey(plugin, "NPCSettlement")
 
     fun LivingEntity.quests(): MutableList<Quest> =
         persistentDataContainer.get(questDataKey, PersistentDataType.STRING)?.let {
@@ -74,5 +77,9 @@ object LivingEntityExtend {
             persistentDataContainer.set(inventoryKey, PersistentDataType.STRING, InventorySerializer.inventoryToJSON(inventory).toString())
         }
     }
+
+    var LivingEntity.settlement: Settlement?
+        get() = persistentDataContainer.get(settlementKey, PersistentDataType.STRING)?.let { name -> settlements[world]?.find { it.data.settlementName == name } }
+        set(value) { value?.let { persistentDataContainer.set(settlementKey, PersistentDataType.STRING, it.data.settlementName) } }
 
 }
