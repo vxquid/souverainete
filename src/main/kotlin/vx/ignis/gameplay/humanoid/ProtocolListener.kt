@@ -5,7 +5,6 @@ import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.event.SimplePacketListenerAbstract
 import com.github.retrooper.packetevents.event.simple.PacketPlayReceiveEvent
 import com.github.retrooper.packetevents.event.simple.PacketPlaySendEvent
-import com.github.retrooper.packetevents.manager.server.ServerVersion
 import com.github.retrooper.packetevents.protocol.attribute.Attributes
 import com.github.retrooper.packetevents.protocol.entity.data.EntityData
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes
@@ -36,12 +35,9 @@ import vx.ignis.gameplay.humanoid.entity.HumanoidInfo
 import vx.ignis.gameplay.humanoid.event.HumanoidInitializationEvent
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
-import vx.ignis.gameplay.personality.PersonalityManager.Gender.*
+import vx.ignis.gameplay.personality.PersonalityManager.Gender.FEMALE
+import vx.ignis.gameplay.personality.PersonalityManager.Gender.MALE
 import java.util.*
-import kotlin.collections.component1
-import kotlin.collections.component2
-import kotlin.collections.get
-import kotlin.collections.set
 
 class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, HumanoidInfo> = hashMapOf()) : SimplePacketListenerAbstract(), Listener {
 
@@ -231,11 +227,15 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                     if (fixedPacket) {
                         player.sendVerbose(" §c> Preventing wrong villager metadata. §7[id ${entity.entityId}]")
                         event.isCancelled = true
+                    } else {
+                        player.sendVerbose(" §2> No wrong metadata was found. §7[id ${entity.entityId}]")
                     }
+
+                    player.sendVerbose(" §3> When-check. $registered, $subscribed, $fixedPacket.")
 
                     when {
 
-                        !registered && fixedPacket -> {
+                        !registered -> {
                             HumanoidInfo(
                                 entity,
                                 UserProfile(entity.uniqueId, "HideMyName"),
@@ -260,7 +260,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                         }
 
                         enabled && registered && fixedPacket && !subscribed -> {
-                            humanoidProvider!!.subscribers.add(player)
+                            humanoidProvider.subscribers.add(player)
                             plugin.server.scheduler.runTask(plugin) { _ ->
                                 player.sendVerbose(" §3> Calling HumanoidInitializationEvent for an existing villager. §7[id ${entity.entityId}]")
                                 plugin.server.pluginManager.callEvent(HumanoidInitializationEvent(player, entity, humanoidProvider, metadata))
