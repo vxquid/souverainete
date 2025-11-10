@@ -62,7 +62,6 @@ class Ignis : JavaPlugin(), Listener {
     }
 
     override fun onDisable() {
-        gameplayManager.humanoidManager.protocolListener.debugOverlay.stopDebugOverlay()
         gameplayManager.allowedWorlds.forEach { world ->
             world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.STRING, gson.toJson(settlements[world]?.map { it.data }))
         }

@@ -19,7 +19,7 @@ import vx.ignis.gameplay.quest.QuestManager
 import vx.ignis.gameplay.reputation.ReputationManager
 import vx.ignis.gameplay.settlement.SettlementManager
 import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlements
-import vx.ignis.gameplay.trade.TradeHack
+import vx.ignis.gameplay.trade.TradeManager
 import java.io.File
 
 class GameplayManager(val firstWorld: World) : Listener {
@@ -46,7 +46,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     val dialogueManager    = DialogueManager()
     val questManager       = QuestManager()
     val interactionManager = InteractionManager()
-    val tradeHack          = TradeHack()
+    val tradeManager       = TradeManager()
     val humanoidManager    = HumanoidManager()
     val professionManager  = ProfessionManager()
     val settlementManager  = SettlementManager()

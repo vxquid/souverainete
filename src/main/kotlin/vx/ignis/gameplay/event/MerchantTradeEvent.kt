@@ -4,8 +4,7 @@ import org.bukkit.entity.Player
 import org.bukkit.event.Event
 import org.bukkit.event.HandlerList
 import org.bukkit.inventory.MerchantRecipe
-import vx.ignis.gameplay.trade.TradeHack
-import vx.ignis.gameplay.trade.TradeHack.QuestMerchant
+import vx.ignis.gameplay.trade.TradeManager.QuestMerchant
 
 class MerchantTradeEvent(val merchant: QuestMerchant, val player: Player, val recipe: MerchantRecipe) : Event() {
 

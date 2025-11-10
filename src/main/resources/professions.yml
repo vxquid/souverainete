@@ -21,27 +21,34 @@ villager-item-producing:
   # A list of items whose quality will depend on the level of the crafter's skill.
   mastery-affected-items:
     - LEATHER_HELMET
+    - COPPER_HELMET
     - IRON_HELMET
     - DIAMOND_HELMET
     - NETHERITE_HELMET
     - LEATHER_CHESTPLATE
+    - COPPER_CHESTPLATE
     - IRON_CHESTPLATE
     - DIAMOND_CHESTPLATE
     - NETHERITE_CHESTPLATE
     - LEATHER_LEGGINGS
+    - COPPER_LEGGINGS
     - IRON_LEGGINGS
     - DIAMOND_LEGGINGS
     - NETHERITE_LEGGINGS
     - LEATHER_BOOTS
+    - COPPER_BOOTS
     - IRON_BOOTS
     - DIAMOND_BOOTS
     - NETHERITE_BOOTS
+    - COPPER_SWORD
     - IRON_SWORD
     - DIAMOND_SWORD
     - NETHERITE_SWORD
+    - COPPER_PICKAXE
     - IRON_PICKAXE
     - DIAMOND_PICKAXE
     - NETHERITE_PICKAXE
+    - COPPER_PICKAXE
     - IRON_AXE
     - DIAMOND_AXE
     - NETHERITE_AXE
@@ -121,6 +128,7 @@ villager-item-producing:
         - DIORITE~32-64
         - ANDESITE~32-64
         - DEEPSLATE~32-64
+        - MAGMA_BLOCK~16-32
         - CLAY_BALL~42-64
         - "@DYE~32-64"
         - "@BRICKS~36-64"
@@ -130,6 +138,7 @@ villager-item-producing:
         - LAPIS_LAZULI~16-32
         - DIAMOND_BLOCK~2-4
         - IRON_PICKAXE~1
+        - COPPER_PICKAXE~1
 
       item-produce:
         - STONE_BRICKS
@@ -163,13 +172,11 @@ villager-item-producing:
       item-priority:
         - STONE~26-54
         - AMETHYST_SHARD~18-32
-        - COPPER_INGOT~24-48
         - COAL~8-32
         - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
+        - IRON_INGOT~32-48
+        - COPPER_INGOT~16-32
+        - COPPER_INGOT~32-48
         - DIAMOND~2-16
         - QUARTZ~16-32
 
@@ -179,6 +186,10 @@ villager-item-producing:
         - IRON_INGOT
         - DIAMOND
         - NETHERITE_INGOT
+        - COPPER_HELMET
+        - COPPER_CHESTPLATE
+        - COPPER_LEGGINGS
+        - COPPER_BOOTS
         - IRON_HELMET
         - IRON_CHESTPLATE
         - IRON_LEGGINGS
@@ -195,15 +206,17 @@ villager-item-producing:
         - COAL~12-24
         - STICK~12-36
         - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
+        - IRON_INGOT~32-48
+        - COPPER_INGOT~16-32
+        - COPPER_INGOT~32-48
         - OAK_PLANKS~12-24
         - DIAMOND~2-12
         - QUARTZ~12-32
 
       item-produce:
+        - COPPER_INGOT
+        - COPPER_AXE
+        - COPPER_SWORD
         - IRON_INGOT
         - TORCH
         - IRON_SWORD
@@ -221,15 +234,18 @@ villager-item-producing:
         - COAL~12-24
         - STICK~12-36
         - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
-        - IRON_INGOT~16-32
+        - IRON_INGOT~32-48
+        - COPPER_INGOT~16-32
+        - COPPER_INGOT~32-48
         - DIAMOND~6-12
         - OAK_PLANKS~12-24
 
       item-produce:
         - TORCH
+        - COPPER_INGOT
+        - COPPER_SHOVEL
+        - COPPER_PICKAXE
+        - COPPER_HOE
         - IRON_INGOT
         - IRON_SHOVEL
         - IRON_PICKAXE

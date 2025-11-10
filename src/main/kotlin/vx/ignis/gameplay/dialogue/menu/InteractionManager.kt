@@ -30,13 +30,13 @@ import vx.ignis.gameplay.personality.PersonalityManager.Companion.getCharacterDa
 import vx.ignis.gameplay.quest.QuestManager.Quest
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
-import vx.ignis.gameplay.trade.TradeHack.Companion.openCustomTradeMenu
+import vx.ignis.gameplay.trade.TradeManager.Companion.openCustomTradeMenu
 import vx.ignis.persistent.LivingEntityExtend.quests
+import vx.ignis.persistent.LivingEntityExtend.subInventory
 
 class InteractionManager: Listener {
 
     private val genericReactionMessages by lazy { plugin.gameplayManager.personalityManager.genericCharacterData }
-    private val buttonTextColor = "§f"
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
@@ -229,6 +229,10 @@ class InteractionManager: Listener {
 
         builder.button(plugin.language.getString("interaction-menu.talk-button")!!) {
             if (player.getActiveDialogueSession() == null) DialogueSession(player, villager)
+        }
+
+        builder.button("§6Inventory") {
+            player.openInventory(villager.subInventory)
         }
 
         builder.button(plugin.language.getString("interaction-menu.close-button")!!) { menu ->

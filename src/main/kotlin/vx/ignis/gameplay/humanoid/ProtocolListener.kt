@@ -30,7 +30,6 @@ import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.scoreboard.Team
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.debug.DebugOverlayManager
 import vx.ignis.gameplay.humanoid.entity.HumanoidInfo
 import vx.ignis.gameplay.humanoid.event.HumanoidInitializationEvent
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
@@ -40,8 +39,6 @@ import vx.ignis.gameplay.personality.PersonalityManager.Gender.MALE
 import java.util.*
 
 class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, HumanoidInfo> = hashMapOf()) : SimplePacketListenerAbstract(), Listener {
-
-    val debugOverlay = DebugOverlayManager(humanoidRegistry).also { it.startDebugOverlay() }
 
     companion object {
 

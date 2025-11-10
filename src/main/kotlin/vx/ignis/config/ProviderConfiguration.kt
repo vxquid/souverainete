@@ -48,7 +48,7 @@ class ProviderConfiguration {
     @Comment(
         "The maximum number of retry attempts after a failed content generation request."
     )
-    var maxRetries: Int = 1
+    var maxRetries: Int = 3
 
     @Comment(
         "Proxy configuration for connecting to Gemini in regions where it is restricted (e.g., Russia, China). Won't be used if host name is PROXY_HOST."

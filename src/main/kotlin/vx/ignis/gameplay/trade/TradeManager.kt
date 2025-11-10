@@ -13,12 +13,12 @@ import org.bukkit.inventory.MenuType
 import org.bukkit.inventory.MerchantRecipe
 import org.bukkit.inventory.view.MerchantView
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.persistent.LivingEntityExtend.quests
 import vx.ignis.gameplay.event.MerchantTradeEvent
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
+import vx.ignis.persistent.LivingEntityExtend.quests
 
 @Suppress("UnstableApiUsage")
-class TradeHack : Listener {
+class TradeManager : Listener {
 
     data class QuestMerchant(val questGiverEntity: LivingEntity, val customTradeView: MerchantView)
 

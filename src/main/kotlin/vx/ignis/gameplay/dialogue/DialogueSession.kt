@@ -6,8 +6,10 @@ import com.cryptomorin.xseries.XSound
 import io.papermc.paper.event.player.AsyncChatEvent
 import net.md_5.bungee.api.ChatMessageType
 import net.md_5.bungee.api.chat.TextComponent
+import net.minecraft.world.InteractionHand
 import org.bukkit.craftbukkit.entity.CraftPlayer
 import org.bukkit.craftbukkit.entity.CraftVillager
+import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
@@ -20,13 +22,14 @@ import org.bukkit.scheduler.BukkitTask
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.Ignis.Companion.sendFormattedMessage
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
-import vx.ignis.persistent.VillagerExtend.professionLevelName
 import vx.ignis.gameplay.memory.MemoryManager.Companion.getEmotionalMemory
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.getPersonality
-import vx.ignis.gameplay.trade.TradeHack.Companion.openCustomTradeMenu
+import vx.ignis.gameplay.trade.TradeManager.Companion.openCustomTradeMenu
+import vx.ignis.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.ignis.persistent.LivingEntityExtend.getVoicePitch
 import vx.ignis.persistent.LivingEntityExtend.getVoiceSound
+import vx.ignis.persistent.VillagerExtend.professionLevelName
 import vx.ignis.util.Daytime
 
 class DialogueSession(val player: Player, val entity: Villager) : Listener {
@@ -88,7 +91,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
             if (readyToSend) {
                 this.cooldown()
                 this.generateGiftReaction(player, entity, event.itemDrop.itemStack.clone(), dialogueHistory)
-                // TODO: (entity as CraftVillager).handle.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(event.itemDrop.itemStack))
+                (entity as CraftVillager).handle.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(event.itemDrop.itemStack))
                 giftAwaiting = false
                 readyToSend = false
                 lastMessageTime = System.currentTimeMillis()
@@ -246,16 +249,18 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
             var delay = 0L
             for (message in reaction.npcResponse) {
                 plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                    player.sendFormattedMessage(npcResponseMessage.replace("{npcName}", entity.customName ?: "NPC").replace("{message}", message).replace("&", "§"))
+                    player.sendFormattedMessage(npcResponseMessage.replace("{npcName}", entity.customName ?: "NPC").replace("{message}", message))
                     player.playSound(player.eyeLocation, XSound.UI_TOAST_IN.get() ?: throw NullPointerException(), 1F, 1.25F)
                     // Handling directive only on last message of the response.
                     if (reaction.npcResponse.last() == message) {
                         if (!reaction.keepTheGift) {
                             entity.world.dropItem(entity.location, gift)
-                        }
+                        } else entity.addItemToQuillInventory(gift)
                         readyToSend = true
-
-                        // TODO; Необходимо добавлять репутацию за нормальный базар. Наверное. Не забудь про подарки.
+                        // Modifying reputation after talking. We should add check for it.
+                        plugin.gameplayManager.reputationManager.addReputation(entity, player, impression.score)
+                        // Force equipment update.
+                        plugin.gameplayManager.humanoidManager.equipmentManager.tick()
                     }
                 }, delay)
                 delay += 60L
@@ -282,13 +287,12 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
             var delay = 0L
             for (message in responseData.npcResponse) {
                 plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                    player.sendFormattedMessage(npcResponseMessage.replace("{npcName}", entity.customName ?: "NPC").replace("{message}", message).replace("&", "§"))
+                    player.sendFormattedMessage(npcResponseMessage.replace("{npcName}", entity.customName ?: "NPC").replace("{message}", message))
                     player.playSound(player.eyeLocation, XSound.UI_TOAST_IN.get() ?: throw NullPointerException(), 1F, 1.25F)
                     // Handling directive only on last message of the response.
                     if (responseData.npcResponse.last() == message) {
-
-                        // TODO; Необходимо добавлять репутацию за нормальный базар. Наверное. Не забудь про подарки.
-
+                        // Modifying reputation after talking. We should add check for it.
+                        plugin.gameplayManager.reputationManager.addReputation(entity, player, impression.score)
                         readyToSend = true
                         when (directive) {
                             Directive.OPEN_TRADE_MENU -> entity.openCustomTradeMenu(player)
@@ -324,8 +328,8 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
 
     companion object {
 
-        private val npcResponseMessage = "&7{npcName}&6ᵃⁱ&7: &f{message}"
-        private val playerToNPCMessage = "&7{playerName}&6ᵃⁱ&7: &f{message}"
+        private val npcResponseMessage = "§7{npcName}§6ᵃⁱ§7: §7{message}"
+        private val playerToNPCMessage = "§7{playerName}§6ᵃⁱ§7: §7{message}"
 
         val activeDialogueSessions = mutableListOf<DialogueSession>()
         fun Player.getActiveDialogueSession() : DialogueSession? {
