@@ -209,7 +209,7 @@ class QuestManager : Listener {
             event.player.closeInventory()
             when (quest.type) {
                 QuestType.PROFESSION_ITEM_GATHERING, QuestType.MUSIC_DISC -> {
-                    this.finishQuest(event.player, event.merchant.questGiverEntity, quest)
+                    this.finishQuest(event.player, event.merchant, quest)
                 }
             }
         }

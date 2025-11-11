@@ -25,7 +25,7 @@ import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.memory.MemoryManager.Companion.getEmotionalMemory
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.getPersonality
-import vx.ignis.gameplay.trade.TradeManager.Companion.openCustomTradeMenu
+import vx.ignis.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.ignis.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.ignis.persistent.LivingEntityExtend.getVoicePitch
 import vx.ignis.persistent.LivingEntityExtend.getVoiceSound
@@ -128,7 +128,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
         val playerReputation = plugin.gameplayManager.reputationManager.getPlayerReputationStatus(villager, player)
         val tradeReadiness   = when {
             villager.profession == Villager.Profession.NONE -> "NPC can't trade due to lack of the profession. Help them find any! NPC must point it in the response."
-            !villager.openCustomTradeMenu(player, false) -> "NPC has a profession, but cannot trade due to poorness: the NPC simply does not have items to trade."
+            !villager.openTradeMenu(player, false) -> "NPC has a profession, but cannot trade due to poorness: the NPC simply does not have items to trade."
             Daytime.fromWorldTime(villager.world.time) == Daytime.NIGHT -> "NPC must be annoyed by the player's attempt to trade during a time when all normal people are sleeping and dreaming!"
             else -> "NPC is ready to trade with the player. If the player suggests to trade, NPC will respond positively."
         }
@@ -295,7 +295,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
                         plugin.gameplayManager.reputationManager.addReputation(entity, player, impression.score)
                         readyToSend = true
                         when (directive) {
-                            Directive.OPEN_TRADE_MENU -> entity.openCustomTradeMenu(player)
+                            Directive.OPEN_TRADE_MENU -> entity.openTradeMenu(player)
                             Directive.INTERRUPT_CONVERSATION -> this.cancelled = true
                             Directive.NONE -> { /* I have nothing to do. */}
                         }
@@ -328,8 +328,8 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
 
     companion object {
 
-        private val npcResponseMessage = "§7{npcName}§6ᵃⁱ§7: §7{message}"
-        private val playerToNPCMessage = "§7{playerName}§6ᵃⁱ§7: §7{message}"
+        private val npcResponseMessage = "§7{npcName}§6ᵃⁱ§7: §f{message}"
+        private val playerToNPCMessage = "§7{playerName}§6ᵃⁱ§7: §f{message}"
 
         val activeDialogueSessions = mutableListOf<DialogueSession>()
         fun Player.getActiveDialogueSession() : DialogueSession? {

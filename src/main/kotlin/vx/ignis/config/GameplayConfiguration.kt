@@ -11,7 +11,7 @@ class GameplayConfiguration {
     val debug: Boolean = false
 
     @Comment("Message prefix.")
-    val messagePrefix: String = "§e🔥 §8|"
+    val messagePrefix: String = "§e🔥 §8|§7"
 
     @Comment("Specify the names of the worlds where you want Ignis to work.")
     var allowedWorlds: List<String> = listOf("world", "world_nether", "world_the_end")

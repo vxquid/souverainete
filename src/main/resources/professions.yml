@@ -2,12 +2,12 @@ villager-item-producing:
 
   # Additional cost for unique items based on their rarity
   extra-rarity-price:
-    COMMON: 2500
-    UNCOMMON: 4500
-    RARE: 7500
-    EPIC: 11500
-    LEGENDARY: 15500
-    MYTHIC: 20000
+    COMMON: 4500
+    UNCOMMON: 8500
+    RARE: 11000
+    EPIC: 16500
+    LEGENDARY: 18500
+    MYTHIC: 24000
     DIVINE: 32000
 
   # Basic chance of creating a unique item during production. Multiplied by villager level. (level 5 villager profession = 25% chance)

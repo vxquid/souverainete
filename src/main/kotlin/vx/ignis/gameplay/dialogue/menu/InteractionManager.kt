@@ -30,7 +30,7 @@ import vx.ignis.gameplay.personality.PersonalityManager.Companion.getCharacterDa
 import vx.ignis.gameplay.quest.QuestManager.Quest
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
-import vx.ignis.gameplay.trade.TradeManager.Companion.openCustomTradeMenu
+import vx.ignis.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.ignis.persistent.LivingEntityExtend.quests
 import vx.ignis.persistent.LivingEntityExtend.subInventory
 
@@ -160,7 +160,7 @@ class InteractionManager: Listener {
             }
 
             plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                if (!villager.openCustomTradeMenu(player)) {
+                if (!villager.openTradeMenu(player)) {
                     val message = villager.getCharacterData()?.noItemsToTradePhrases?.random() ?: genericReactionMessages.noItemsToTradePhrases.random()
                     villager.talk(player, message, followDuringDialogue = true)
                 }
@@ -220,7 +220,7 @@ class InteractionManager: Listener {
             }
 
             plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                if (!villager.openCustomTradeMenu(player)) {
+                if (!villager.openTradeMenu(player)) {
                     val message = villager.getCharacterData()?.noItemsToTradePhrases?.random() ?: genericReactionMessages.noItemsToTradePhrases.random()
                     villager.talk(player, message, followDuringDialogue = true)
                 }

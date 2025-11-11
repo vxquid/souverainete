@@ -48,7 +48,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
 
         // Predicate for removing invalid and necessary EntityData (especially VILLAGER_DATA, which causes a protocol error on the client).
         private val MUST_BE_REMOVED: (EntityData<*>) -> Boolean = {
-            it.index == 15 || it.index == 16 && it.type != EntityDataTypes.BYTE || it.type == EntityDataTypes.VILLAGER_DATA
+            it.index == 15 || it.index == 17 || it.index == 16 && it.type != EntityDataTypes.BYTE || it.type == EntityDataTypes.VILLAGER_DATA
         }
 
         fun LivingEntity.skinID() = persistentDataContainer.get(skinIDKey, PersistentDataType.FLOAT)

@@ -1,11 +1,10 @@
 package vx.ignis.gameplay.trade
 
-import com.github.retrooper.packetevents.PacketEvents
-import com.github.retrooper.packetevents.manager.server.ServerVersion
 import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.PotionMeta
 import vx.ignis.Ignis.Companion.plugin
+import vx.ignis.gameplay.ProfessionManager.Companion.getUniqueItemRarity
 import kotlin.random.Random
 
 object ScoreCalculator {
@@ -17,10 +16,10 @@ object ScoreCalculator {
     /* Подсчитывание цены для всего стака. */
     fun ItemStack.calculateScore(): Int {
         return (this.type.getBasicScore() * this.amount + ((this.itemMeta as? PotionMeta)?.let {
-            val type = if (PacketEvents.getAPI().serverManager.version.isNewerThanOrEquals(ServerVersion.V_1_20_6)) it.basePotionType else it.basePotionData!!.type
+            val type = it.basePotionType
             val price = plugin.prices.getInt("effect-type.$type")
             if (price != 0) price else 2400 + Random.nextInt(1, 6) * 200
-        } ?: 0))
+        } ?: 0) + this.getUniqueItemRarity().extraPrice)
     }
 
     fun Material.getBasicScore(defaultPrice: Int = 50): Int {
