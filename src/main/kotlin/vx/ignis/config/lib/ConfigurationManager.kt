@@ -16,8 +16,6 @@ import java.lang.reflect.Modifier
 @Suppress("UNCHECKED_CAST")
 object ConfigurationManager {
 
-    private val namingConvention = NamingConventionType.KEBAB
-
     private val yaml = Yaml(DumperOptions().apply {
         isPrettyFlow = true
         indent = 2
@@ -62,13 +60,14 @@ object ConfigurationManager {
         val missing = mutableListOf<String>()
         val fields = getFields(instance::class.java)
         fields.forEach { field ->
-            val key = if (prefix.isEmpty()) field.name else "$prefix.${field.name}"
+            val kebabField = toKebabCase(field.name)
+            val fullKey = if (prefix.isEmpty()) kebabField else "$prefix.$kebabField"
             if (field.isAnnotationPresent(Ignore::class.java)) return@forEach
 
             field.isAccessible = true
-            val value = data[field.name]
+            val value = data[kebabField]
             if (value == null) {
-                missing.add(key)
+                missing.add(fullKey)
                 return@forEach
             }
 
@@ -81,7 +80,8 @@ object ConfigurationManager {
             } else {
                 val nestedInstance = field.get(instance) ?: field.type.getDeclaredConstructor().newInstance()
                 field.set(instance, nestedInstance)
-                missing.addAll(applyToInstance(nestedInstance, value as? Map<String, Any?> ?: emptyMap(), key))
+                val nestedPrefix = fullKey
+                missing.addAll(applyToInstance(nestedInstance, value as? Map<String, Any?> ?: emptyMap(), nestedPrefix))
             }
         }
         return missing
@@ -106,12 +106,13 @@ object ConfigurationManager {
             if (field.isAnnotationPresent(Ignore::class.java)) return@forEach
             field.isAccessible = true
             val value = field.get(instance)
+            val kebabKey = toKebabCase(field.name)
             if (isSimpleType(field.type)) {
-                map[field.name] = if (field.type.isEnum) value?.toString() else value
+                map[kebabKey] = if (field.type.isEnum) value?.toString() else value
             } else if (field.type == List::class.java || field.type == Map::class.java) {
-                map[field.name] = value
+                map[kebabKey] = value
             } else {
-                map[field.name] = toMap(value!!)
+                map[kebabKey] = toMap(value!!)
             }
         }
         return map
@@ -159,12 +160,9 @@ object ConfigurationManager {
             }
 
             val originalKey = field.name
-            val key = when (namingConvention) {
-                NamingConventionType.CAMEL -> originalKey
-                NamingConventionType.KEBAB -> toKebabCase(originalKey)
-            }
-            val value = data[originalKey] // Используем originalKey для data, т.к. toMap использует field.name
-            writer.append("$indent$key: ")
+            val kebabKey = toKebabCase(originalKey)
+            val value = data[kebabKey]
+            writer.append("$indent$kebabKey: ")
 
             if (value is Map<*, *>) {
                 writer.append("\n")
