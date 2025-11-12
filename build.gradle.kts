@@ -39,7 +39,6 @@ dependencies {
   implementation("com.google.code.gson:gson:2.11.0")
   implementation("com.github.cryptomorin:XSeries:13.3.3")
   implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT") // Annotations-based commands.
-  implementation("de.exlll:configlib-paper:4.6.1") // Annotations-based configs.
   compileOnly("com.github.retrooper:packetevents-spigot:2.10.0")
   compileOnly("io.lumine:Mythic-Dist:5.10.0")
 }
@@ -62,7 +61,6 @@ tasks {
       minimize()
       relocate("co.aikar.commands", "vx.ignis.command")
       relocate("co.aikar.locales", "vx.ignis.command.locales")
-      relocate("de.exlll.configlib", "vx.ignis.config")
       relocate("kotlin", "vx.ignis.kotlin")
       relocate("com.github.retrooper.packetevents", "vx.ignis.packetevents.api")
       relocate("io.github.retrooper.packetevents", "vx.ignis.packetevents.impl")

@@ -14,9 +14,7 @@ npc-gift-reaction: "Your task is to react to the gift from player {playerName} a
 food-quest:
 
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Material.html
-  allowed-types: [BREAD, APPLE, COOKED_COD, COOKED_SALMON, BAKED_POTATO]
-
-  quest-requirements: "The villager, weakened by hunger, approaches the player with a request to bring him food. He explains that because of hunger, he cannot perform his duties. After completing the task, the villager sincerely thanks the player for their help."
+  allowed-types: [BREAD~8-16, APPLE~12-24, COOKED_COD~24-32, COOKED_SALMON~24-32, BAKED_POTATO~8-24]
 
 # Booze quest. Villagers have to relax somehow too, right?..
 booze-quest:

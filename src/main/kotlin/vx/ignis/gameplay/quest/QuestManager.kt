@@ -19,6 +19,7 @@ import vx.ignis.gameplay.dialogue.DialogueManager.Companion.talk
 import vx.ignis.gameplay.event.MerchantTradeEvent
 import vx.ignis.gameplay.event.PlayerAcceptQuestEvent
 import vx.ignis.gameplay.event.QuestInvalidationEvent
+import vx.ignis.gameplay.humanoid.HungerManager.eat
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.getCharacterData
@@ -29,11 +30,14 @@ import vx.ignis.gameplay.quest.ProgressTracker.Companion.questsCompleted
 import vx.ignis.gameplay.quest.ProgressTracker.Companion.questsFailed
 import vx.ignis.gameplay.quest.QuestManager.Quest.QuestItem
 import vx.ignis.gameplay.quest.pragma.QuestItemStrategy
+import vx.ignis.gameplay.quest.pragma.strategy.FoodSearchQuestItemStrategy
 import vx.ignis.gameplay.quest.pragma.strategy.MusicDiscQuestItemStrategy
 import vx.ignis.gameplay.quest.pragma.strategy.ProfessionItemGatheringQuestItemStrategy
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
 import vx.ignis.gameplay.trade.ScoreCalculator.calculateScore
+import vx.ignis.persistent.LivingEntityExtend.hasEdibleItem
+import vx.ignis.persistent.LivingEntityExtend.hunger
 import vx.ignis.persistent.LivingEntityExtend.questDataKey
 import vx.ignis.persistent.LivingEntityExtend.quests
 import vx.ignis.persistent.VillagerExtend.professionLevelName
@@ -82,8 +86,13 @@ class QuestManager : Listener {
             return
         }
 
-        // Random quest type will be chosen.
-        val questType = QuestType.entries.random()
+        // Random quest type will be chosen. If villager is hungry, enforce food quest.
+        val questType = if (villager.hunger <= plugin.gameplayManager.config.hunger.questThreshold && !villager.hasEdibleItem()) {
+            QuestType.FOOD_SEARCH
+        } else {
+            // Don't forget to exclude food quest if there's no meaning in it.
+            QuestType.entries.toMutableList().apply { removeIf { it == QuestType.FOOD_SEARCH } }.random()
+        }
 
         plugin.server.scheduler.runTaskAsynchronously(plugin, { _ ->
             try {
@@ -210,6 +219,12 @@ class QuestManager : Listener {
             when (quest.type) {
                 QuestType.PROFESSION_ITEM_GATHERING, QuestType.MUSIC_DISC -> {
                     this.finishQuest(event.player, event.merchant, quest)
+                }
+                QuestType.FOOD_SEARCH -> {
+                    plugin.server.scheduler.runTaskLater(plugin, { _ ->
+                        event.merchant.eat()
+                        this.finishQuest(event.player, event.merchant, quest)
+                    }, 20L)  // Delay to ensure item is in inventory
                 }
             }
         }
@@ -367,7 +382,8 @@ class QuestManager : Listener {
 
     enum class QuestType(val questFamily: QuestFamily, val strategy: QuestItemStrategy, val taskDescription: String) {
         PROFESSION_ITEM_GATHERING(QuestFamily.GATHERING, ProfessionItemGatheringQuestItemStrategy(), "NPC requests an item for their development — this quest is related to the NPC's profession leveling. Based on the quest item and the NPC profession, NPC should explain the task to the player by sharing the reason they need the quest item."),
-        MUSIC_DISC(QuestFamily.GATHERING, MusicDiscQuestItemStrategy(), "NPC wants a music disc and asks the player to find him one. The reason must be related to either personality or profession.")
+        MUSIC_DISC(QuestFamily.GATHERING, MusicDiscQuestItemStrategy(), "NPC wants a music disc and asks the player to find him one. The reason must be related to either personality or profession."),
+        FOOD_SEARCH(QuestFamily.GATHERING, FoodSearchQuestItemStrategy(), "NPC, weakened by hunger, approaches the player with a request to bring him food. NPC explains that because of hunger, they cannot perform their duties. After completing the task, the NPC thanks the player for their help.")
     }
 
     companion object {

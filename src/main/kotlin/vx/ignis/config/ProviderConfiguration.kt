@@ -1,9 +1,9 @@
 package vx.ignis.config
 
-import de.exlll.configlib.Comment
-import de.exlll.configlib.Configuration
+import vx.ignis.config.lib.annotations.Comment
+import vx.ignis.config.lib.annotations.Configuration
 
-@Configuration
+@Configuration("provider.yml")
 class ProviderConfiguration {
 
     @Comment(

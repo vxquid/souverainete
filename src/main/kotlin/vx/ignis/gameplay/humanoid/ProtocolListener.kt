@@ -44,7 +44,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
 
         private val skinIDKey = NamespacedKey(plugin, "SkinID")
         private val skinKey = NamespacedKey(plugin, "Skin")
-        private val HUMANOID_VILLAGERS_ENABLED = plugin.gameplayManager.config.humanoidVillagers
+        private val HUMANOID_VILLAGERS_ENABLED = plugin.gameplayManager.config.humanoid.humanoidVillagers
 
         // Predicate for removing invalid and necessary EntityData (especially VILLAGER_DATA, which causes a protocol error on the client).
         private val MUST_BE_REMOVED: (EntityData<*>) -> Boolean = {

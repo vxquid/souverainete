@@ -57,7 +57,7 @@ class ReputationDisplayManager(private val reputationManager: ReputationManager)
             val playerDisplaysMap = playerDisplays[player.uniqueId] ?: return@forEach
 
             // Получаем nearby LivingEntities с репутацией, сортируем по расстоянию (closest first)
-            val nearbyNPCs = player.getNearbyEntities(config.reputationDisplayCloseDistance, config.reputationDisplayCloseDistance, config.reputationDisplayCloseDistance)
+            val nearbyNPCs = player.getNearbyEntities(config.reputation.displayCloseDistance, config.reputation.displayCloseDistance, config.reputation.displayCloseDistance)
                 .filterIsInstance<LivingEntity>()
                 .filter { it.persistentDataContainer.has(ReputationManager.REP_KEY, org.bukkit.persistence.PersistentDataType.STRING) }
                 .sortedBy { player.location.distanceSquared(it.location) }
@@ -84,15 +84,15 @@ class ReputationDisplayManager(private val reputationManager: ReputationManager)
                 }
                 val repValue = repMap[player.uniqueId] ?: 0
                 val status = reputationManager.getPlayerReputationStatus(npc, player)
-                val text = toSmallCaps(config.reputationDisplayTextTemplate
+                val text = toSmallCaps(config.reputation.displayTextTemplate
                     .replace("{npcName}", npcName)
                     .replace("{repValue}", repValue.toString())
                     .replace("{status}", status.localizedName))
 
                 // Рассчитываем позицию в правой части экрана относительно взгляда игрока
-                val forward = player.eyeLocation.direction.normalize().multiply(config.reputationDisplayHudDistance)
-                val right = forward.clone().crossProduct(Vector(0.0, 1.0, 0.0)).normalize().multiply(config.reputationDisplayHudRightOffset)
-                val verticalOffset = Vector(0.0, config.reputationDisplayHudVerticalSpacing * index, 0.0) // Стек для нескольких NPC
+                val forward = player.eyeLocation.direction.normalize().multiply(config.reputation.displayHudDistance)
+                val right = forward.clone().crossProduct(Vector(0.0, 1.0, 0.0)).normalize().multiply(config.reputation.displayHudRightOffset)
+                val verticalOffset = Vector(0.0, config.reputation.displayHudVerticalSpacing * index, 0.0) // Стек для нескольких NPC
                 val newLocation = player.eyeLocation.add(forward).add(right).add(verticalOffset)
 
                 if (display == null || !display.isValid) {
@@ -119,17 +119,17 @@ class ReputationDisplayManager(private val reputationManager: ReputationManager)
     private fun configureDisplay(display: TextDisplay, text: String) {
         display.isVisibleByDefault = false // Не visible по умолчанию
         display.text(Component.text(text).color(resolveTextColor()))
-        display.billboard = config.reputationDisplayBillboard // Поворот к игроку
-        val scale = config.reputationDisplayScale
+        display.billboard = config.reputation.displayBillboard // Поворот к игроку
+        val scale = config.reputation.displayScale
         display.transformation = Transformation(
             Vector3f(0f, 0f, 0f), // Translation
             org.joml.Quaternionf(0f, 0f, 0f, 1f), // Left rotation
             Vector3f(scale[0], scale[1], scale[2]), // Scale
             org.joml.Quaternionf(0f, 0f, 0f, 1f) // Right rotation
         )
-        val bgColor = config.reputationDisplayBackgroundColor
+        val bgColor = config.reputation.displayBackgroundColor
         display.backgroundColor = org.bukkit.Color.fromARGB(bgColor[0], bgColor[1], bgColor[2], bgColor[3]) // Фон из конфига
-        display.isSeeThrough = config.reputationDisplaySeeThrough // See-through
+        display.isSeeThrough = config.reputation.displaySeeThrough // See-through
         display.isDefaultBackground = false
     }
 
@@ -138,7 +138,7 @@ class ReputationDisplayManager(private val reputationManager: ReputationManager)
      * Поддерживает именованные цвета и HEX (#RRGGBB).
      */
     private fun resolveTextColor(): net.kyori.adventure.text.format.TextColor {
-        val colorStr = config.reputationDisplayTextColor.trim()
+        val colorStr = config.reputation.displayTextColor.trim()
         return if (colorStr.startsWith("#") && colorStr.length == 7) {
             net.kyori.adventure.text.format.TextColor.fromHexString(colorStr)
                 ?: NamedTextColor.WHITE
@@ -168,7 +168,7 @@ class ReputationDisplayManager(private val reputationManager: ReputationManager)
      */
     fun updateForPlayer(player: Player, entity: LivingEntity) {
         val playerDisplaysMap = playerDisplays[player.uniqueId] ?: return
-        if (player.location.distance(entity.location) > config.reputationDisplayCloseDistance) return
+        if (player.location.distance(entity.location) > config.reputation.displayCloseDistance) return
 
         val npcName = entity.customName ?: entity.type.name.lowercase().capitalize()
         var repMap = reputationManager.getReputationMap(entity)
@@ -180,7 +180,7 @@ class ReputationDisplayManager(private val reputationManager: ReputationManager)
         }
         val repValue = repMap[player.uniqueId] ?: 0
         val status = reputationManager.getPlayerReputationStatus(entity, player)
-        val text = toSmallCaps(config.reputationDisplayTextTemplate
+        val text = toSmallCaps(config.reputation.displayTextTemplate
             .replace("{npcName}", npcName)
             .replace("{repValue}", repValue.toString())
             .replace("{status}", status.localizedName))
@@ -189,8 +189,8 @@ class ReputationDisplayManager(private val reputationManager: ReputationManager)
         display.text(Component.text(text).color(resolveTextColor()))
 
         // Обновляем позицию в правой части экрана
-        val forward = player.eyeLocation.direction.normalize().multiply(config.reputationDisplayHudDistance)
-        val right = forward.clone().crossProduct(Vector(0.0, 1.0, 0.0)).normalize().multiply(config.reputationDisplayHudRightOffset)
+        val forward = player.eyeLocation.direction.normalize().multiply(config.reputation.displayHudDistance)
+        val right = forward.clone().crossProduct(Vector(0.0, 1.0, 0.0)).normalize().multiply(config.reputation.displayHudRightOffset)
         // Для updateForPlayer не стекуем, так как это одиночное обновление; полный стек в таймере
         val newLocation = player.eyeLocation.add(forward).add(right)
         display.teleport(newLocation)

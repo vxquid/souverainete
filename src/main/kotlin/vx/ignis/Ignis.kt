@@ -3,8 +3,6 @@ package vx.ignis
 import co.aikar.commands.PaperCommandManager
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
-import de.exlll.configlib.ConfigLib
-import de.exlll.configlib.YamlConfigurationProperties
 import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.NamespacedKey
@@ -99,13 +97,8 @@ class Ignis : JavaPlugin(), Listener {
         lateinit var plugin: Ignis
         lateinit var gson: Gson
 
-        val properties: YamlConfigurationProperties = ConfigLib
-            .BUKKIT_DEFAULT_PROPERTIES
-            .toBuilder()
-            .build()
-
         fun Player.sendFormattedMessage(message: String) {
-            this.sendMessage(plugin.gameplayManager.config.messagePrefix + " " + message)
+            this.sendMessage(plugin.gameplayManager.config.general.messagePrefix + " " + message)
         }
     }
 

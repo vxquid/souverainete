@@ -14,7 +14,7 @@ import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
 import org.joml.Vector3f
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.config.GameplayConfiguration.DialogueFormat
+import vx.ignis.config.GameplayConfiguration.DialogueConfig.DialogueFormat
 import vx.ignis.persistent.LivingEntityExtend.getVoicePitch
 import vx.ignis.persistent.LivingEntityExtend.getVoiceSound
 import java.util.concurrent.ConcurrentHashMap
@@ -115,7 +115,7 @@ class DialogueManager {
                 this.persistentDataContainer.get(dialogueFormatKey, PersistentDataType.STRING)?.let { type ->
                     return DialogueFormat.valueOf(type)
                 }
-                return plugin.gameplayManager.config.dialogueFormat.also { type ->
+                return plugin.gameplayManager.config.dialogue.dialogueFormat.also { type ->
                     this.persistentDataContainer.set(dialogueFormatKey, PersistentDataType.STRING, type.toString())
                 }
             }

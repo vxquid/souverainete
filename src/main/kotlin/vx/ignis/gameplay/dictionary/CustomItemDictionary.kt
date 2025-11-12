@@ -1,26 +1,22 @@
 package vx.ignis.gameplay.dictionary
 
-import de.exlll.configlib.YamlConfigurations
 import org.bukkit.Material
 import org.bukkit.event.Listener
 import org.bukkit.inventory.ItemStack
 import vx.ignis.Ignis.Companion.gson
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.Ignis.Companion.properties
 import vx.ignis.config.DictionaryConfiguration
+import vx.ignis.config.lib.ConfigurationManager
 import java.io.File
 import java.nio.file.Path
 
 class CustomItemDictionary : Listener {
 
-    private val dictionary: DictionaryConfiguration = run {
-        YamlConfigurations.update(path, DictionaryConfiguration::class.java, properties)
-        YamlConfigurations.load(path, DictionaryConfiguration::class.java, properties)
-    }
+    private val dictionary = ConfigurationManager.load(DictionaryConfiguration::class.java)
 
     private fun saveDictionary(): Boolean {
         return try {
-            YamlConfigurations.save(path, DictionaryConfiguration::class.java, dictionary, properties)
+            ConfigurationManager.save(dictionary)
             true
         } catch (e: Exception) {
             e.printStackTrace()

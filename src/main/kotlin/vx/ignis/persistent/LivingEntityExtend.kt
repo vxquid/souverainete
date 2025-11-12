@@ -29,6 +29,7 @@ object LivingEntityExtend {
     val questDataKey  = NamespacedKey(plugin, "NPCQuestData")
     val inventoryKey  = NamespacedKey(plugin, "Inventory")
     val settlementKey = NamespacedKey(plugin, "NPCSettlement")
+    val hungerKey     = NamespacedKey(plugin, "Hunger")
 
     fun LivingEntity.quests(): MutableList<Quest> =
         persistentDataContainer.get(questDataKey, PersistentDataType.STRING)?.let {
@@ -77,6 +78,16 @@ object LivingEntityExtend {
             persistentDataContainer.set(inventoryKey, PersistentDataType.STRING, InventorySerializer.inventoryToJSON(inventory).toString())
         }
     }
+
+    fun LivingEntity.hasEdibleItem(): Boolean {
+        return this.subInventory.filterNotNull().any { it.type.isEdible }
+    }
+
+    var LivingEntity.hunger: Double
+        get() = persistentDataContainer.get(hungerKey, PersistentDataType.DOUBLE) ?: plugin.gameplayManager.config.hunger.max.also {
+            persistentDataContainer.set(hungerKey, PersistentDataType.DOUBLE, it)
+        }
+        set(value) { persistentDataContainer.set(hungerKey, PersistentDataType.DOUBLE, value.coerceIn(0.0, plugin.gameplayManager.config.hunger.max)) }
 
     var LivingEntity.settlement: Settlement?
         get() = persistentDataContainer.get(settlementKey, PersistentDataType.STRING)?.let { name -> settlements[world]?.find { it.data.settlementName == name } }

@@ -1,19 +1,14 @@
 package vx.ignis.ai
 
-import de.exlll.configlib.YamlConfigurations
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.Ignis.Companion.properties
 import vx.ignis.ai.base.AIClient
 import vx.ignis.config.ProviderConfiguration
 import vx.ignis.config.ProviderConfiguration.ProviderType
-import java.io.File
+import vx.ignis.config.lib.ConfigurationManager
 
 class ProviderManager {
 
-    val config: ProviderConfiguration = run {
-        YamlConfigurations.update(File(plugin.dataFolder, "provider.yml").toPath(), ProviderConfiguration::class.java, properties)
-        YamlConfigurations.load(File(plugin.dataFolder, "provider.yml").toPath(), ProviderConfiguration::class.java, properties)
-    }
+    val config: ProviderConfiguration = ConfigurationManager.load(ProviderConfiguration::class.java)
 
     val client: AIClient = run {
 

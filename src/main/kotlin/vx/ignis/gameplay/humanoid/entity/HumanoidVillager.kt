@@ -27,14 +27,13 @@ import net.minecraft.world.entity.npc.VillagerType
 import net.minecraft.world.entity.schedule.Activity
 import net.minecraft.world.entity.schedule.Schedule
 import net.minecraft.world.level.Level
-import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.Sound
 import org.bukkit.World
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
-import vx.ignis.gameplay.humanoid.entity.Humanoid
+import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.gameplay.humanoid.entity.behavior.LookAndFollowDuringConversation
 import vx.ignis.util.Reflection
 import kotlin.reflect.KClass
@@ -179,11 +178,11 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
     override fun consume(world: World, item: ItemStack, sound: Sound, duration: Int, location: Location, period: Long, onDone: () -> Unit) {
         val nmsItem = CraftItemStack.asNMSCopy(item)
         var ticks = 0
-        Bukkit.getServer().scheduler.runTaskTimer(Bukkit.getPluginManager().getPlugin("IgnisVillagers")!!, { task ->
+        plugin.server.scheduler.runTaskTimer(plugin, { task ->
             this.isNoAi = true
             this.setItemSlot(EquipmentSlot.MAINHAND, nmsItem)
             world.playSound(location, sound, 1F, 1F)
-            if (ticks++ >= duration) {
+            ticks++; if (ticks >= duration) {
                 this.setItemSlot(EquipmentSlot.MAINHAND, net.minecraft.world.item.ItemStack.EMPTY)
                 onDone.invoke()
                 this.isNoAi = false

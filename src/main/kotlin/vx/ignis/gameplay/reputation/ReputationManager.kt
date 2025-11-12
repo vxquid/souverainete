@@ -45,16 +45,16 @@ class ReputationManager {
         val newStatus = getPlayerReputationStatus(entity, player)
 
         // Уведомление об изменении репутации
-        if (plugin.gameplayManager.config.reputationChatNotification && value != 0) {
+        if (plugin.gameplayManager.config.reputation.chatNotification && value != 0) {
             val entityDescription = entity.customName ?: "nearby inhabitants"
             notifyReputationChange(player, value, entityDescription)
         }
 
-        if (previousStatus != newStatus && plugin.gameplayManager.config.reputationChatNotification) {
+        if (previousStatus != newStatus && plugin.gameplayManager.config.reputation.chatNotification) {
             val entityName = entity.customName ?: "nearby inhabitants"
             val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.localizedName)
             player.sendMessage(statusChangeMessage)
-            player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputationStatusUpdateSound, 1F, 1F)
+            player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
         }
 
         // Обновление отображения BELOW_NAME
@@ -82,17 +82,17 @@ class ReputationManager {
         val newStatus = getPlayerReputationStatus(entity, player)
 
         // Уведомление об изменении репутации (аналогично addReputation, если значение изменилось)
-        if (plugin.gameplayManager.config.reputationChatNotification && value != previousRep) {
+        if (plugin.gameplayManager.config.reputation.chatNotification && value != previousRep) {
             val entityDescription = entity.customName ?: entity.type.name.lowercase().capitalize()
             val changeValue = value - previousRep
             notifyReputationChange(player, changeValue, entityDescription)
         }
 
-        if (previousStatus != newStatus && plugin.gameplayManager.config.reputationChatNotification) {
+        if (previousStatus != newStatus && plugin.gameplayManager.config.reputation.chatNotification) {
             val entityName = entity.customName ?: entity.type.name.lowercase().capitalize()
             val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.localizedName)
             player.sendMessage(statusChangeMessage)
-            player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputationStatusUpdateSound, 1F, 1F)
+            player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
         }
 
         // Обновление отображения BELOW_NAME
@@ -115,14 +115,14 @@ class ReputationManager {
         val config = plugin.gameplayManager.config
 
         return when {
-            reputation >= config.reputationExaltedRequired -> Reputation.EXALTED
-            reputation >= config.reputationReveredRequired -> Reputation.REVERED
-            reputation >= config.reputationHonoredRequired -> Reputation.HONORED
-            reputation >= config.reputationFriendlyRequired -> Reputation.FRIENDLY
-            reputation >= config.reputationNeutralRequired -> Reputation.NEUTRAL
-            reputation >= config.reputationUnfriendlyRequired -> Reputation.UNFRIENDLY
-            reputation >= config.reputationHostileRequired -> Reputation.HOSTILE
-            reputation >= config.reputationExiledRequired -> Reputation.EXILED
+            reputation >= config.reputation.exaltedRequired -> Reputation.EXALTED
+            reputation >= config.reputation.reveredRequired -> Reputation.REVERED
+            reputation >= config.reputation.honoredRequired -> Reputation.HONORED
+            reputation >= config.reputation.friendlyRequired -> Reputation.FRIENDLY
+            reputation >= config.reputation.neutralRequired -> Reputation.NEUTRAL
+            reputation >= config.reputation.unfriendlyRequired -> Reputation.UNFRIENDLY
+            reputation >= config.reputation.hostileRequired -> Reputation.HOSTILE
+            reputation >= config.reputation.exiledRequired -> Reputation.EXILED
             else -> Reputation.EXILED
         }
     }

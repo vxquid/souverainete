@@ -37,7 +37,7 @@ class SettlementManager: Listener {
     private fun startEnteringTick(world: World) {
 
         // Check settlement tracking display.
-        if (!plugin.gameplayManager.config.trackPlayerSettlementEntry) return
+        if (!plugin.gameplayManager.config.settlement.trackPlayerSettlementEntry) return
 
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
 

@@ -1,12 +1,12 @@
 package vx.ignis.config
 
-import de.exlll.configlib.Comment
-import de.exlll.configlib.Configuration
 import vx.ignis.Ignis.Companion.gson
+import vx.ignis.config.lib.annotations.Comment
+import vx.ignis.config.lib.annotations.Configuration
 import vx.ignis.gameplay.dictionary.CustomItem
 import vx.ignis.gameplay.dictionary.CustomItemDictionary
 
-@Configuration
+@Configuration("dictionary.yml")
 data class DictionaryConfiguration(
 
     @Comment("A list of custom items that can be used as quest items (or quest rewards) in the future.")
