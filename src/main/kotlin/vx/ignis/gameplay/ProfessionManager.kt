@@ -315,7 +315,6 @@ class ProfessionManager : Listener {
             rolls++
         } while (Random.nextInt(100) <= 50 / rolls + villager.villagerLevel)
 
-        rolls = 7
         val rarity = when (rolls) {
             1 -> UniqueItemRarity.COMMON
             2 -> UniqueItemRarity.UNCOMMON

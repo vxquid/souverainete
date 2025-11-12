@@ -34,6 +34,7 @@ import vx.ignis.gameplay.quest.ProgressTracker.Companion.questsFailed
 import vx.ignis.gameplay.quest.QuestManager.Quest.QuestItem
 import vx.ignis.gameplay.quest.pragma.QuestItemStrategy
 import vx.ignis.gameplay.quest.pragma.strategy.*
+import vx.ignis.gameplay.quest.pragma.strategy.TreasureHuntQuestItemStrategy.Companion.treasureItems
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
 import vx.ignis.gameplay.trade.ScoreCalculator.calculateScore
@@ -50,7 +51,7 @@ class QuestManager : Listener {
     val progressTracker = ProgressTracker()
 
     // TODO; Некоторые из этих значений должны быть в конфиге.
-    private val questLifetimeDuration      = 96000
+    private val questLifetimeDuration      = 192000
     private val questIntervalTicks         = 400L
     private val reputationScoreMultiplier  = 0.005
     private val experienceMultiplierPlayer = 0.05
@@ -97,7 +98,8 @@ class QuestManager : Listener {
                 this.removeIf { it == QuestType.FOOD_SEARCH }
                 when (villager.profession) {
                     Profession.ARMORER -> this.add(QuestType.SMITHING_TEMPLATE_ORDER)
-                    Profession.LIBRARIAN -> this.add(QuestType.ENCHANTED_BOOK_ORDER)
+                    Profession.LIBRARIAN -> { this.add(QuestType.ENCHANTED_BOOK_ORDER); this.add(QuestType.TREASURE_HUNT); }
+                    Profession.CARTOGRAPHER -> this.add(QuestType.TREASURE_HUNT)
                 }
             }.random()
         }
@@ -227,7 +229,7 @@ class QuestManager : Listener {
             when (quest.type) {
 
                 // Default quests without special finishers.
-                QuestType.PROFESSION_ITEM_GATHERING, QuestType.SMITHING_TEMPLATE_ORDER, QuestType.ENCHANTED_BOOK_ORDER -> {
+                QuestType.PROFESSION_ITEM_GATHERING, QuestType.SMITHING_TEMPLATE_ORDER, QuestType.ENCHANTED_BOOK_ORDER, QuestType.TREASURE_HUNT -> {
                     this.finishQuest(event.player, event.merchant, quest)
                 }
 
@@ -378,6 +380,7 @@ class QuestManager : Listener {
             when (questType) {
                 QuestType.BOOZE -> it["potionType"] = (questItem.item.itemMeta as PotionMeta).basePotionType!!.key.key.lowercase().replace("_", " ")
                 QuestType.ENCHANTED_BOOK_ORDER -> it["enchantmentType"] = (questItem.item.itemMeta as EnchantmentStorageMeta).enchants.toList().first().first.key.key.replace("_", " ")
+                QuestType.TREASURE_HUNT -> it["treasureDescription"] = treasureItems.find { it.first == questItem.item.type }?.third ?: "No extra info."
                 else -> { /* :) */ }
             }
 
@@ -454,7 +457,8 @@ class QuestManager : Listener {
         FOOD_SEARCH(QuestFamily.GATHERING, FoodSearchQuestItemStrategy(), "NPC, weakened by hunger, approaches the player with a request to bring him food. NPC explains that because of hunger, they cannot perform their duties. After completing the task, the NPC thanks the player for their help."),
         BOOZE(QuestFamily.GATHERING, BoozeQuestItemStrategy(), "NPC asks the player for a potion (which NPC treats like a drink). Take a note that the rewardText in this quest is shown to the player ONLY AFTER the animation of the NPC drinking the potion, implying the potion effect is already working on the NPC; NPC must describe the effect of the potion, which is {potionType}, telling how it feels and, depending on their condition & personality, thank the player or criticize (or even insult) they!"),
         SMITHING_TEMPLATE_ORDER(QuestFamily.GATHERING, SmithingTemplateQuestItemStrategy(), "A special quest of the armorer, related to collecting smithing trims for armor, which are used for armor decoration purposes. NPC should hint that in the future, the player will be able to ask them if the player would like to use smithing trims on their armor."),
-        ENCHANTED_BOOK_ORDER(QuestFamily.GATHERING, EnchantedBookQuestItemStrategy(), "This is a special quest of the librarian. NPC must somehow let the player know that they are researching item enchantment and are now looking for a {enchantmentType} enchantment book. After completing the quest, the NPC should hint that the player can contact him in the future if they want to enchant their tools or armor.")
+        ENCHANTED_BOOK_ORDER(QuestFamily.GATHERING, EnchantedBookQuestItemStrategy(), "This is a special quest of the librarian. NPC must somehow let the player know that they are researching item enchantment and are now looking for a {enchantmentType} enchantment book. After completing the quest, the NPC should hint that the player can contact him in the future if they want to enchant their tools or armor."),
+        TREASURE_HUNT(QuestFamily.GATHERING, TreasureHuntQuestItemStrategy(), "The treasure hunting is about traveling. Every self-respecting researcher should have a collection of rare items, which the player will have to participate in. In addition, NPC should hint to the player where to find the desired item based on the extra description: {treasureDescription}.")
     }
 
     companion object {
