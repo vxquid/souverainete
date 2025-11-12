@@ -149,7 +149,7 @@ object ConfigurationManager {
             writer.append("$indent$prefixed\n")
         }
 
-        val fields = getFields(config::class.java).sortedBy { it.name }
+        val fields = getFields(config::class.java) // Убрали .sortedBy { it.name } — теперь порядок как в объявлении полей
         fields.forEachIndexed { index, field ->
             if (field.isAnnotationPresent(Ignore::class.java)) return@forEachIndexed
 
