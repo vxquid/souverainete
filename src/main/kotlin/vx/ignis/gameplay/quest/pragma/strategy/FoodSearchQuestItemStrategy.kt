@@ -11,9 +11,6 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
 
-/**
- * Simple quest for food search.
- */
 class FoodSearchQuestItemStrategy : QuestItemStrategy() {
 
     override fun get(questGiver: LivingEntity): CustomItem {

@@ -24,7 +24,6 @@ object HungerManager {
     private val hungerDecreaseInterval = plugin.gameplayManager.config.hunger.decreaseInterval
     private val hungerDecreaseAmount = plugin.gameplayManager.config.hunger.decrease
     private val hungerEatThreshold = plugin.gameplayManager.config.hunger.eatThreshold
-    private val hungerQuestThreshold = plugin.gameplayManager.config.hunger.questThreshold
     private val hungerMax = plugin.gameplayManager.config.hunger.max
     private val hungerRegenThreshold = plugin.gameplayManager.config.hunger.regenThreshold
     private val hungerStarvationThreshold = plugin.gameplayManager.config.hunger.starvationThreshold
@@ -47,7 +46,7 @@ object HungerManager {
 
                 // If below eat threshold and has edible item, schedule eat
                 if (villager.hunger <= hungerEatThreshold && villager.hasEdibleItem()) {
-                    plugin.server.scheduler.runTaskLater(plugin, { _ -> villager.eat() }, 5 + (index * 2L).coerceAtMost(40) + Random.nextInt(250))
+                    plugin.server.scheduler.runTaskLaterAsynchronously(plugin, { _ -> villager.eat() }, 5 + (index * 2L).coerceAtMost(40) + Random.nextInt(250))
                 }
             }
         }

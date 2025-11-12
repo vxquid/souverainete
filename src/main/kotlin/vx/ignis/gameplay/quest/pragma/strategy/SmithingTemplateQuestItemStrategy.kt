@@ -6,16 +6,16 @@ import org.bukkit.inventory.ItemStack
 import vx.ignis.gameplay.dictionary.CustomItem
 import vx.ignis.gameplay.quest.pragma.QuestItemStrategy
 
-class MusicDiscQuestItemStrategy : QuestItemStrategy() {
+class SmithingTemplateQuestItemStrategy : QuestItemStrategy() {
 
     override fun get(questGiver: LivingEntity): CustomItem {
-        val disc = ItemStack(discs.random(), 1)
-        val item = CustomItem(disc.type.toString(), 3000, disc)
+        val template = ItemStack(templates.random(), 1)
+        val item = CustomItem(template.type.toString(), 5500, template)
         return item
     }
 
     companion object {
-        val discs = Material.entries.filter { material: Material -> material.isRecord }
+        val templates = Material.entries.filter { material: Material -> material.name.contains("SMITHING_TEMPLATE") }
     }
 
 }

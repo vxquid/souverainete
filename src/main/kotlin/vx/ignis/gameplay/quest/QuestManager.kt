@@ -1,16 +1,18 @@
 package vx.ignis.gameplay.quest
 
-import org.bukkit.Bukkit
-import org.bukkit.Material
-import org.bukkit.NamespacedKey
-import org.bukkit.World
+import net.kyori.adventure.key.Key
+import org.bukkit.*
+import org.bukkit.entity.Entity
 import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
+import org.bukkit.entity.Villager.Profession
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.BundleMeta
+import org.bukkit.inventory.meta.EnchantmentStorageMeta
+import org.bukkit.inventory.meta.PotionMeta
 import org.bukkit.persistence.PersistentDataType
 import vx.ignis.Ignis.Companion.gson
 import vx.ignis.Ignis.Companion.plugin
@@ -19,6 +21,7 @@ import vx.ignis.gameplay.dialogue.DialogueManager.Companion.talk
 import vx.ignis.gameplay.event.MerchantTradeEvent
 import vx.ignis.gameplay.event.PlayerAcceptQuestEvent
 import vx.ignis.gameplay.event.QuestInvalidationEvent
+import vx.ignis.gameplay.humanoid.HumanoidManager.Companion.asHumanoid
 import vx.ignis.gameplay.humanoid.HungerManager.eat
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
@@ -30,9 +33,7 @@ import vx.ignis.gameplay.quest.ProgressTracker.Companion.questsCompleted
 import vx.ignis.gameplay.quest.ProgressTracker.Companion.questsFailed
 import vx.ignis.gameplay.quest.QuestManager.Quest.QuestItem
 import vx.ignis.gameplay.quest.pragma.QuestItemStrategy
-import vx.ignis.gameplay.quest.pragma.strategy.FoodSearchQuestItemStrategy
-import vx.ignis.gameplay.quest.pragma.strategy.MusicDiscQuestItemStrategy
-import vx.ignis.gameplay.quest.pragma.strategy.ProfessionItemGatheringQuestItemStrategy
+import vx.ignis.gameplay.quest.pragma.strategy.*
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
 import vx.ignis.gameplay.trade.ScoreCalculator.calculateScore
@@ -40,6 +41,7 @@ import vx.ignis.persistent.LivingEntityExtend.hasEdibleItem
 import vx.ignis.persistent.LivingEntityExtend.hunger
 import vx.ignis.persistent.LivingEntityExtend.questDataKey
 import vx.ignis.persistent.LivingEntityExtend.quests
+import vx.ignis.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import vx.ignis.persistent.VillagerExtend.professionLevelName
 import java.util.*
 
@@ -50,7 +52,7 @@ class QuestManager : Listener {
     // TODO; Некоторые из этих значений должны быть в конфиге.
     private val questLifetimeDuration      = 96000
     private val questIntervalTicks         = 400L
-    private val reputationPriceMultiplier  = 0.05
+    private val reputationScoreMultiplier  = 0.005
     private val experienceMultiplierPlayer = 0.05
     private val experienceMultiplierNPC    = 0.0025
 
@@ -70,7 +72,7 @@ class QuestManager : Listener {
             return
         }
 
-        val villager  = this.selectRandomVillager(world) ?: run {
+        val villager = this.selectRandomVillager(world) ?: run {
             return
         }
 
@@ -90,8 +92,14 @@ class QuestManager : Listener {
         val questType = if (villager.hunger <= plugin.gameplayManager.config.hunger.questThreshold && !villager.hasEdibleItem()) {
             QuestType.FOOD_SEARCH
         } else {
-            // Don't forget to exclude food quest if there's no meaning in it.
-            QuestType.entries.toMutableList().apply { removeIf { it == QuestType.FOOD_SEARCH } }.random()
+            // Don't forget to exclude food quest if villager isn't hungry and add other profession-related quests.
+            QuestType.entries.toMutableList().apply {
+                this.removeIf { it == QuestType.FOOD_SEARCH }
+                when (villager.profession) {
+                    Profession.ARMORER -> this.add(QuestType.SMITHING_TEMPLATE_ORDER)
+                    Profession.LIBRARIAN -> this.add(QuestType.ENCHANTED_BOOK_ORDER)
+                }
+            }.random()
         }
 
         plugin.server.scheduler.runTaskAsynchronously(plugin, { _ ->
@@ -174,7 +182,7 @@ class QuestManager : Listener {
 
     fun finishQuest(player: Player, questGiver: LivingEntity, quest: Quest, onFinish: () -> Unit = {}) {
 
-        val playerReputation   = (quest.score * reputationPriceMultiplier).toInt()
+        val playerReputation   = (quest.score * reputationScoreMultiplier).toInt()
         val playerExperience   = (quest.score * experienceMultiplierPlayer).toInt()
         val villagerExperience = (quest.score * experienceMultiplierNPC).toInt()
 
@@ -217,15 +225,68 @@ class QuestManager : Listener {
         event.player.quests().find { it.questItem.getItemStack().isSimilar(event.recipe.ingredients.first()) }?.let { quest ->
             event.player.closeInventory()
             when (quest.type) {
-                QuestType.PROFESSION_ITEM_GATHERING, QuestType.MUSIC_DISC -> {
+
+                // Default quests without special finishers.
+                QuestType.PROFESSION_ITEM_GATHERING, QuestType.SMITHING_TEMPLATE_ORDER, QuestType.ENCHANTED_BOOK_ORDER -> {
                     this.finishQuest(event.player, event.merchant, quest)
                 }
-                QuestType.FOOD_SEARCH -> {
-                    plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                        event.merchant.eat()
-                        this.finishQuest(event.player, event.merchant, quest)
-                    }, 20L)  // Delay to ensure item is in inventory
+
+                // Music disc quest finisher.
+                QuestType.MUSIC_DISC -> {
+
+                    fun getSoundKeyFromMaterial(material: Material): String? {
+                        val name = material.name
+                        if (!name.startsWith("MUSIC_DISC_")) return null  // Не disc — игнор
+                        val suffix = name.removePrefix("MUSIC_DISC_").lowercase()  // "CAT" → "cat"; "CREATOR_MUSIC" → "creator_music"
+                        return "music_disc.$suffix"  // Готовый key для Adventure Sound
+                    }
+
+                    val recordKey = getSoundKeyFromMaterial(quest.questItem.getItemStack().type)!!
+
+                    fun playRecordFollowingNpc(
+                        npc: Entity,
+                        recordKey: String,
+                        source: net.kyori.adventure.sound.Sound.Source = net.kyori.adventure.sound.Sound.Source.RECORD,
+                        volume: Float = 1.5f,
+                        pitch: Float = 1.0f,
+                        radius: Double = 32.0
+                    ) {
+                        val sound = net.kyori.adventure.sound.Sound.sound(Key.key(recordKey), source, volume, pitch)
+
+                        val nearbyPlayers: List<Player> = npc.world.getNearbyEntities(npc.location, radius, radius, radius)
+                            .filterIsInstance<Player>()
+
+                        if (nearbyPlayers.isEmpty()) return
+
+                        nearbyPlayers.forEach { player ->
+                            player.playSound(sound, npc)
+                        }
+                    }
+
+                    playRecordFollowingNpc(event.merchant, recordKey)
+                    this.finishQuest(event.player, event.merchant, quest)
+
                 }
+
+                // Food quest. Logically, NPC must eat after taking the food.
+                QuestType.FOOD_SEARCH -> {
+                    event.merchant.eat()
+                    this.finishQuest(event.player, event.merchant, quest)
+                }
+
+                // Booze quest. My favorite. Drink, and only after that, finish.
+                QuestType.BOOZE -> {
+                    event.merchant.asHumanoid()?.let { humanoid ->
+                        val potion = quest.questItem.getItemStack()
+                        val effect = (potion.itemMeta as PotionMeta).basePotionType?.potionEffects?.firstOrNull()
+                        humanoid.consume(event.merchant.world, potion, Sound.ENTITY_GENERIC_DRINK, 7, event.merchant.location, 7) {
+                            effect?.let { event.merchant.addPotionEffect(it) }
+                            event.merchant.takeItemFromQuillInventory(potion, 1)
+                            this.finishQuest(event.player, event.merchant, quest)
+                        }
+                    } ?: this.finishQuest(event.player, event.merchant, quest) // Fallback, if humanoids is disabled. For some reason.
+                }
+
             }
         }
     }
@@ -307,16 +368,23 @@ class QuestManager : Listener {
             it["npcRace"]         = questGiver.race.name
             it["raceDescription"] = questGiver.race.description
             it["currentBiome"]    = questGiver.location.block.biome.key.toString()
+
             // Only villagers can have a profession and settlement (they live in a fucking villages!). I'm planning to add quests to wandering trades and witches as well.
             (questGiver as? Villager)?.let { villager ->
-                it["npcProfession"]      = villager.profession.toString()
+                it["npcProfession"]      = villager.profession.key.key
                 it["npcProfessionLevel"] = villager.professionLevelName
             }
 
-            it["questInfo"]       = questInfo
+            when (questType) {
+                QuestType.BOOZE -> it["potionType"] = (questItem.item.itemMeta as PotionMeta).basePotionType!!.key.key.lowercase().replace("_", " ")
+                QuestType.ENCHANTED_BOOK_ORDER -> it["enchantmentType"] = (questItem.item.itemMeta as EnchantmentStorageMeta).enchants.toList().first().first.key.key.replace("_", " ")
+                else -> { /* :) */ }
+            }
+
             it["rewardItem"]      = currency.item.type.name.lowercase().replace("_", " ")
             it["questItem"]       = questItem.key.lowercase().replace("_", " ")
             it["questItemAmount"] = amount.toString()
+            it["questInfo"]       = questInfo.replaceMap(it) // Must be last!
         }
 
         val prompt = questPrompt.replaceMap(placeholders)
@@ -383,7 +451,10 @@ class QuestManager : Listener {
     enum class QuestType(val questFamily: QuestFamily, val strategy: QuestItemStrategy, val taskDescription: String) {
         PROFESSION_ITEM_GATHERING(QuestFamily.GATHERING, ProfessionItemGatheringQuestItemStrategy(), "NPC requests an item for their development — this quest is related to the NPC's profession leveling. Based on the quest item and the NPC profession, NPC should explain the task to the player by sharing the reason they need the quest item."),
         MUSIC_DISC(QuestFamily.GATHERING, MusicDiscQuestItemStrategy(), "NPC wants a music disc and asks the player to find him one. The reason must be related to either personality or profession."),
-        FOOD_SEARCH(QuestFamily.GATHERING, FoodSearchQuestItemStrategy(), "NPC, weakened by hunger, approaches the player with a request to bring him food. NPC explains that because of hunger, they cannot perform their duties. After completing the task, the NPC thanks the player for their help.")
+        FOOD_SEARCH(QuestFamily.GATHERING, FoodSearchQuestItemStrategy(), "NPC, weakened by hunger, approaches the player with a request to bring him food. NPC explains that because of hunger, they cannot perform their duties. After completing the task, the NPC thanks the player for their help."),
+        BOOZE(QuestFamily.GATHERING, BoozeQuestItemStrategy(), "NPC asks the player for a potion (which NPC treats like a drink). Take a note that the rewardText in this quest is shown to the player ONLY AFTER the animation of the NPC drinking the potion, implying the potion effect is already working on the NPC; NPC must describe the effect of the potion, which is {potionType}, telling how it feels and, depending on their condition & personality, thank the player or criticize (or even insult) they!"),
+        SMITHING_TEMPLATE_ORDER(QuestFamily.GATHERING, SmithingTemplateQuestItemStrategy(), "A special quest of the armorer, related to collecting smithing trims for armor, which are used for armor decoration purposes. NPC should hint that in the future, the player will be able to ask them if the player would like to use smithing trims on their armor."),
+        ENCHANTED_BOOK_ORDER(QuestFamily.GATHERING, EnchantedBookQuestItemStrategy(), "This is a special quest of the librarian. NPC must somehow let the player know that they are researching item enchantment and are now looking for a {enchantmentType} enchantment book. After completing the quest, the NPC should hint that the player can contact him in the future if they want to enchant their tools or armor.")
     }
 
     companion object {

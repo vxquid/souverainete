@@ -125,7 +125,7 @@ class GameplayConfiguration {
         var decreaseInterval: Long = 200
 
         @Comment("Hunger threshold to trigger eating from inventory.")
-        var eatThreshold: Double = 20.0
+        var eatThreshold: Double = 14.0
 
         @Comment("Hunger threshold to force food quest generation.")
         var questThreshold: Double = 10.0

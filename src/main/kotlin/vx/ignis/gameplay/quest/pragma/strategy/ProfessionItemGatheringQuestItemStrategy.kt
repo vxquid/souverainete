@@ -214,5 +214,7 @@ class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
                     }
             }
         }
+
     }
+
 }
