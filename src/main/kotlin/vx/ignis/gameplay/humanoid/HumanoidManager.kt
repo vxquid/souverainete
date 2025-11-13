@@ -4,12 +4,10 @@ import com.github.retrooper.packetevents.PacketEvents
 import net.minecraft.world.entity.EntityType
 import net.minecraft.world.entity.npc.Villager
 import net.minecraft.world.level.storage.PrimaryLevelData
-import org.bukkit.World
 import org.bukkit.craftbukkit.entity.CraftLivingEntity
 import org.bukkit.entity.LivingEntity
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.gameplay.humanoid.entity.Humanoid
-import vx.ignis.gameplay.humanoid.entity.HumanoidInfo
 import vx.ignis.gameplay.humanoid.entity.HumanoidVillager
 import vx.ignis.gameplay.humanoid.race.RaceManager
 import vx.ignis.util.Reflection
@@ -21,6 +19,7 @@ class HumanoidManager {
     val raceManager      = RaceManager()
     val protocolListener = ProtocolListener()
     val equipmentManager = EquipmentManager()
+    val humanoidDisplay  = HumanoidInfoDisplayManager()
 
     init {
         entityProvider.replaceEntityTypes()

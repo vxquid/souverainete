@@ -63,7 +63,7 @@ class Ignis : JavaPlugin(), Listener {
 
         // Translate language.yml using cache
         val languageFile = File(dataFolder, "language.yml")
-        language = translationManager.getTranslated(language, languageFile)
+        language = translationManager.getTranslated(languageFile)
 
     }
 

@@ -37,6 +37,26 @@ reputation:
     revered: "Revered"
     exalted: "Exalted"
 
+# Villager profession names (used in info displays and tooltips).
+# Keys match Villager.Profession enum keys (e.g., 'armorer' from minecraft:armorer).
+# Translate these for localization.
+villager-professions:
+  armorer: "Armorer"
+  butcher: "Butcher"
+  cartographer: "Cartographer"
+  cleric: "Cleric"
+  farmer: "Farmer"
+  fisherman: "Fisherman"
+  fletcher: "Fletcher"
+  leatherworker: "Leatherworker"
+  librarian: "Librarian"
+  mason: "Mason"
+  nitwit: "Nitwit"
+  shepherd: "Shepherd"
+  tool_smith: "Toolsmith"
+  weaponsmith: "Weaponsmith"
+  none: "Jobless"
+
 # Messages that are visible after using commands.
 command-message:
 

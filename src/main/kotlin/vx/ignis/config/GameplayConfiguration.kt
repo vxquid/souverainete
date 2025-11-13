@@ -16,6 +16,7 @@ class GameplayConfiguration {
     val reputation = ReputationConfig()
     val settlement = SettlementConfig()
     val hunger     = HungerConfig()
+    val humanoidDisplay = HumanoidDisplayConfig()
 
     class GeneralConfig {
         @Comment("Don't touch this, or you'll see a lot weird things.")
@@ -78,35 +79,6 @@ class GameplayConfiguration {
         @Comment("Required reputation for EXALTED status.")
         var exaltedRequired: Int = 20000
 
-        @Comment("Distance within which to show reputation HUD for nearby NPCs.")
-        var displayCloseDistance: Double = 5.0
-
-        @Comment("Forward distance from player for HUD position.")
-        var displayHudDistance: Double = 2.0
-
-        @Comment("Right offset from player's view direction for HUD position.")
-        var displayHudRightOffset: Double = 1.0
-
-        @Comment("Vertical spacing between multiple reputation displays in HUD.")
-        var displayHudVerticalSpacing: Double = -0.3
-
-        @Comment("Scale factor for the reputation text display (X, Y, Z).")
-        var displayScale: List<Float> = listOf(0.5f, 0.5f, 0.5f)
-
-        @Comment("Background color for the reputation display in ARGB format (A, R, G, B).")
-        var displayBackgroundColor: List<Int> = listOf(128, 0, 0, 0)
-
-        @Comment("Whether the reputation display should be see-through.")
-        var displaySeeThrough: Boolean = true
-
-        @Comment("Billboard mode for the reputation display.", "FIXED, VERTICAL, HORIZONTAL, CENTER.")
-        var displayBillboard: Billboard = Billboard.CENTER
-
-        @Comment("Text color for the reputation display (NamedTextColor name, e.g., WHITE, GREEN).")
-        var displayTextColor: String = "WHITE"
-
-        @Comment("Template for the reputation text. Placeholders: {npcName}, {repValue}, {status}")
-        var displayTextTemplate: String = "{npcName}'s Reputation: {repValue} ({status})"
     }
 
     class SettlementConfig {
@@ -138,6 +110,41 @@ class GameplayConfiguration {
 
         @Comment("Damage amount per tick when starving.")
         var starvationDamage: Double = 1.0
+    }
+
+    class HumanoidDisplayConfig {
+        @Comment("Enable NPC info displays above humanoids.")
+        var enabled: Boolean = true
+
+        @Comment("Maximum view distance in blocks to show NPC info displays to players.")
+        var viewDistance: Double = 5.5
+
+        @Comment("Y-axis offset for positioning the display above the NPC's head.")
+        var displayOffsetY: Float = 0.195f
+
+        @Comment("Scale factors for the display entity (X, Y, Z).")
+        var displayScale: List<Float> = listOf(0.65f, 0.65f, 0.65f)
+
+        @Comment("Interval in server ticks between display updates (text refresh and viewer checks).")
+        var updateIntervalTicks: Long = 10L
+
+        @Comment("Text template for the NPC name, profession, and level line. Use %s for name and profession, %d for level.")
+        var nameProfessionLevelTemplate: String = "§a%s§f, %s §6(⭐%d)"
+
+        @Comment("Text template for the reputation line. Use %d for value, %s for status.")
+        var reputationTemplate: String = "§e🏆 %d §f(%s)"
+
+        @Comment("Text template for the health line. Use %.1f placeholders for current and max health.")
+        var healthTemplate: String = "§с❤%.1f§f/§a%.1f"
+
+        @Comment("Billboard rendering mode for the display. FIXED, VERTICAL, HORIZONTAL, CENTER.")
+        var billboard: Billboard = Billboard.CENTER
+
+        @Comment("Whether the display entity renders as see-through (ignores blocks).")
+        var seeThrough: Boolean = false
+
+        @Comment("Background color for the display in ARGB format (A, R, G, B). Higher alpha for more opacity.")
+        var backgroundColor: List<Int> = listOf(175, 0, 0, 0)
     }
 
 }

@@ -9,8 +9,6 @@ import java.util.*
 
 class ReputationManager {
 
-    private val reputationDisplayManager = ReputationDisplayManager(this)
-
     fun getReputationMap(entity: LivingEntity): MutableMap<UUID, Int> {
         val pdc = entity.persistentDataContainer
         if (pdc.has(REP_KEY, PersistentDataType.STRING)) {
@@ -57,8 +55,6 @@ class ReputationManager {
             player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
         }
 
-        // Обновление отображения BELOW_NAME
-        this.reputationDisplayManager.updateForPlayer(player, entity)
     }
 
     private fun notifyReputationChange(player: Player, aggregatedValue: Int, entityDescription: String) {
@@ -95,8 +91,6 @@ class ReputationManager {
             player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
         }
 
-        // Обновление отображения BELOW_NAME
-        this.reputationDisplayManager.updateForPlayer(player, entity)
     }
 
     enum class Reputation(val localizedName: String, val priceMultiplier: Double) {
