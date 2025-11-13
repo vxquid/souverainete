@@ -43,6 +43,7 @@ class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
         val selectedItem = selectRandomItemInRange(prioritizedItems, raceCurrencyPrice * 5, maxWealth)
             ?: selectFallbackItem(prioritizedItems, raceCurrencyPrice * 5, maxWealth, profession)
 
+        plugin.logger.info("[QUEST DEBUG] PIGQIS score: ${selectedItem.price.toLong()}.")
         return CustomItem(selectedItem.material.name, selectedItem.price.toLong(), ItemStack(selectedItem.material, selectedItem.amount)
         )
     }

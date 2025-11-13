@@ -17,6 +17,7 @@ import org.bukkit.plugin.java.JavaPlugin
 import vx.ignis.ai.ProviderManager
 import vx.ignis.command.DictionaryCommand
 import vx.ignis.command.QuestCommand
+import vx.ignis.config.lib.TranslationManager
 import vx.ignis.gameplay.GameplayManager
 import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
@@ -32,6 +33,7 @@ class Ignis : JavaPlugin(), Listener {
     lateinit var providerManager: ProviderManager
     lateinit var gameplayManager: GameplayManager
     lateinit var commandManager:  PaperCommandManager
+    lateinit var translationManager: TranslationManager
 
     var language: YamlConfiguration = run {
         super.saveResource("language.yml", false)
@@ -56,7 +58,13 @@ class Ignis : JavaPlugin(), Listener {
     override fun onEnable() {
         RainbowColorTicker.init()
         this.providerManager = ProviderManager()
+        this.translationManager = TranslationManager(this, providerManager.client, providerManager.config.language)
         this.server.pluginManager.registerEvents(this, this)
+
+        // Translate language.yml using cache
+        val languageFile = File(dataFolder, "language.yml")
+        language = translationManager.getTranslated(language, languageFile)
+
     }
 
     override fun onDisable() {

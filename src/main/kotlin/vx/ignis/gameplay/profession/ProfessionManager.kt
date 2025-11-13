@@ -1,4 +1,4 @@
-package vx.ignis.gameplay
+package vx.ignis.gameplay.profession
 
 import io.papermc.paper.registry.RegistryAccess
 import io.papermc.paper.registry.RegistryKey
@@ -100,7 +100,7 @@ class ProfessionManager : Listener {
 
         val ingredients = cachedProfessionsConfig.getStringList("villager-item-producing.profession.CLERIC.item-priority").map { it.split("~")[0] }
         villager.subInventory.filterNotNull().find { ingredients.contains(it.type.toString()) }?.let { brewingIngredient ->
-            villager.takeItemFromQuillInventory(brewingIngredient, 1 + Random.nextInt(5))
+            villager.takeItemFromQuillInventory(brewingIngredient, 1 + Random.Default.nextInt(5))
 
             val potion = ItemStack(Material.POTION).apply {
                 itemMeta = (itemMeta as PotionMeta).apply {
@@ -206,7 +206,7 @@ class ProfessionManager : Listener {
         // Check for unique item generation
         if (cachedProfessionsConfig.getStringList("villager-item-producing.mastery-affected-items").contains(item.type.toString())) {
             val uniqueChance = professionLevel * cachedProfessionsConfig.getInt("villager-item-producing.unique-item-chance")
-            if (Random.nextInt(100) <= uniqueChance) {
+            if (Random.Default.nextInt(100) <= uniqueChance) {
                 val uniqueItem = createUniqueItem(villager, item)
                 uniqueItemProduceQueue[villager] = uniqueItem
                 return
@@ -242,7 +242,7 @@ class ProfessionManager : Listener {
         private val uniqueItemPrompt = "Answer only in JSON format, without unnecessary text, make sure it will be JSON parseable. Generate a unique item description using the following JSON scheme: " +
                 "`itemDescription` — a detailed and immersive description of the item (one to three sentences), " +
                 "`itemNames` — string array, five short but creative item names, must differ from each other. " +
-                "The writing style must be strictly tailored in the following order: global setting, race (race description), character definition, current biome, profession (profession level), gender. Start with a neutral description — it'll be easier for you to navigate that way. Don't shorten the descriptions — we don't want scraps of phrases, right? Select the most important words (like names or attributes) with bold Markdown. Select interesting parts with italic Markdown. All content must be written in a narrative style to enhance immersion and believability. " +
+                "The writing style must be strictly tailored in the following order: global setting, race (race description), character definition, current biome, profession (profession level), gender. " +
                 "The following is the information about the NPC: name is {npcName}, current biome is {currentBiome}, NPC personality definition is [{npcPersonality}], race is {npcRace} and race description: [{raceDescription}], profession is {npcProfession}, npc profession mastery level is {npcProfessionLevel}, npc gender is {npcGender}. {uniqueItemInfo} " +
                 "Item details: item type is {itemType}, extra item attributes are {extraItemAttributes}, item rarity is {itemRarity}, settlement name is {settlementName}, settlement level is {settlementLevel}, setting is {setting}, naming style is {namingStyle}."
 
@@ -313,7 +313,7 @@ class ProfessionManager : Listener {
         var rolls = 0
         do {
             rolls++
-        } while (Random.nextInt(100) <= 50 / rolls + villager.villagerLevel)
+        } while (Random.Default.nextInt(100) <= 50 / rolls + villager.villagerLevel)
 
         val rarity = when (rolls) {
             1 -> UniqueItemRarity.COMMON
@@ -554,7 +554,6 @@ class ProfessionManager : Listener {
         }
     }
 
-    // TODO: Move to config
     enum class UniqueItemRarity(val color: String, val extraPrice: Int) {
         NONE("#ffffff", 0),
         COMMON("#a9a9a9", plugin.professions.getInt("villager-item-producing.extra-rarity-price.COMMON")),

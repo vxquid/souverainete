@@ -4,7 +4,7 @@ import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.PotionMeta
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.gameplay.ProfessionManager.Companion.getUniqueItemRarity
+import vx.ignis.gameplay.profession.ProfessionManager.Companion.getUniqueItemRarity
 import kotlin.random.Random
 
 object ScoreCalculator {

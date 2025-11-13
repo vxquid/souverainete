@@ -81,7 +81,7 @@ class QuestManager : Listener {
             return
         }
 
-        if (villager.profession == Villager.Profession.NONE) run {
+        if (villager.profession == Profession.NONE) run {
             return
         }
 
@@ -139,6 +139,7 @@ class QuestManager : Listener {
      * */
     @Suppress("KotlinUnreachableCode")
     fun generateQuest(type: QuestType, questGiver: LivingEntity): Quest {
+
         class QuestGenerationException : Exception("Error during quest generation!")
         val generator = QuestGenerationController(type, questGiver)
 
@@ -191,6 +192,7 @@ class QuestManager : Listener {
         if (questGiver is Villager) questGiver.villagerExperience += villagerExperience
         player.giveExp(playerExperience)
         plugin.gameplayManager.reputationManager.addReputation(questGiver, player, playerReputation)
+        player.sendFormattedMessage("[Debug] | Reputation added from quest. ${quest.score} * $reputationScoreMultiplier = $playerReputation. Right?...")
 
         val finishMessage = plugin.language.getString("quest.finished")!!.replace("{quest}", quest.name)
         player.sendFormattedMessage(finishMessage)
@@ -352,7 +354,7 @@ class QuestManager : Listener {
 
         private val questPrompt = "Answer only in JSON format, without unnecessary text, make sure it will be JSON parseable. Generate a quest for NPC using the following JSON scheme: " +
         "`questNames` — string array, five short but creative quest names, must differ from each other" +
-        "`extraShortTaskDescription` — extremely short description of the task (goal, quest giver name, amount), " +
+        "`extraShortTaskDescription` — extremely short description of the task (goal, quest giver name, amount); don't use Markdown here!, " +
         "`shortRequiredQuestItemDescription` — a short (literally one sentence) description of the item in the context of the quest (from the third party), " +
         "string array of `reputationBasedQuestDescriptions` and string array of `reputationBasedQuestFinishingDialogues` which will shift from the most negative reputation to the most positive (existing reputation states: exiled, hostile, unfriendly, neutral, friendly, honored, revered, exalted, don't mention the exact status, just play around it, eight values must be in each array). " +
         "The writing style must be strictly tailored in the following order: global setting, race (race description), character definition, current biome, profession (profession level), gender. Start with a neutral description — it'll be easier for you to navigate that way. Don't shorten the descriptions because it's an array — we don't want scraps of phrases, right? Then, sort the content of the array from the worst to the best reputation. Select the most important words (like names or goals) with bold Markdown. Select interesting parts with italic Markdown. All content must be written in the first person to enhance player immersion and believability. In places where the npc want to address the player, use the %playerName% placeholder. " +
@@ -361,7 +363,7 @@ class QuestManager : Listener {
         val questItem = questType.strategy.get(questGiver)
         val currency  = plugin.gameplayManager.itemDictionary.getItem(questGiver.race.normalCurrency.name)
         val amount    = questItem.item.amount
-        val score     = if (questItem.score * amount < currency.score) currency.score else questItem.score * amount
+        val score     = if (questItem.score * amount < currency.score) currency.score else (questItem.score * amount)
 
         private val placeholders  = mutableMapOf<String, String>().also {
             it["npcPersonality"]  = "${questGiver.getPersonality()}"

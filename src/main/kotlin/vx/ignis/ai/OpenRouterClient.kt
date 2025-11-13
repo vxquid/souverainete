@@ -10,8 +10,6 @@ import vx.ignis.Ignis.Companion.gson
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.ai.base.AIClient
 import vx.ignis.config.ProviderConfiguration
-import java.io.File
-import java.io.IOException
 import java.io.StringReader
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -77,43 +75,12 @@ class OpenRouterClient(
         null
     }
 
-    override fun translate(file: File, onSuccess: (YamlConfiguration) -> Unit) {
-        val prompt =
-            "Translate YAML file below to $lang, keep the keys and special symbols (like §) and DO NOT translate placeholders. Wrap result as ```yaml```. \n```yaml\n${file.readText()}\n```"
-        val requestBody = createRequestBody(prompt)
-        val request = createRequest(requestBody)
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                logError("Network issue: ${e.message}")
-                retryTranslate(file, onSuccess)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    if (!response.isSuccessful) {
-                        logError("HTTP ${response.code} - ${response.message}")
-                        retryTranslate(file, onSuccess)
-                        return
-                    }
-                    val content = response.body?.string() ?: run {
-                        logError("Empty response body")
-                        retryTranslate(file, onSuccess)
-                        return
-                    }
-                    try {
-                        val cleanedData = findYaml(content).unescapeString()
-                        onSuccess(YamlConfiguration.loadConfiguration(StringReader(cleanedData)))
-                    } catch (e: NullPointerException) {
-                        logError("Failed to extract YAML: ${e.message}")
-                        retryTranslate(file, onSuccess)
-                    } catch (e: Exception) {
-                        logError("Unexpected error during translation: ${e.message}")
-                        retryTranslate(file, onSuccess)
-                    }
-                }
-            }
-        })
+    override fun translate(yamlConfig: YamlConfiguration): YamlConfiguration? = try {
+        val yamlText = yamlConfig.saveToString()
+        val prompt = "Translate YAML file below to $lang, keep the keys and special symbols (like §) and DO NOT translate placeholders. Wrap result as ```yaml```. \n```yaml\n${yamlText}\n```"
+        translateWithRetry(prompt, config.maxRetries)
+    } catch (any: Exception) {
+        null
     }
 
     private fun <T : Any> sendRequestWithRetry(
@@ -142,9 +109,7 @@ class OpenRouterClient(
                 return null
             }
             try {
-                //logDebug("Raw AI response: $content")
                 val cleanedContent = content.cleanJson()
-                //logDebug("Cleaned AI response: $cleanedContent")
                 return gson.fromJson(cleanedContent, JsonObject::class.java)
                     ?.let { gson.fromJson(it, responseType.java) }
                     ?: run {
@@ -156,6 +121,43 @@ class OpenRouterClient(
                 sendRequestWithRetry(prompt, responseType, retries - 1)
             } catch (e: Exception) {
                 logError("Unexpected error parsing response: ${e.message}")
+                null
+            }
+        }
+    }
+
+    private fun translateWithRetry(
+        prompt: String,
+        retries: Int
+    ): YamlConfiguration? {
+        if (retries <= 0) {
+            logError("Max retries reached for translate prompt: $prompt")
+            return null
+        }
+
+        val requestBody = createRequestBody(prompt)
+        val request = createRequest(requestBody)
+
+        return client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                handleFailedResponse(response)
+                return translateWithRetry(prompt, retries - 1)
+            }
+            val content = response.body?.string()?.let { body ->
+                gson.fromJson(body, OpenRouterResponse::class.java)
+                    ?.choices?.firstOrNull()?.message?.content
+            } ?: run {
+                logError("Empty or invalid response")
+                return null
+            }
+            try {
+                val cleanedData = findYaml(content).unescapeString()
+                YamlConfiguration.loadConfiguration(StringReader(cleanedData))
+            } catch (e: NullPointerException) {
+                logError("Failed to extract YAML: ${e.message}")
+                translateWithRetry(prompt, retries - 1)
+            } catch (e: Exception) {
+                logError("Unexpected error during translation: ${e.message}")
                 null
             }
         }
@@ -177,12 +179,6 @@ class OpenRouterClient(
             .header("Content-Type", "application/json")
             .post(body)
             .build()
-    }
-
-    private fun retryTranslate(file: File, onSuccess: (YamlConfiguration) -> Unit) {
-        plugin.server.scheduler.runTaskLater(plugin, { _ ->
-            translate(file, onSuccess)
-        }, 200L)
     }
 
     private fun findYaml(yaml: String): String {
@@ -210,10 +206,6 @@ class OpenRouterClient(
 
     private fun logError(message: String) {
         plugin.logger.warning("[OpenRouterClient] [ERROR] $message")
-    }
-
-    private fun logDebug(message: String) {
-        plugin.logger.info("[OpenRouterClient] [DEBUG] $message")
     }
 
 }

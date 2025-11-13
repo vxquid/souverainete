@@ -10,8 +10,6 @@ import vx.ignis.Ignis.Companion.gson
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.ai.base.AIClient
 import vx.ignis.config.ProviderConfiguration
-import java.io.File
-import java.io.IOException
 import java.io.StringReader
 import java.net.InetSocketAddress
 import java.net.Proxy
@@ -68,54 +66,16 @@ class GeminiClient(
         val fullPrompt =
             "$rules$prompt\n\nReturn the response as a JSON object strictly adhering to the schema described in the prompt. Ensure the response is valid JSON enclosed in curly braces {} and contains only the fields specified in the schema. Do NOT include code fences (```json```)"
         sendRequestWithRetry(fullPrompt, targetClass, config.maxRetries)
-    } catch (any: Exception) {
+    } catch (_: Exception) {
         null
     }
 
-    override fun translate(file: File, onSuccess: (YamlConfiguration) -> Unit) {
-        val prompt =
-            "Translate YAML file below to $lang, keep the keys and special symbols (like ยง) and DO NOT translate placeholders. Wrap result as ```yaml```. \n```yaml\n${file.readText()}\n```"
-        val key = try {
-            keyManager.getAvailableKey()
-        } catch (e: IllegalStateException) {
-            logError("No available API keys: ${e.message}")
-            return
-        }
-
-        val requestBody =
-            createJsonRequest(prompt.escapeJsonString()).toRequestBody("application/json".toMediaTypeOrNull())
-        val request = Request.Builder().url("$baseUrl${key.key}").post(requestBody).build()
-
-        client.newCall(request).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: IOException) {
-                logError("Network issue: ${e.message}")
-                retryTranslate(file, onSuccess)
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.use {
-                    if (!response.isSuccessful) {
-                        logError("HTTP ${response.code} - ${response.message}")
-                        retryTranslate(file, onSuccess)
-                        return
-                    }
-                    val content = response.body?.string() ?: run {
-                        logError("Empty response body")
-                        retryTranslate(file, onSuccess)
-                        return
-                    }
-                    try {
-                        val cleanedData = findYaml(content).unescapeString()
-                        onSuccess(YamlConfiguration.loadConfiguration(StringReader(cleanedData)))
-                    } catch (e: NullPointerException) {
-                        logError("Failed to extract YAML: ${e.message}")
-                        retryTranslate(file, onSuccess)
-                    } catch (e: Exception) {
-                        logError("Unexpected error during translation: ${e.message}")
-                    }
-                }
-            }
-        })
+    override fun translate(yamlConfig: YamlConfiguration): YamlConfiguration? = try {
+        val yamlText = yamlConfig.saveToString()
+        val prompt = "Translate YAML file below to $lang, keep the keys and special symbols (like §) and DO NOT translate placeholders. You must wrap the result in ```yaml```. \n```yaml\n${yamlText}\n```"
+        translateWithRetry(prompt, config.maxRetries)
+    } catch (_: Exception) {
+        null
     }
 
     private fun <T : Any> sendRequestWithRetry(
@@ -137,7 +97,7 @@ class GeminiClient(
         }
 
         val requestBody =
-            createJsonRequest(prompt.escapeJsonString()).toRequestBody("application/json".toMediaTypeOrNull())
+            createJsonRequest(prompt.escapeJsonString(), "application/json").toRequestBody("application/json".toMediaTypeOrNull())
         val request = Request.Builder().url("$baseUrl${key.key}").post(requestBody).build()
 
         return client.newCall(request).execute().use { response ->
@@ -179,10 +139,64 @@ class GeminiClient(
         }
     }
 
-    private fun retryTranslate(file: File, onSuccess: (YamlConfiguration) -> Unit) {
-        plugin.server.scheduler.runTaskLater(plugin, { _ ->
-            translate(file, onSuccess)
-        }, 200L)
+    private fun translateWithRetry(
+        prompt: String,
+        retries: Int
+    ): YamlConfiguration? {
+
+        if (retries <= 0) {
+            logError("Max retries reached for translate prompt: $prompt")
+            return null
+        }
+
+        val key = try {
+            keyManager.getAvailableKey()
+        } catch (e: IllegalStateException) {
+            logError("No available API keys: ${e.message}")
+            return null
+        }
+
+        val requestBody =
+            createJsonRequest(prompt.escapeJsonString(), "text/plain").toRequestBody("application/json".toMediaTypeOrNull())
+        val request = Request.Builder().url("$baseUrl${key.key}").post(requestBody).build()
+
+        return client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                handleFailedResponse(response, key)
+                return translateWithRetry(prompt, retries - 1)
+            }
+            val content = response.body?.string() ?: run {
+                logError("Empty response body")
+                return null
+            }
+            try {
+
+                val jsonResponse = gson.fromJson(content, JsonObject::class.java)
+                val extractedText = jsonResponse
+                    .getAsJsonArray("candidates")
+                    ?.get(0)?.asJsonObject
+                    ?.getAsJsonObject("content")
+                    ?.getAsJsonArray("parts")
+                    ?.get(0)?.asJsonObject
+                    ?.get("text")?.asString
+                    ?: run {
+                        logError("Failed to extract text from response!")
+                        return null
+                    }
+                val cleanedData = findYaml(extractedText).unescapeString()
+                plugin.logger.info("[TRANSLATION DEBUG] $cleanedData ")
+                YamlConfiguration.loadConfiguration(StringReader(cleanedData))
+            } catch (e: JsonParseException) {
+                logError("Failed to parse JSON: ${e.message}")
+                translateWithRetry(prompt, retries - 1)
+            } catch (e: NullPointerException) {
+                logError("Failed to extract YAML: ${e.message}")
+                translateWithRetry(prompt, retries - 1)
+            } catch (e: Exception) {
+                logError("Unexpected error during translation: ${e.message}")
+                null
+            }
+        }
     }
 
     private fun findYaml(yaml: String): String {
@@ -209,7 +223,7 @@ class GeminiClient(
         replace(Regex("""\\+n"""), "\n")
             .replace(Regex("""\\+""""), "\"")
 
-    private fun createJsonRequest(prompt: String): String =
+    private fun createJsonRequest(prompt: String, mimeType: String = "application/json"): String =
         """{
             "contents": [{
                 "parts": [{
@@ -221,7 +235,7 @@ class GeminiClient(
                 "threshold": "4"
             }],
             "generationConfig": {
-                "responseMimeType": "application/json",
+                "responseMimeType": "$mimeType",
                 "temperature": $temp
             }
         }""".trimIndent()

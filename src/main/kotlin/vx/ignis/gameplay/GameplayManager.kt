@@ -15,6 +15,7 @@ import vx.ignis.gameplay.dictionary.CustomItemDictionary
 import vx.ignis.gameplay.humanoid.HumanoidManager
 import vx.ignis.gameplay.humanoid.HungerManager
 import vx.ignis.gameplay.personality.PersonalityManager
+import vx.ignis.gameplay.profession.ProfessionManager
 import vx.ignis.gameplay.quest.QuestManager
 import vx.ignis.gameplay.reputation.ReputationManager
 import vx.ignis.gameplay.settlement.SettlementManager
