@@ -57,6 +57,11 @@ villager-professions:
   weaponsmith: "Weaponsmith"
   none: "Jobless"
 
+# Hunger status names (used in info displays).
+hunger-status:
+  hungry: "🍗 Hungry"
+  starving: "☠ Starving"
+
 # Messages that are visible after using commands.
 command-message:
 
@@ -118,6 +123,7 @@ command-error-message:
   status-not-found: "§cError! Non-existent reputation status: §с{status}."
   settlement-not-found: "§cError! Non-existent settlement: §с{settlementName}."
 
-# Success messages.
-command-success-message:
-  reputation-changed: "§7Reputation of §e{playerName} §7has been changed to §6{status}§7."
+# Update checker messages.
+update:
+  new-version-available: "§7A new version is available: §6{newVersion}§7. Please consider updating."
+  check-failed: "§7Failed to check for updates: {errorMessage}."

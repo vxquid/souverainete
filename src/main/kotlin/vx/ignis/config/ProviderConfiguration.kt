@@ -14,6 +14,12 @@ class ProviderConfiguration {
     var providerType: ProviderType = ProviderType.GEMINI
 
     @Comment(
+        "For GEMINI, default model is \"gemini-2.5-flash-lite\".",
+        "For OPENROUTER, default model is \"google/gemini-2.5-flash-lite\"."
+    )
+    var model = "gemini-2.5-flash-lite"
+
+    @Comment(
         "List of API keys for the provider. For GEMINI, multiple keys can be used for automatic rotation upon quota limits.",
         "Note: Each GEMINI key requires a separate Google account (you may ask players for assistance in creating accounts).",
         "For OPENROUTER, only the first key in the list is used; additional keys are ignored."

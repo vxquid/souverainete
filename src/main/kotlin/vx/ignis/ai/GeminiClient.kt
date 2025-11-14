@@ -17,10 +17,11 @@ import java.util.concurrent.TimeUnit
 import kotlin.reflect.KClass
 
 class GeminiClient(
-    private val baseUrl: String = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=",
     private val keyManager: KeyManager,
     private val config: ProviderConfiguration
 ) : AIClient {
+
+    private val baseUrl: String = "https://generativelanguage.googleapis.com/v1beta/models/${config.model}:generateContent?key="
 
     class KeyManager(keys: List<String>) {
         data class Key(val key: String, var requestCounter: Int = 0, var quota: Boolean = false)
@@ -184,7 +185,6 @@ class GeminiClient(
                         return null
                     }
                 val cleanedData = findYaml(extractedText).unescapeString()
-                plugin.logger.info("[TRANSLATION DEBUG] $cleanedData ")
                 YamlConfiguration.loadConfiguration(StringReader(cleanedData))
             } catch (e: JsonParseException) {
                 logError("Failed to parse JSON: ${e.message}")

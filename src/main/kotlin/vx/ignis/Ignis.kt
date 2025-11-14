@@ -10,6 +10,7 @@ import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.world.WorldLoadEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
@@ -24,7 +25,9 @@ import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlementsWorld
 import vx.ignis.serialization.ItemStackSerializer
 import vx.ignis.serialization.LocationSerializer
 import vx.ignis.serialization.UUIDSerializer
+import vx.ignis.util.Metrics
 import vx.ignis.util.RainbowColorTicker
+import vx.ignis.util.UpdateChecker
 import java.io.File
 import java.util.*
 
@@ -55,16 +58,37 @@ class Ignis : JavaPlugin(), Listener {
         YamlConfiguration.loadConfiguration(File(super.getDataFolder(), "professions.yml"))
     }
 
+    private var updateAvailable: Boolean = false
+    private var latestVersion: String? = null
+
     override fun onEnable() {
         RainbowColorTicker.init()
         this.providerManager = ProviderManager()
         this.translationManager = TranslationManager(this, providerManager.client, providerManager.config.language)
         this.server.pluginManager.registerEvents(this, this)
 
-        // Translate language.yml using cache
-        val languageFile = File(dataFolder, "language.yml")
-        language = translationManager.getTranslated(languageFile)
+        // Translate language.yml using cache. Must be async.
+        this.server.scheduler.runTaskAsynchronously(this, {_ ->
+            val languageFile = File(dataFolder, "language.yml")
+            language = translationManager.getTranslated(languageFile)
+        })
 
+        // Metrics!
+        Metrics(this, 27976)
+
+        // Update checking.
+        UpdateChecker(121059).getVersion { remoteVersion ->
+            @Suppress("DEPRECATION") val currentVersion = description.version
+            val comparison = UpdateChecker.compareVersions(currentVersion, remoteVersion)
+            if (comparison >= 0) {
+                logger.info("You are running the latest release of Ignis. Your build: $currentVersion")
+                updateAvailable = false
+            } else {
+                logger.info("New version of Ignis available: $remoteVersion")
+                updateAvailable = true
+                latestVersion = remoteVersion
+            }
+        }
     }
 
     override fun onDisable() {
@@ -88,6 +112,19 @@ class Ignis : JavaPlugin(), Listener {
             // Command registration
             commandManager.registerCommand(QuestCommand())
             commandManager.registerCommand(DictionaryCommand())
+        }
+    }
+
+    @EventHandler
+    fun onPlayerJoin(event: PlayerJoinEvent) {
+        if (event.player.hasPermission("ignis.update")) {
+            if (latestVersion != null) {
+                if (updateAvailable) {
+                    val updateMsg = language.getString("update.new-version-available", "§cA new version of §6Ignis §cis available: §e{newVersion}§c! Please update.")
+                        ?.replace("{newVersion}", latestVersion!!)
+                    event.player.sendFormattedMessage(updateMsg ?: "New version available: $latestVersion")
+                }
+            }
         }
     }
 

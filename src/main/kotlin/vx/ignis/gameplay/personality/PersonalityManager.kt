@@ -1,9 +1,6 @@
 package vx.ignis.gameplay.personality
 
-import io.papermc.paper.registry.RegistryAccess
-import io.papermc.paper.registry.RegistryKey
 import org.bukkit.NamespacedKey
-import org.bukkit.Registry
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.AbstractVillager
 import org.bukkit.entity.EntityType
@@ -14,7 +11,6 @@ import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.ai.base.AIClient
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import java.io.File
-import java.util.*
 
 class PersonalityManager {
 

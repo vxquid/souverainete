@@ -15,6 +15,7 @@ import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
 import org.joml.Vector3f
 import vx.ignis.Ignis.Companion.plugin
+import vx.ignis.persistent.LivingEntityExtend.hunger
 
 class HumanoidInfoDisplayManager : Listener {
 
@@ -23,7 +24,7 @@ class HumanoidInfoDisplayManager : Listener {
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
         val config = plugin.gameplayManager.config
-        if (config.humanoidDisplay.enabled) {
+        if (config.nametag.enabled) {
             startViewerUpdater()
         }
     }
@@ -32,16 +33,16 @@ class HumanoidInfoDisplayManager : Listener {
         val config = plugin.gameplayManager.config
         val location = npc.location.clone()
         val display = npc.world.spawn(location, TextDisplay::class.java) { textDisplay ->
-            textDisplay.billboard = config.humanoidDisplay.billboard
-            textDisplay.isSeeThrough = config.humanoidDisplay.seeThrough
+            textDisplay.billboard = config.nametag.billboard
+            textDisplay.isSeeThrough = config.nametag.seeThrough
             textDisplay.isVisibleByDefault = false
-            val bgColor = config.humanoidDisplay.backgroundColor
+            val bgColor = config.nametag.backgroundColor
             textDisplay.backgroundColor = Color.fromARGB(bgColor[0], bgColor[1], bgColor[2], bgColor[3])
             updateDisplayText(textDisplay, npc, player)
 
-            val scale = config.humanoidDisplay.displayScale
+            val scale = config.nametag.displayScale
             val transformation = Transformation(
-                Vector3f(0f, config.humanoidDisplay.displayOffsetY, 0f),
+                Vector3f(0f, config.nametag.displayOffsetY, 0f),
                 AxisAngle4f(),
                 Vector3f(scale[0], scale[1], scale[2]),
                 AxisAngle4f()
@@ -72,21 +73,36 @@ class HumanoidInfoDisplayManager : Listener {
         val repValue = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
         val repStatus = reputationManager.getPlayerReputationStatus(npc, player)
 
-        val line1 = config.humanoidDisplay.nameProfessionLevelTemplate.format(name, profession, level)
-        val line2 = config.humanoidDisplay.reputationTemplate.format(repValue, repStatus.localizedName) + " §7|§r " + config.humanoidDisplay.healthTemplate.format(health, maxHealth)
-        display.text = "$line1\n$line2"
+        val line1 = config.nametag.nameProfessionLevelTemplate.format(name, profession, level)
+        val line2 = config.nametag.reputationTemplate.format(repValue, repStatus.localizedName) + " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
+
+        var text = "$line1\n$line2"
+
+        // Check hunger and add third line if hungry or starving
+        val hungerValue = npc.hunger
+        val hungerMax = config.hunger.max
+        val hungerEatThreshold = config.hunger.eatThreshold
+        val hungerStarvationThreshold = config.hunger.starvationThreshold
+        if (hungerValue <= hungerEatThreshold) {
+            val statusKey = if (hungerValue <= hungerStarvationThreshold) "starving" else "hungry"
+            val status = plugin.language.getString("hunger-status.$statusKey")!!
+            val line3 = config.nametag.hungerTemplate.format(status, hungerValue, hungerMax)
+            text += "\n$line3"
+        }
+
+        display.text = text
     }
 
     private fun startViewerUpdater() {
         val config = plugin.gameplayManager.config
-        val viewDistance = config.humanoidDisplay.viewDistance
+        val viewDistance = config.nametag.viewDistance
         val viewDistanceSquared = viewDistance * viewDistance
-        val updateIntervalTicks = config.humanoidDisplay.updateIntervalTicks
+        val updateIntervalTicks = config.nametag.updateIntervalTicks
 
         object : BukkitRunnable() {
             override fun run() {
                 val cfg = plugin.gameplayManager.config
-                if (!cfg.humanoidDisplay.enabled || !cfg.humanoid.humanoidVillagers) {
+                if (!cfg.nametag.enabled || !cfg.humanoid.humanoidVillagers) {
                     displays.values.forEach { if (it.isValid) it.remove() }
                     displays.clear()
                     return
@@ -139,6 +155,9 @@ class HumanoidInfoDisplayManager : Listener {
     @EventHandler
     fun onEntityDeath(event: EntityDeathEvent) {
         val npc = event.entity
+        if (npc !is Villager) return
+        if (!plugin.gameplayManager.config.humanoid.humanoidVillagers) return
+        if (!plugin.gameplayManager.config.worlds.allowedWorlds.contains(npc.world.name)) return
         val toRemove = displays.filterKeys { (n, _) -> n == npc }.keys.toList()
         toRemove.forEach { pair ->
             val (n, p) = pair
@@ -151,7 +170,7 @@ class HumanoidInfoDisplayManager : Listener {
     @EventHandler
     fun onChunkUnload(event: ChunkUnloadEvent) {
         val config = plugin.gameplayManager.config
-        if (!config.humanoidDisplay.enabled) return
+        if (!config.nametag.enabled) return
         if (!config.worlds.allowedWorlds.contains(event.world.name)) return
         if (!config.humanoid.humanoidVillagers) return
 

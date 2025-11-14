@@ -16,15 +16,13 @@ class GameplayConfiguration {
     val reputation = ReputationConfig()
     val settlement = SettlementConfig()
     val hunger     = HungerConfig()
-    val humanoidDisplay = HumanoidDisplayConfig()
+    val nametag    = NametagDisplayConfig()
 
     class GeneralConfig {
         @Comment("Don't touch this, or you'll see a lot weird things.")
         val debug: Boolean = false
-
         @Comment("Message prefix.")
-        val messagePrefix: String = "§e🔥 §8|§7"
-
+        val messagePrefix: String = "§6ɪɢɴɪꜱ §8|§7"
     }
 
     class WorldsConfig {
@@ -110,9 +108,12 @@ class GameplayConfiguration {
 
         @Comment("Damage amount per tick when starving.")
         var starvationDamage: Double = 1.0
+
+        @Comment("Whether NPCs can die from starvation.")
+        var canDieFromStarvation: Boolean = true
     }
 
-    class HumanoidDisplayConfig {
+    class NametagDisplayConfig {
         @Comment("Enable NPC info displays above humanoids.")
         var enabled: Boolean = true
 
@@ -136,6 +137,9 @@ class GameplayConfiguration {
 
         @Comment("Text template for the health line. Use %.1f placeholders for current and max health.")
         var healthTemplate: String = "§с❤%.1f§f/§a%.1f"
+
+        @Comment("Text template for the hunger status line when NPC is starving or hungry. Use %s for status, %.1f for hunger.")
+        var hungerTemplate: String = "§c%s (%.1f / %.1f)"
 
         @Comment("Billboard rendering mode for the display. FIXED, VERTICAL, HORIZONTAL, CENTER.")
         var billboard: Billboard = Billboard.CENTER

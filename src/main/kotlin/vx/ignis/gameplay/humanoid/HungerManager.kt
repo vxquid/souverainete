@@ -28,6 +28,7 @@ object HungerManager {
     private val hungerRegenThreshold = plugin.gameplayManager.config.hunger.regenThreshold
     private val hungerStarvationThreshold = plugin.gameplayManager.config.hunger.starvationThreshold
     private val hungerStarvationDamage = plugin.gameplayManager.config.hunger.starvationDamage
+    private val canDieFromStarvation = plugin.gameplayManager.config.hunger.canDieFromStarvation
 
     fun startTicker() {
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
@@ -56,8 +57,10 @@ object HungerManager {
         if (entity.hunger >= hungerRegenThreshold) {
             entity.addPotionEffect(PotionEffect(PotionEffectType.REGENERATION, 200, 2))
         } else if (entity.hunger <= hungerStarvationThreshold) {
-            // Apply starvation damage and weakness
-            entity.damage(hungerStarvationDamage)
+            // Apply starvation damage if allowed or if health is above damage amount
+            if (canDieFromStarvation || entity.health > hungerStarvationDamage) {
+                entity.damage(hungerStarvationDamage)
+            }
             entity.addPotionEffect(PotionEffect(PotionEffectType.WEAKNESS, 200, 1))
             entity.addPotionEffect(PotionEffect(PotionEffectType.SLOWNESS, 200, 0))
         } else if (entity.hunger <= hungerEatThreshold) {

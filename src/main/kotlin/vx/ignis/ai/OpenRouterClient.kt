@@ -44,7 +44,7 @@ class OpenRouterClient(
         }
     }.build()
 
-    private val model = "google/gemini-2.5-flash-lite"
+    private val model = config.model
     private val mediaType = "application/json; charset=utf-8".toMediaType()
     private val lang  = config.language
     private val rules = "[Rules: `Use $lang language.`, `Generate content in ${config.setting} setting.`, `Use ${config.namingStyle} naming style.`] "
