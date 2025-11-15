@@ -66,11 +66,6 @@ class PersonalityManager {
         }
     }
 
-    fun getPersonality(key: String): Personality? = personalities[key]
-    fun addPersonality(personality: Personality) {
-        personalities[personality.key] = personality
-    }
-
     private fun generateCharacterData(entity: LivingEntity) {
 
         val personality = entity.getPersonality()
@@ -80,15 +75,15 @@ class PersonalityManager {
 
         plugin.server.scheduler.runTaskAsynchronously(plugin, { _ ->
             aiClient.sendPromptWithSchema(
-                prompt = "Your task is to generate NPC personality data, taking into account race (race name: ${race.name}, race description: [{${race.description}}]), personality ($personality), gender ($gender), biome ($biome). Required JSON schema: " +
-                        "‘npcNames’ (array of five strings; first and second name; respect the naming style!), " +
-                        "‘sleepInterruptionPhrases’ (array of 5 strings; [phrases that NPC says when a player disrupts their sleep]), " +
-                        "‘damagePhrases’ (array of 5 strings; [phrases that NPC says when attacked by a player]), " +
-                        "‘joblessPhrases’ (array of 5 strings; [phrases that NPC says when a player suggests trading, but NPC doesn't have any job]), " +
-                        "‘noItemsToTradePhrases’ (array of 5 strings; [phrases that NPC says when a player suggests trading, but NPC doesn't have any items to trade]), " +
-                        "‘noQuestPhrases’ (array of 5 strings; [phrases that NPC says when a player asks NPC about job, but NPC doesn't have any quests for the player])," +
-                        "‘totemOfUndyingResurrectionPhrases’ (array of 5 strings; [phrases that NPC says when totem of undying saves them from death, must be heavily depends on personality type])," +
-                        "‘imprisonedOrStuckPhrases’ (array of 5 strings; [phrases that NPC says when they being locked in one place for a long time (usually they should ask for help, but it depends on personality)]).",
+                prompt = "Your task is to generate NPC data & reaction phrases, taking into account the following NPC info: race (race name: ${race.name}, race description: [{${race.description}}]), personality is ($personality), gender ($gender), biome ($biome). Required JSON schema: " +
+                        "‘npcNames’ (array of five strings; first and second name; must be in naming style!), " +
+                        "‘sleepInterruptionPhrases’ (array of 5 strings; [reaction phrases that NPC says when a player disrupts their sleep]), " +
+                        "‘damagePhrases’ (array of 5 strings; [reaction phrases that NPC says when attacked by a player]), " +
+                        "‘joblessPhrases’ (array of 5 strings; [reaction phrases that NPC says when a player suggests trading, but NPC doesn't have any job]), " +
+                        "‘noItemsToTradePhrases’ (array of 5 strings; [reaction phrases that NPC says when a player suggests trading, but NPC doesn't have any items to trade]), " +
+                        "‘noQuestPhrases’ (array of 5 strings; [reaction phrases that NPC says when a player asks NPC about job, but NPC doesn't have any quests for the player])," +
+                        "‘totemOfUndyingResurrectionPhrases’ (array of 5 strings; [reaction phrases that NPC says when totem of undying saves them from death, must be heavily depends on personality type])," +
+                        "‘imprisonedOrStuckPhrases’ (array of 5 strings; [reaction phrases that NPC says when they being locked in one place for a long time (usually they should ask for help, but it depends on personality)]).",
                 targetClass = CharacterData::class
             )?.let { personalityData ->
                 entity.setCharacterData(personalityData)
@@ -137,9 +132,7 @@ class PersonalityManager {
 
         val personalityKey   = NamespacedKey(plugin, "Personality")
         val characterDataKey = NamespacedKey(plugin, "CharacterData")
-        val genderKey = NamespacedKey(plugin, "Gender")
-        val voiceKey  = NamespacedKey(plugin, "VoiceSound")
-        val pitchKey  = NamespacedKey(plugin, "VoicePitch")
+        val genderKey        = NamespacedKey(plugin, "Gender")
 
         fun LivingEntity.getPersonality(): Personality {
             return this.persistentDataContainer.get(personalityKey, PersistentDataType.STRING)?.let {
