@@ -4,7 +4,7 @@ import org.bukkit.Material
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.PotionMeta
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.gameplay.profession.ProfessionManager.Companion.getUniqueItemRarity
+import vx.ignis.gameplay.profession.UniqueItemManager.Companion.getUniqueItemRarity
 import kotlin.random.Random
 
 /**
@@ -12,16 +12,6 @@ import kotlin.random.Random
  * Excludes edibles and enchanted books from collections to prevent inflated scores from consumables.
  */
 object ScoreCalculator {
-
-    /**
-     * Calculates the total score for a collection of items, excluding edibles and enchanted books.
-     * @return Sum of individual item scores.
-     */
-    fun Collection<ItemStack>.calculateScore(): Int {
-        return this
-            .filterNot { item -> item.type.isEdible || item.type == Material.ENCHANTED_BOOK }
-            .sumOf { it.calculateScore() }
-    }
 
     /**
      * Calculates the score for an entire stack of items.

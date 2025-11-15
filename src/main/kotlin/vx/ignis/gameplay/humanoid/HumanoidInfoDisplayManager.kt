@@ -120,7 +120,7 @@ class HumanoidInfoDisplayManager : Listener {
                     for (npc in nearbyVillagers) {
                         val pair = npc to player
                         if (!displays.containsKey(pair)) {
-                            createPersonalDisplay(npc, player)
+                            plugin.server.scheduler.runTask(plugin) { _ -> createPersonalDisplay(npc, player) }
                         } else {
                             updateDisplayText(displays[pair]!!, npc, player)
                         }

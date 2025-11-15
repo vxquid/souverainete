@@ -39,23 +39,27 @@ class Ignis : JavaPlugin(), Listener {
     lateinit var translationManager: TranslationManager
 
     var language: YamlConfiguration = run {
-        super.saveResource("language.yml", false)
-        YamlConfiguration.loadConfiguration(File(super.getDataFolder(), "language.yml"))
+        val file = File(super.getDataFolder(), "language.yml")
+        if (!file.exists()) super.saveResource("language.yml", false)
+        YamlConfiguration.loadConfiguration(file)
     }
 
     var prompts: YamlConfiguration = run {
-        super.saveResource("prompts.yml", false)
-        YamlConfiguration.loadConfiguration(File(super.getDataFolder(), "prompts.yml"))
+        val file = File(super.getDataFolder(), "prompts.yml")
+        if (!file.exists()) super.saveResource("prompts.yml", false)
+        YamlConfiguration.loadConfiguration(file)
     }
 
     var prices: YamlConfiguration = run {
-        super.saveResource("prices.yml", false)
-        YamlConfiguration.loadConfiguration(File(super.getDataFolder(), "prices.yml"))
+        val file = File(super.getDataFolder(), "prices.yml")
+        if (!file.exists()) super.saveResource("prices.yml", false)
+        YamlConfiguration.loadConfiguration(file)
     }
 
     var professions: YamlConfiguration = run {
-        super.saveResource("professions.yml", false)
-        YamlConfiguration.loadConfiguration(File(super.getDataFolder(), "professions.yml"))
+        val file = File(super.getDataFolder(), "professions.yml")
+        if (!file.exists()) super.saveResource("professions.yml", false)
+        YamlConfiguration.loadConfiguration(file)
     }
 
     private var updateAvailable: Boolean = false
@@ -81,10 +85,10 @@ class Ignis : JavaPlugin(), Listener {
             @Suppress("DEPRECATION") val currentVersion = description.version
             val comparison = UpdateChecker.compareVersions(currentVersion, remoteVersion)
             if (comparison >= 0) {
-                logger.info("You are running the latest release of Ignis. Your build: $currentVersion")
+                logger.info("You are running the latest release of Ignis ($currentVersion).")
                 updateAvailable = false
             } else {
-                logger.info("New version of Ignis available: $remoteVersion")
+                logger.info("New version ($remoteVersion) is available. Please, consider updating.")
                 updateAvailable = true
                 latestVersion = remoteVersion
             }

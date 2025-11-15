@@ -32,7 +32,6 @@ import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
 import vx.ignis.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.ignis.persistent.LivingEntityExtend.quests
-import vx.ignis.persistent.LivingEntityExtend.subInventory
 
 class InteractionManager: Listener {
 
@@ -229,10 +228,6 @@ class InteractionManager: Listener {
 
         builder.button(plugin.language.getString("interaction-menu.talk-button")!!) {
             if (player.getActiveDialogueSession() == null) DialogueSession(player, villager)
-        }
-
-        builder.button("§6Inventory") {
-            player.openInventory(villager.subInventory)
         }
 
         builder.button(plugin.language.getString("interaction-menu.close-button")!!) { menu ->

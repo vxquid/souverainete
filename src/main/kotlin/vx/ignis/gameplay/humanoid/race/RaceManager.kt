@@ -19,13 +19,15 @@ import kotlin.random.Random
 class RaceManager {
 
     var races: YamlConfiguration = run {
-        plugin.saveResource("races.yml", false)
-        YamlConfiguration.loadConfiguration(File(plugin.dataFolder, "races.yml"))
+        val file = File(plugin.dataFolder, "races.yml")
+        if (!file.exists()) plugin.saveResource("races.yml", false)
+        YamlConfiguration.loadConfiguration(file)
     }
 
     var skins: YamlConfiguration = run {
-        plugin.saveResource("skins.yml", false)
-        YamlConfiguration.loadConfiguration(File(plugin.dataFolder, "skins.yml"))
+        val file = File(plugin.dataFolder, "skins.yml")
+        if (!file.exists()) plugin.saveResource("skins.yml", false)
+        YamlConfiguration.loadConfiguration(file)
     }
 
     fun loadRaces() {
