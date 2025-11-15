@@ -13,10 +13,10 @@ import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.persistent.LivingEntityExtend.quests
 import vx.ignis.gameplay.event.QuestInvalidationEvent
 import vx.ignis.gameplay.quest.QuestManager.Companion.addQuest
 import vx.ignis.gameplay.quest.QuestManager.Companion.removeQuest
+import vx.ignis.persistent.LivingEntityExtend.quests
 
 class ProgressTracker : Listener {
 
@@ -74,7 +74,7 @@ class ProgressTracker : Listener {
     }
 
     fun startTracking(player: Player, quest: QuestManager.Quest): BossBar {
-        val progressBar = Bukkit.createBossBar("§6${quest.name}§f: ${quest.data.extraShortTaskDescription}", BarColor.RED, BarStyle.SEGMENTED_20)
+        val progressBar = Bukkit.createBossBar("§6${quest.name}§f: ${quest.data.extraShortTaskDescription.replace("%playerName%", player.name)}", BarColor.RED, BarStyle.SEGMENTED_20)
         progressBar.progress = quest.progress
         progressBar.addPlayer(player)
         questTracker[player] = quest to progressBar
