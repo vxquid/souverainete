@@ -1,6 +1,7 @@
 package vx.ignis.gameplay.profession
 
 import org.bukkit.Bukkit
+import org.bukkit.Keyed
 import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.entity.Pose
@@ -113,7 +114,13 @@ class ProfessionManager : Listener {
             val recipes = Bukkit.getRecipesFor(ItemStack(material))
             if (recipes.isEmpty()) continue
 
-            val recipe = recipes.random()
+            val vanillaRecipes = recipes.filter { it is Keyed && (it as Keyed).key.namespace == "minecraft" }
+            if (vanillaRecipes.isEmpty()) {
+                plugin.logger.warning("No craftable recipes found for $professionKey.")
+                continue
+            }
+
+            val recipe = vanillaRecipes.random()
             val recipeIngredients = extractRecipeIngredients(recipe) ?: continue
 
             if (!canCraftRecipe(villager, recipeIngredients)) continue
@@ -191,7 +198,7 @@ class ProfessionManager : Listener {
         // Check for unique item generation
         if (cachedProfessionsConfig.getStringList("villager-item-producing.mastery-affected-items").contains(item.type.toString())) {
             val uniqueChance = professionLevel * cachedProfessionsConfig.getInt("villager-item-producing.unique-item-chance")
-            if (Random.nextInt(100) <= uniqueChance) {
+            if (Random.Default.nextInt(100) <= uniqueChance) {
                 val uniqueItem = UniqueItemManager.createUniqueItem(villager, item)
                 uniqueItemProduceQueue[villager] = uniqueItem
                 return
