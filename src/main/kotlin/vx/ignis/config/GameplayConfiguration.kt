@@ -17,12 +17,13 @@ class GameplayConfiguration {
     val settlement = SettlementConfig()
     val hunger     = HungerConfig()
     val nametag    = NametagDisplayConfig()
+    val quest      = QuestConfig()
 
     class GeneralConfig {
-        @Comment("Don't touch this, or you'll see a lot weird things.")
+        @Comment("Don't touch this, or you'll see a lot of weird things.")
         val debug: Boolean = false
         @Comment("Message prefix.")
-        val messagePrefix: String = "§6ɪɢɴɪꜱ §8|§7"
+        val messagePrefix: String = "§x§F§F§0§0§7§2ɪ§x§B§F§1§1§9§5ɢ§x§8§0§2§3§B§9ɴ§x§4§0§3§4§D§Cɪ§x§0§0§4§5§F§Fꜱ §8|§7"
     }
 
     class WorldsConfig {
@@ -149,6 +150,29 @@ class GameplayConfiguration {
 
         @Comment("Background color for the display in ARGB format (A, R, G, B). Higher alpha for more opacity.")
         var backgroundColor: List<Int> = listOf(175, 0, 0, 0)
+    }
+
+    class QuestConfig {
+        @Comment("Quest lifetime duration in ticks.")
+        var lifetimeDuration: Long = 192000L
+
+        @Comment("Interval in ticks for quest generation.")
+        var intervalTicks: Long = 400L
+
+        @Comment("Reputation score multiplier for quest completion.")
+        var reputationMultiplier: Double = 0.005
+
+        @Comment("Experience multiplier for players.")
+        var playerExperienceMultiplier: Double = 0.05
+
+        @Comment("Experience multiplier for NPCs.")
+        var npcExperienceMultiplier: Double = 0.0025
+
+        @Comment("Maximum number of quests a player can have.")
+        var playerQuestLimit: Int = 3
+
+        @Comment("Base number of quests an NPC can have (added to villager level).")
+        var npcQuestBase: Int = 1
     }
 
 }

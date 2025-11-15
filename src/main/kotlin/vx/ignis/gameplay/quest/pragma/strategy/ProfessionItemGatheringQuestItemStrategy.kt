@@ -7,10 +7,8 @@ import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.gameplay.dictionary.CustomItem
-import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.quest.pragma.QuestItemStrategy
 import vx.ignis.gameplay.trade.ScoreCalculator.calculateScore
-import vx.ignis.gameplay.trade.ScoreCalculator.getBasicScore
 import java.util.logging.Level
 import kotlin.random.Random
 
@@ -32,16 +30,16 @@ class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
 
         val profession = questGiver.profession
         val level = questGiver.villagerLevel
-        val raceCurrencyPrice = questGiver.race.normalCurrency.get()!!.getBasicScore()
 
+        val minWealth = InventoryWealth.getProfessionLimit(level).minWealth
         val maxWealth = InventoryWealth.getProfessionLimit(level).maxWealth
         val prioritizedItems = professionItems[profession]
             ?: throw IllegalStateException(
                 "No items configured for profession $profession; check professions.yml!"
             )
 
-        val selectedItem = selectRandomItemInRange(prioritizedItems, raceCurrencyPrice * 5, maxWealth)
-            ?: selectFallbackItem(prioritizedItems, raceCurrencyPrice * 5, maxWealth, profession)
+        val selectedItem = selectRandomItemInRange(prioritizedItems, minWealth, maxWealth)
+            ?: selectFallbackItem(prioritizedItems, minWealth, maxWealth, profession)
 
         plugin.logger.info("[QUEST DEBUG] PIGQIS score: ${selectedItem.price.toLong()}.")
         return CustomItem(selectedItem.material.name, selectedItem.price.toLong(), ItemStack(selectedItem.material, selectedItem.amount)

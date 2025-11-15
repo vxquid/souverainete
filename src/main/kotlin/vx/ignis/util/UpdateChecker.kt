@@ -2,6 +2,7 @@ package vx.ignis.util
 
 import org.bukkit.Bukkit
 import org.bukkit.plugin.java.JavaPlugin
+import vx.ignis.Ignis.Companion.plugin
 import java.io.IOException
 import java.net.URL
 import java.util.*
@@ -21,7 +22,7 @@ class UpdateChecker(private val resourceId: Int) {
                     }
                 }
             } catch (e: IOException) {
-                Bukkit.getLogger().info("Failed to check for updates: ${e.message}")
+                plugin.logger.info("Failed to check for updates: ${e.message}")
             }
         }
     }

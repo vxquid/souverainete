@@ -5,12 +5,13 @@ import org.bukkit.entity.LivingEntity
 import org.bukkit.inventory.ItemStack
 import vx.ignis.gameplay.dictionary.CustomItem
 import vx.ignis.gameplay.quest.pragma.QuestItemStrategy
+import vx.ignis.gameplay.trade.ScoreCalculator.calculateScore
 
 class MusicDiscQuestItemStrategy : QuestItemStrategy() {
 
     override fun get(questGiver: LivingEntity): CustomItem {
         val disc = ItemStack(discs.random(), 1)
-        val item = CustomItem(disc.type.toString(), 3000, disc)
+        val item = CustomItem(disc.type.toString(), disc.calculateScore().toLong(), disc)
         return item
     }
 

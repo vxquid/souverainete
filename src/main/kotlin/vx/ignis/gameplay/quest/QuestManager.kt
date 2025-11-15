@@ -37,7 +37,6 @@ import vx.ignis.gameplay.quest.pragma.strategy.*
 import vx.ignis.gameplay.quest.pragma.strategy.TreasureHuntQuestItemStrategy.Companion.treasureItems
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
-import vx.ignis.gameplay.trade.ScoreCalculator.calculateScore
 import vx.ignis.persistent.LivingEntityExtend.hasEdibleItem
 import vx.ignis.persistent.LivingEntityExtend.hunger
 import vx.ignis.persistent.LivingEntityExtend.questDataKey
@@ -50,13 +49,6 @@ class QuestManager : Listener {
 
     val progressTracker = ProgressTracker()
 
-    // TODO; Некоторые из этих значений должны быть в конфиге.
-    private val questLifetimeDuration      = 192000
-    private val questIntervalTicks         = 400L
-    private val reputationScoreMultiplier  = 0.005
-    private val experienceMultiplierPlayer = 0.05
-    private val experienceMultiplierNPC    = 0.0025
-
     // ID квестов помогает отслеживать актуальные квесты и те, которые уже не имеют смысла.
     val questCountKey = NamespacedKey(plugin, "TotalQuestCount")
     val totalQuestAmount: Long
@@ -64,7 +56,7 @@ class QuestManager : Listener {
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
-        plugin.server.scheduler.runTaskTimer(plugin, { _ -> tick() }, 0, questIntervalTicks)
+        plugin.server.scheduler.runTaskTimer(plugin, { _ -> tick() }, 0, plugin.gameplayManager.config.quest.intervalTicks)
     }
 
     fun tick() {
@@ -85,17 +77,18 @@ class QuestManager : Listener {
             return
         }
 
-        if (villager.quests().size > 1 + villager.villagerLevel) run {
+        if (villager.quests().size > plugin.gameplayManager.config.quest.npcQuestBase + villager.villagerLevel) run {
             return
         }
+
+        // Basic small quests allowed for every profession.
+        val allowedQuests = mutableListOf(QuestType.PROFESSION_ITEM_GATHERING, QuestType.BOOZE, QuestType.MUSIC_DISC)
 
         // Random quest type will be chosen. If villager is hungry, enforce food quest.
         val questType = if (villager.hunger <= plugin.gameplayManager.config.hunger.questThreshold && !villager.hasEdibleItem()) {
             QuestType.FOOD_SEARCH
         } else {
-            // Don't forget to exclude food quest if villager isn't hungry and add other profession-related quests.
-            QuestType.entries.toMutableList().apply {
-                this.removeIf { it == QuestType.FOOD_SEARCH }
+            allowedQuests.apply {
                 when (villager.profession) {
                     Profession.ARMORER -> this.add(QuestType.SMITHING_TEMPLATE_ORDER)
                     Profession.LIBRARIAN -> { this.add(QuestType.ENCHANTED_BOOK_ORDER); this.add(QuestType.TREASURE_HUNT); }
@@ -109,7 +102,6 @@ class QuestManager : Listener {
                 plugin.gameplayManager.questManager.generateQuest(questType, villager as LivingEntity).let { quest ->
                     plugin.gameplayManager.actualQuests.add(quest.id)
                     villager.addQuest(quest)
-                    // plugin.logger.info("Generated a brand-new quest ${quest.name} for entity ${villager.customName} in world ${villager.world.name} at ${villager.location}.")
                 }
             } catch (exception: Exception) {
                 val debug = true
@@ -125,12 +117,12 @@ class QuestManager : Listener {
     private fun selectRandomVillager(world: World) : Villager? {
         return world.entities.filterIsInstance<Villager>().onEach { villager: Villager ->
             villager.quests().forEach { quest ->
-                if ((System.currentTimeMillis() - quest.timeCreated) / 1000 * 20 > questLifetimeDuration) {
+                if ((System.currentTimeMillis() - quest.timeCreated) / 1000 * 20 > plugin.gameplayManager.config.quest.lifetimeDuration) {
                     this.invalidateQuest(quest, QuestInvalidationEvent.Reason.TIME_EXPIRATION)
                     villager.removeQuest(quest)
                 }
             }
-        }.filter { it.quests().size < it.villagerLevel + 1 }.randomOrNull()
+        }.filter { it.quests().size < it.villagerLevel + plugin.gameplayManager.config.quest.npcQuestBase }.randomOrNull()
     }
 
     /**
@@ -185,14 +177,13 @@ class QuestManager : Listener {
 
     fun finishQuest(player: Player, questGiver: LivingEntity, quest: Quest, onFinish: () -> Unit = {}) {
 
-        val playerReputation   = (quest.score * reputationScoreMultiplier).toInt()
-        val playerExperience   = (quest.score * experienceMultiplierPlayer).toInt()
-        val villagerExperience = (quest.score * experienceMultiplierNPC).toInt()
+        val playerReputation   = (quest.score * plugin.gameplayManager.config.quest.reputationMultiplier).toInt()
+        val playerExperience   = (quest.score * plugin.gameplayManager.config.quest.playerExperienceMultiplier).toInt()
+        val villagerExperience = (quest.score * plugin.gameplayManager.config.quest.npcExperienceMultiplier).toInt()
 
         if (questGiver is Villager) questGiver.villagerExperience += villagerExperience
         player.giveExp(playerExperience)
         plugin.gameplayManager.reputationManager.addReputation(questGiver, player, playerReputation)
-        player.sendFormattedMessage("[Debug] | Reputation added from quest. ${quest.score} * $reputationScoreMultiplier = $playerReputation. Right?...")
 
         val finishMessage = plugin.language.getString("quest.finished")!!.replace("{quest}", quest.name)
         player.sendFormattedMessage(finishMessage)
@@ -328,9 +319,8 @@ class QuestManager : Listener {
             return
         }
 
-        val playerQuestLimit = 3 // TODO; Move me to the cfg!
-        if (player.quests().size >= playerQuestLimit) {
-            val questLimitMessage = plugin.language.getString("quest.limit")!!.replace("{playerQuestLimit}", playerQuestLimit.toString())
+        if (player.quests().size >= plugin.gameplayManager.config.quest.playerQuestLimit) {
+            val questLimitMessage = plugin.language.getString("quest.limit")!!.replace("{playerQuestLimit}", plugin.gameplayManager.config.quest.playerQuestLimit.toString())
             player.sendFormattedMessage(questLimitMessage)
             return
         }
@@ -353,19 +343,19 @@ class QuestManager : Listener {
         private val questInfo = questType.questFamily.questDescription.replace("{taskDescription}", questType.taskDescription)
 
         private val questPrompt = "Answer only in JSON format, without unnecessary text, make sure it will be JSON parseable. Generate a quest for NPC using the following JSON scheme: " +
-        "`questNames` — string array, five short but creative quest names, must differ from each other" +
-        "`extraShortTaskDescription` — extremely short description of the task (goal, quest giver name, amount); don't use Markdown here!, " +
-        "`shortRequiredQuestItemDescription` — a short (literally one sentence) description of the item in the context of the quest (from the third party), " +
-        "string array of `reputationBasedQuestDescriptions` and string array of `reputationBasedQuestFinishingDialogues` which will shift from the most negative reputation to the most positive (existing reputation states: exiled, hostile, unfriendly, neutral, friendly, honored, revered, exalted, don't mention the exact status, just play around it, eight values must be in each array). " +
-        "The writing style must be strictly tailored in the following order: global setting, race (race description), character definition, current biome, profession (profession level), gender. Start with a neutral description — it'll be easier for you to navigate that way. Don't shorten the descriptions because it's an array — we don't want scraps of phrases, right? Then, sort the content of the array from the worst to the best reputation. Select the most important words (like names or goals) with bold Markdown. Select interesting parts with italic Markdown. All content must be written in the first person to enhance player immersion and believability. In places where the npc want to address the player, use the %playerName% placeholder. " +
-        "The following is the information about the NPC: name is {npcName}, current biome is {currentBiome}, NPC personality definition is [{npcPersonality}], race is {npcRace} and race description: [{raceDescription}], profession is {npcProfession}, npc profession mastery level is {npcProfessionLevel}, npc gender is {npcGender}. {questInfo}"
+                "`questNames` — string array, five short but creative quest names, must differ from each other" +
+                "`extraShortTaskDescription` — extremely short description of the task (goal, quest giver name, amount); don't use Markdown here!, " +
+                "`shortRequiredQuestItemDescription` — a short (literally one sentence) description of the item in the context of the quest (from the third party), " +
+                "string array of `reputationBasedQuestDescriptions` and string array of `reputationBasedQuestFinishingDialogues` which will shift from the most negative reputation to the most positive (existing reputation states: exiled, hostile, unfriendly, neutral, friendly, honored, revered, exalted, don't mention the exact status, just play around it, eight values must be in each array). " +
+                "The writing style must be strictly tailored in the following order: global setting, race (race description), character definition, current biome, profession (profession level), gender. Start with a neutral description — it'll be easier for you to navigate that way. Don't shorten the descriptions because it's an array — we don't want scraps of phrases, right? Then, sort the content of the array from the worst to the best reputation. Select the most important words (like names or goals) with bold Markdown. Select interesting parts with italic Markdown. All content must be written in the first person to enhance player immersion and believability. In places where the npc want to address the player, use the %playerName% placeholder. " +
+                "The following is the information about the NPC: name is {npcName}, current biome is {currentBiome}, NPC personality definition is [{npcPersonality}], race is {npcRace} and race description: [{raceDescription}], profession is {npcProfession}, npc profession mastery level is {npcProfessionLevel}, npc gender is {npcGender}. {questInfo}"
 
         val questItem = questType.strategy.get(questGiver)
         val currency  = plugin.gameplayManager.itemDictionary.getItem(questGiver.race.normalCurrency.name)
         val amount    = questItem.item.amount
-        val score     = if (questItem.score * amount < currency.score) currency.score else (questItem.score * amount)
+        val score     = if (questItem.score < currency.score) currency.score * 10 else questItem.score
 
-        private val placeholders  = mutableMapOf<String, String>().also {
+        private val placeholders  = mutableMapOf<String, String>().also { it ->
             it["npcPersonality"]  = "${questGiver.getPersonality()}"
             it["npcName"]         = questGiver.customName.toString()
             it["npcGender"]       = questGiver.gender.toString()
@@ -381,7 +371,7 @@ class QuestManager : Listener {
 
             when (questType) {
                 QuestType.BOOZE -> it["potionType"] = (questItem.item.itemMeta as PotionMeta).basePotionType!!.key.key.lowercase().replace("_", " ")
-                QuestType.ENCHANTED_BOOK_ORDER -> it["enchantmentType"] = (questItem.item.itemMeta as EnchantmentStorageMeta).enchants.toList().first().first.key.key.replace("_", " ")
+                QuestType.ENCHANTED_BOOK_ORDER -> it["enchantmentType"] = (questItem.item.itemMeta as EnchantmentStorageMeta).storedEnchants.toList().first().first.key.key.replace("_", " ")
                 QuestType.TREASURE_HUNT -> it["treasureDescription"] = treasureItems.find { it.first == questItem.item.type }?.third ?: "No extra info."
                 else -> { /* :) */ }
             }
@@ -417,7 +407,7 @@ class QuestManager : Listener {
         fun calculateReward(currency: String): ItemStack {
 
             val currency = plugin.gameplayManager.itemDictionary.getItem(currency)
-            var amount = (this.questItem.getItemStack().calculateScore() / currency.score)
+            var amount = score / currency.score
 
             if (amount < 64)
                 return currency.item.apply { this.amount = if (amount <= 0) 1 else amount.toInt() }
