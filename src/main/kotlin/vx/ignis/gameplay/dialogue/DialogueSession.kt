@@ -1,15 +1,12 @@
 @file:Suppress("DEPRECATION")
-
 package vx.ignis.gameplay.dialogue
 
 import com.cryptomorin.xseries.XSound
 import io.papermc.paper.event.player.AsyncChatEvent
 import net.md_5.bungee.api.ChatMessageType
 import net.md_5.bungee.api.chat.TextComponent
-import net.minecraft.world.InteractionHand
 import org.bukkit.craftbukkit.entity.CraftPlayer
 import org.bukkit.craftbukkit.entity.CraftVillager
-import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
@@ -17,6 +14,7 @@ import org.bukkit.event.HandlerList
 import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.event.player.PlayerDropItemEvent
+import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.scheduler.BukkitTask
 import vx.ignis.Ignis.Companion.plugin
@@ -91,7 +89,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
             if (readyToSend) {
                 this.cooldown()
                 this.generateGiftReaction(player, entity, event.itemDrop.itemStack.clone(), dialogueHistory)
-                (entity as CraftVillager).handle.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(event.itemDrop.itemStack))
+                plugin.gameplayManager.humanoidManager.protocolListener.temporaryEquip(entity, EquipmentSlot.HAND, event.itemDrop.itemStack, 60)
                 giftAwaiting = false
                 readyToSend = false
                 lastMessageTime = System.currentTimeMillis()
