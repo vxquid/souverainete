@@ -9,7 +9,7 @@ import org.bukkit.inventory.meta.SuspiciousStewMeta
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.gameplay.humanoid.HumanoidManager.Companion.asHumanoid
+import vx.ignis.nms.VersionBridge.Companion.asHumanoid
 import vx.ignis.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.ignis.persistent.LivingEntityExtend.getVoicePitch
 import vx.ignis.persistent.LivingEntityExtend.getVoiceSound

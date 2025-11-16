@@ -1,10 +1,10 @@
 package vx.ignis.gameplay.profession
 
+import com.cryptomorin.xseries.XAttribute
 import io.papermc.paper.registry.RegistryAccess
 import io.papermc.paper.registry.RegistryKey
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
-import org.bukkit.Registry
 import org.bukkit.attribute.Attribute
 import org.bukkit.attribute.AttributeModifier
 import org.bukkit.entity.Villager
@@ -134,7 +134,7 @@ class UniqueItemManager {
             var rolls = 0
             do {
                 rolls++
-            } while (Random.Default.nextInt(100) <= gameplayConfig.uniqueItem.rollsBaseChanceDivisor / rolls + villager.villagerLevel)
+            } while (Random.nextInt(100) <= gameplayConfig.uniqueItem.rollsBaseChanceDivisor / rolls + villager.villagerLevel)
 
             val rarity = when (rolls) {
                 1 -> UniqueItemRarity.COMMON
@@ -146,17 +146,17 @@ class UniqueItemManager {
                 else -> UniqueItemRarity.DIVINE
             }
 
-            val attributeNames = getAllowedAttributes(itemStack.type)
-            val slot = getEquipmentSlot(itemStack.type)
+            val attributeNames = getAllowedAttributes(itemStack.type.toString())
+            val slot = getEquipmentSlot(itemStack.type.toString())
             val meta = itemStack.itemMeta ?: return itemStack
 
-            val attributes = Registry.ATTRIBUTE.filter { attributeNames.contains(it.key.key.uppercase()) }
-            attributes.forEach { meta.removeAttributeModifier(it) }
+            val attributes = XAttribute.getValues().filter { attributeNames.contains(it.name().uppercase()) }
+            attributes.forEach { it.get()?.let { p0 -> meta.removeAttributeModifier(p0) } }
 
-            var attackSpeed = getBaseAttackSpeed(itemStack.type)
-            var attackDamage = getBaseAttackDamage(itemStack.type)
-            var armor = getBaseArmor(itemStack.type)
-            var armorToughness = getBaseArmorToughness(itemStack.type)
+            var attackSpeed = getBaseAttackSpeed(itemStack.type.toString())
+            var attackDamage = getBaseAttackDamage(itemStack.type.toString())
+            var armor = getBaseArmor(itemStack.type.toString())
+            var armorToughness = getBaseArmorToughness(itemStack.type.toString())
             var blockBreakSpeed = 1.0
             var blockInteractionRange = 0.0
             var entityInteractionRange = 0.0
@@ -166,18 +166,18 @@ class UniqueItemManager {
             val addedAttributes = mutableListOf<String>()
             repeat(rolls) {
                 val attribute = attributes.random()
-                val attrName = attribute.key.key.replace("generic.", "").replace("player.", "").replace("_", " ").lowercase()
+                val attrName = attribute.get()!!.key.key.replace("generic.", "").replace("player.", "").replace("_", " ").lowercase()
                 addedAttributes.add(attrName)
 
                 when (attribute) {
-                    Attribute.ATTACK_SPEED -> attackSpeed += gameplayConfig.uniqueItem.attackSpeedIncrement
-                    Attribute.ATTACK_DAMAGE -> attackDamage += gameplayConfig.uniqueItem.attackDamageIncrement
-                    Attribute.BLOCK_BREAK_SPEED -> blockBreakSpeed += gameplayConfig.uniqueItem.blockBreakSpeedIncrement
-                    Attribute.BLOCK_INTERACTION_RANGE -> blockInteractionRange += gameplayConfig.uniqueItem.blockInteractionRangeIncrement
-                    Attribute.MAX_HEALTH -> maxHealth += gameplayConfig.uniqueItem.maxHealthIncrement
-                    Attribute.ARMOR -> armor += gameplayConfig.uniqueItem.armorIncrement
-                    Attribute.ARMOR_TOUGHNESS -> armorToughness += gameplayConfig.uniqueItem.armorToughnessIncrement
-                    Attribute.SCALE -> {
+                    XAttribute.ATTACK_SPEED -> attackSpeed += gameplayConfig.uniqueItem.attackSpeedIncrement
+                    XAttribute.ATTACK_DAMAGE -> attackDamage += gameplayConfig.uniqueItem.attackDamageIncrement
+                    XAttribute.BLOCK_BREAK_SPEED -> blockBreakSpeed += gameplayConfig.uniqueItem.blockBreakSpeedIncrement
+                    XAttribute.BLOCK_INTERACTION_RANGE -> blockInteractionRange += gameplayConfig.uniqueItem.blockInteractionRangeIncrement
+                    XAttribute.MAX_HEALTH -> maxHealth += gameplayConfig.uniqueItem.maxHealthIncrement
+                    XAttribute.ARMOR -> armor += gameplayConfig.uniqueItem.armorIncrement
+                    XAttribute.ARMOR_TOUGHNESS -> armorToughness += gameplayConfig.uniqueItem.armorToughnessIncrement
+                    XAttribute.SCALE -> {
                         scale += gameplayConfig.uniqueItem.scaleIncrement
                         blockInteractionRange += gameplayConfig.uniqueItem.blockInteractionRangeIncrement
                         entityInteractionRange += gameplayConfig.uniqueItem.entityInteractionRangeIncrement
@@ -186,15 +186,15 @@ class UniqueItemManager {
                 }
             }
 
-            addAttributeModifier(meta, Attribute.ATTACK_SPEED, attackSpeed, slot, if (attackSpeed != getBaseAttackSpeed(itemStack.type)) AttributeModifier.Operation.ADD_NUMBER else null)
-            addAttributeModifier(meta, Attribute.ATTACK_DAMAGE, attackDamage, slot)
-            addAttributeModifier(meta, Attribute.BLOCK_BREAK_SPEED, blockBreakSpeed, slot, if (blockBreakSpeed > 1.0) AttributeModifier.Operation.ADD_NUMBER else null)
-            addAttributeModifier(meta, Attribute.BLOCK_INTERACTION_RANGE, blockInteractionRange, slot, if (blockInteractionRange > 0.0) AttributeModifier.Operation.ADD_NUMBER else null)
-            addAttributeModifier(meta, Attribute.ENTITY_INTERACTION_RANGE, entityInteractionRange, slot, if (entityInteractionRange > 0.0) AttributeModifier.Operation.ADD_NUMBER else null)
-            addAttributeModifier(meta, Attribute.MAX_HEALTH, maxHealth, slot, if (maxHealth > 0.0) AttributeModifier.Operation.ADD_NUMBER else null)
-            addAttributeModifier(meta, Attribute.ARMOR, armor, slot)
-            addAttributeModifier(meta, Attribute.ARMOR_TOUGHNESS, armorToughness, slot, if (armorToughness > 0.0) AttributeModifier.Operation.ADD_NUMBER else null)
-            addAttributeModifier(meta, Attribute.SCALE, scale, slot, if (scale > 0.0) AttributeModifier.Operation.ADD_NUMBER else null)
+            XAttribute.ATTACK_SPEED.get()?.let { addAttributeModifier(meta, it, attackSpeed, slot, if (attackSpeed != getBaseAttackSpeed(itemStack.type.toString())) AttributeModifier.Operation.ADD_NUMBER else null) }
+            XAttribute.ATTACK_DAMAGE.get()?.let { addAttributeModifier(meta, it, attackDamage, slot) }
+            XAttribute.BLOCK_BREAK_SPEED.get()?.let { addAttributeModifier(meta, it, blockBreakSpeed, slot, if (blockBreakSpeed > 1.0) AttributeModifier.Operation.ADD_NUMBER else null) }
+            XAttribute.BLOCK_INTERACTION_RANGE.get()?.let { addAttributeModifier(meta, it, blockInteractionRange, slot, if (blockInteractionRange > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
+            XAttribute.ENTITY_INTERACTION_RANGE.get()?.let { addAttributeModifier(meta, it, entityInteractionRange, slot, if (entityInteractionRange > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
+            XAttribute.MAX_HEALTH.get()?.let { addAttributeModifier(meta, it, maxHealth, slot, if (maxHealth > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
+            XAttribute.ARMOR.get()?.let { addAttributeModifier(meta, it, armor, slot) }
+            XAttribute.ARMOR_TOUGHNESS.get()?.let { addAttributeModifier(meta, it, armorToughness, slot, if (armorToughness > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
+            XAttribute.SCALE.get()?.let { addAttributeModifier(meta, it, scale, slot, if (scale > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
 
             meta.persistentDataContainer.set(attributeKey, PersistentDataType.STRING, addedAttributes.joinToString(", "))
             meta.persistentDataContainer.set(rarityKey, PersistentDataType.STRING, rarity.toString())
@@ -226,7 +226,7 @@ class UniqueItemManager {
             }
         }
 
-        private fun getAllowedAttributes(type: Material): List<String> {
+        private fun getAllowedAttributes(type: String): List<String> {
             return when (type) {
                 in ProfessionManager.SWORDS -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.swords")
                 in ProfessionManager.PICKAXES -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.pickaxes")
@@ -239,7 +239,7 @@ class UniqueItemManager {
             }
         }
 
-        private fun getEquipmentSlot(type: Material): EquipmentSlotGroup {
+        private fun getEquipmentSlot(type: String): EquipmentSlotGroup {
             return when (type) {
                 in ProfessionManager.HELMETS -> EquipmentSlotGroup.HEAD
                 in ProfessionManager.CHESTPLATES -> EquipmentSlotGroup.CHEST
@@ -249,61 +249,61 @@ class UniqueItemManager {
             }
         }
 
-        private fun getBaseAttackSpeed(type: Material): Double {
+        private fun getBaseAttackSpeed(type: String): Double {
             return -4.0 + when (type) {
                 in ProfessionManager.SWORDS -> gameplayConfig.uniqueItem.baseAttackSpeedSwords
                 in ProfessionManager.PICKAXES -> gameplayConfig.uniqueItem.baseAttackSpeedPickaxes
-                Material.IRON_AXE -> gameplayConfig.uniqueItem.baseAttackSpeedIronAxe
-                in listOf(Material.DIAMOND_AXE, Material.NETHERITE_AXE) -> gameplayConfig.uniqueItem.baseAttackSpeedDiamondNetheriteAxe
+                "IRON_AXE" -> gameplayConfig.uniqueItem.baseAttackSpeedIronAxe
+                in listOf("DIAMOND_AXE", "NETHERITE_AXE") -> gameplayConfig.uniqueItem.baseAttackSpeedDiamondNetheriteAxe
                 else -> gameplayConfig.uniqueItem.baseAttackSpeedDefault
             }
         }
 
-        private fun getBaseAttackDamage(type: Material): Double {
+        private fun getBaseAttackDamage(type: String): Double {
             return when (type) {
-                Material.COPPER_SWORD -> gameplayConfig.uniqueItem.baseAttackDamageCopperSword
-                Material.IRON_SWORD -> gameplayConfig.uniqueItem.baseAttackDamageIronSword
-                Material.DIAMOND_SWORD -> gameplayConfig.uniqueItem.baseAttackDamageDiamondSword
-                Material.NETHERITE_SWORD -> gameplayConfig.uniqueItem.baseAttackDamageNetheriteSword
-                Material.COPPER_PICKAXE -> gameplayConfig.uniqueItem.baseAttackDamageCopperPickaxe
-                Material.IRON_PICKAXE -> gameplayConfig.uniqueItem.baseAttackDamageIronPickaxe
-                Material.DIAMOND_PICKAXE -> gameplayConfig.uniqueItem.baseAttackDamageDiamondPickaxe
-                Material.NETHERITE_PICKAXE -> gameplayConfig.uniqueItem.baseAttackDamageNetheritePickaxe
-                Material.COPPER_AXE -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
-                Material.IRON_AXE -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
-                Material.DIAMOND_AXE -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
-                Material.NETHERITE_AXE -> gameplayConfig.uniqueItem.baseAttackDamageNetheriteAxe
+                "COPPER_SWORD" -> gameplayConfig.uniqueItem.baseAttackDamageCopperSword
+                "IRON_SWORD" -> gameplayConfig.uniqueItem.baseAttackDamageIronSword
+                "DIAMOND_SWORD" -> gameplayConfig.uniqueItem.baseAttackDamageDiamondSword
+                "NETHERITE_SWORD" -> gameplayConfig.uniqueItem.baseAttackDamageNetheriteSword
+                "COPPER_PICKAXE" -> gameplayConfig.uniqueItem.baseAttackDamageCopperPickaxe
+                "IRON_PICKAXE" -> gameplayConfig.uniqueItem.baseAttackDamageIronPickaxe
+                "DIAMOND_PICKAXE" -> gameplayConfig.uniqueItem.baseAttackDamageDiamondPickaxe
+                "NETHERITE_PICKAXE" -> gameplayConfig.uniqueItem.baseAttackDamageNetheritePickaxe
+                "COPPER_AXE" -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
+                "IRON_AXE" -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
+                "DIAMOND_AXE" -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
+                "NETHERITE_AXE" -> gameplayConfig.uniqueItem.baseAttackDamageNetheriteAxe
                 else -> 0.0
             }
         }
 
-        private fun getBaseArmor(type: Material): Double {
+        private fun getBaseArmor(type: String): Double {
             return when (type) {
-                Material.LEATHER_HELMET -> gameplayConfig.uniqueItem.baseArmorLeatherHelmet
-                Material.LEATHER_CHESTPLATE -> gameplayConfig.uniqueItem.baseArmorLeatherChestplate
-                Material.LEATHER_LEGGINGS -> gameplayConfig.uniqueItem.baseArmorLeatherLeggings
-                Material.LEATHER_BOOTS -> gameplayConfig.uniqueItem.baseArmorLeatherBoots
-                Material.COPPER_HELMET -> gameplayConfig.uniqueItem.baseArmorCopperHelmet
-                Material.COPPER_CHESTPLATE -> gameplayConfig.uniqueItem.baseArmorCopperChestplate
-                Material.COPPER_LEGGINGS -> gameplayConfig.uniqueItem.baseArmorCopperLeggings
-                Material.COPPER_BOOTS -> gameplayConfig.uniqueItem.baseArmorCopperBoots
-                Material.IRON_HELMET -> gameplayConfig.uniqueItem.baseArmorIronHelmet
-                Material.IRON_CHESTPLATE -> gameplayConfig.uniqueItem.baseArmorIronChestplate
-                Material.IRON_LEGGINGS -> gameplayConfig.uniqueItem.baseArmorIronLeggings
-                Material.IRON_BOOTS -> gameplayConfig.uniqueItem.baseArmorIronBoots
-                Material.DIAMOND_HELMET -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteHelmet
-                Material.DIAMOND_CHESTPLATE -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteChestplate
-                Material.DIAMOND_LEGGINGS -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteLeggings
-                Material.DIAMOND_BOOTS -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteBoots
-                Material.NETHERITE_HELMET -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteHelmet
-                Material.NETHERITE_CHESTPLATE -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteChestplate
-                Material.NETHERITE_LEGGINGS -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteLeggings
-                Material.NETHERITE_BOOTS -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteBoots
+                "LEATHER_HELMET" -> gameplayConfig.uniqueItem.baseArmorLeatherHelmet
+                "LEATHER_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorLeatherChestplate
+                "LEATHER_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorLeatherLeggings
+                "LEATHER_BOOTS" -> gameplayConfig.uniqueItem.baseArmorLeatherBoots
+                "COPPER_HELMET" -> gameplayConfig.uniqueItem.baseArmorCopperHelmet
+                "COPPER_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorCopperChestplate
+                "COPPER_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorCopperLeggings
+                "COPPER_BOOTS" -> gameplayConfig.uniqueItem.baseArmorCopperBoots
+                "IRON_HELMET" -> gameplayConfig.uniqueItem.baseArmorIronHelmet
+                "IRON_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorIronChestplate
+                "IRON_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorIronLeggings
+                "IRON_BOOTS" -> gameplayConfig.uniqueItem.baseArmorIronBoots
+                "DIAMOND_HELMET" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteHelmet
+                "DIAMOND_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteChestplate
+                "DIAMOND_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteLeggings
+                "DIAMOND_BOOTS" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteBoots
+                "NETHERITE_HELMET" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteHelmet
+                "NETHERITE_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteChestplate
+                "NETHERITE_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteLeggings
+                "NETHERITE_BOOTS" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteBoots
                 else -> 0.0
             }
         }
 
-        private fun getBaseArmorToughness(type: Material): Double {
+        private fun getBaseArmorToughness(type: String): Double {
             return when (type) {
                 in ProfessionManager.DIAMOND_ARMOR -> gameplayConfig.uniqueItem.baseArmorToughnessDiamond
                 in ProfessionManager.NETHERITE_ARMOR -> gameplayConfig.uniqueItem.baseArmorToughnessNetherite

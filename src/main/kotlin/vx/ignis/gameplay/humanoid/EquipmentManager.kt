@@ -1,22 +1,21 @@
 package vx.ignis.gameplay.humanoid
 
-import org.bukkit.entity.Villager
-import org.bukkit.inventory.ItemStack
 import org.bukkit.Material.*
 import org.bukkit.Sound
 import org.bukkit.enchantments.Enchantment
+import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityResurrectEvent
 import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.event.world.WorldLoadEvent
 import org.bukkit.inventory.EquipmentSlot
+import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.Damageable
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.gameplay.humanoid.HumanoidManager.Companion.asHumanoid
+import vx.ignis.nms.VersionBridge.Companion.asHumanoid
 import vx.ignis.persistent.LivingEntityExtend.subInventory
 import vx.ignis.persistent.LivingEntityExtend.takeItemFromQuillInventory
-import kotlin.collections.iterator
 import kotlin.random.Random
 
 class EquipmentManager : Listener {

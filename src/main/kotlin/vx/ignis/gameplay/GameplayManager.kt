@@ -21,6 +21,7 @@ import vx.ignis.gameplay.reputation.ReputationManager
 import vx.ignis.gameplay.settlement.SettlementManager
 import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.ignis.gameplay.trade.TradeManager
+import vx.ignis.nms.VersionBridge
 
 class GameplayManager(val firstWorld: World) : Listener {
 
@@ -47,6 +48,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     val professionManager  = ProfessionManager()
     val settlementManager  = SettlementManager()
     val hungerManager      = HungerManager.also { it.startTicker() }
+    val versionBridge      = VersionBridge(plugin)
 
     @EventHandler
     private fun onWorldLoad(event: WorldLoadEvent) {

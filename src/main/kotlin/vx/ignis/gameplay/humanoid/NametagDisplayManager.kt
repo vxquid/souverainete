@@ -1,5 +1,6 @@
 package vx.ignis.gameplay.humanoid
 
+import com.cryptomorin.xseries.XAttribute
 import org.bukkit.Bukkit
 import org.bukkit.Color
 import org.bukkit.entity.LivingEntity
@@ -17,7 +18,7 @@ import org.joml.Vector3f
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.persistent.LivingEntityExtend.hunger
 
-class HumanoidInfoDisplayManager : Listener {
+class NametagDisplayManager : Listener {
 
     private val displays = mutableMapOf<Pair<LivingEntity, Player>, TextDisplay>()
 
@@ -67,7 +68,7 @@ class HumanoidInfoDisplayManager : Listener {
         val professionKey = npc.profession.key.key.lowercase()
         val profession = plugin.language.getString("villager-professions.$professionKey")!!.replace("_", " ").capitalizeWords()
         val health = npc.health
-        val maxHealth = npc.getAttribute(org.bukkit.attribute.Attribute.MAX_HEALTH)?.value ?: 20.0
+        val maxHealth = npc.getAttribute(XAttribute.MAX_HEALTH.get()!!)?.value ?: 20.0
 
         val reputationManager = plugin.gameplayManager.reputationManager
         val repValue = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0

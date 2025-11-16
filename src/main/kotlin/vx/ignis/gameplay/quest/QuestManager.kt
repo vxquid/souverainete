@@ -21,7 +21,6 @@ import vx.ignis.gameplay.dialogue.DialogueManager.Companion.talk
 import vx.ignis.gameplay.event.MerchantTradeEvent
 import vx.ignis.gameplay.event.PlayerAcceptQuestEvent
 import vx.ignis.gameplay.event.QuestInvalidationEvent
-import vx.ignis.gameplay.humanoid.HumanoidManager.Companion.asHumanoid
 import vx.ignis.gameplay.humanoid.HungerManager.eat
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
@@ -37,6 +36,7 @@ import vx.ignis.gameplay.quest.pragma.strategy.*
 import vx.ignis.gameplay.quest.pragma.strategy.TreasureHuntQuestItemStrategy.Companion.treasureItems
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
+import vx.ignis.nms.VersionBridge.Companion.asHumanoid
 import vx.ignis.persistent.LivingEntityExtend.hasEdibleItem
 import vx.ignis.persistent.LivingEntityExtend.hunger
 import vx.ignis.persistent.LivingEntityExtend.questDataKey

@@ -3,13 +3,13 @@ import xyz.jpenilla.resourcefactory.bukkit.BukkitPluginYaml
 plugins {
   kotlin("jvm") version "2.0.0"
   id("io.papermc.paperweight.userdev") version "2.0.0-beta.17"
-  id("xyz.jpenilla.run-paper") version "2.3.1" // Adds runServer and runMojangMappedServer tasks for testing
-  id("xyz.jpenilla.resource-factory-bukkit-convention") version "1.3.0" // Generates plugin.yml based on the Gradle config
+  id("xyz.jpenilla.run-paper") version "2.3.1"
+  id("xyz.jpenilla.resource-factory-bukkit-convention") version "1.3.0"
   id("com.gradleup.shadow") version "8.3.3"
 }
 
 group = "ignis"
-version = "0.3.3.2"
+version = "0.3.3.3"
 description = "Let AI make your server alive with AI-generated NPCs, quests, towns, items and a lot more."
 
 bukkitPluginYaml {
@@ -19,7 +19,7 @@ bukkitPluginYaml {
   depend = listOf("packetevents")
   softDepend = listOf("MythicMobs")
   authors.add("vxquid")
-  apiVersion = "1.21.10"
+  apiVersion = "1.21"
 }
 
 repositories {
@@ -28,17 +28,18 @@ repositories {
   maven("https://repo.papermc.io/repository/maven-public/")
   maven("https://repo.codemc.io/repository/maven-releases/")
   maven("https://repo.codemc.io/repository/maven-snapshots/")
-  maven("https://mvn.lumine.io/repository/maven-public/") // MythicMobs repository
+  maven("https://mvn.lumine.io/repository/maven-public/")
 }
 
-
 dependencies {
-  paperweight.paperDevBundle("1.21.10-R0.1-SNAPSHOT")
+  paperweight.paperDevBundle("1.21.1-R0.1-SNAPSHOT")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")
   implementation("com.github.cryptomorin:XSeries:13.3.3")
   implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT") // Annotations-based commands.
+  implementation(project(":nms-support"))
+  implementation(project(":nms-support:base"))
   compileOnly("com.github.retrooper:packetevents-spigot:2.10.0")
   compileOnly("io.lumine:Mythic-Dist:5.10.0")
 }

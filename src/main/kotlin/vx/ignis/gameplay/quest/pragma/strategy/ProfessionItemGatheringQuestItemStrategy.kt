@@ -208,7 +208,7 @@ class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
             } else {
                 Material.matchMaterial(materialName.uppercase())?.let { it to range }
                     ?: run {
-                        logger.warning("Invalid material '$materialName' in config")
+                        // logger.warning("Invalid material '$materialName' in config")
                         null
                     }
             }

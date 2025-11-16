@@ -1,4 +1,4 @@
-package vx.ignis.util;
+package vx.ignis.nms;
 
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -93,7 +93,7 @@ public final class Reflection {
         }
     }
 
-    private static void setFieldUsingUnsafe(Object base, Class<?> type, long offset, Object newValue) {
+    static void setFieldUsingUnsafe(Object base, Class<?> type, long offset, Object newValue) {
         if (type == Integer.TYPE) {
             UNSAFE.putInt(base, offset, ((Integer) newValue));
         } else if (type == Short.TYPE) {

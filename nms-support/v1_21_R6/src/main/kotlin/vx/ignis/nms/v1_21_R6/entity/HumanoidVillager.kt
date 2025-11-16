@@ -1,4 +1,4 @@
-package vx.ignis.gameplay.humanoid.entity
+package vx.ignis.nms.v1_21_R6.entity
 
 import com.google.common.collect.ImmutableList
 import com.google.common.collect.ImmutableSet
@@ -33,9 +33,10 @@ import org.bukkit.World
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
-import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.gameplay.humanoid.entity.behavior.LookAndFollowDuringConversation
-import vx.ignis.util.Reflection
+import vx.ignis.nms.EntityProvider.Humanoid
+import vx.ignis.nms.Reflection
+import vx.ignis.nms.v1_21_R6.VersionSpecificHumanoidEntityProvider.Companion.plugin
+import vx.ignis.nms.v1_21_R6.entity.ai.LookAndFollowDuringConversation
 import kotlin.reflect.KClass
 
 @Suppress("UNCHECKED_CAST")
@@ -202,7 +203,7 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
             org.bukkit.inventory.EquipmentSlot.LEGS -> EquipmentSlot.LEGS
             org.bukkit.inventory.EquipmentSlot.FEET -> EquipmentSlot.FEET
             org.bukkit.inventory.EquipmentSlot.BODY -> EquipmentSlot.BODY
-            org.bukkit.inventory.EquipmentSlot.SADDLE -> EquipmentSlot.SADDLE
+            org.bukkit.inventory.EquipmentSlot.SADDLE -> EquipmentSlot.BODY
         }
 
         val nmsItem = CraftItemStack.asNMSCopy(item)

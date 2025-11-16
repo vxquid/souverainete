@@ -22,6 +22,7 @@ import vx.ignis.config.lib.TranslationManager
 import vx.ignis.gameplay.GameplayManager
 import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
+import vx.ignis.nms.VersionBridge
 import vx.ignis.serialization.ItemStackSerializer
 import vx.ignis.serialization.LocationSerializer
 import vx.ignis.serialization.UUIDSerializer
@@ -76,6 +77,8 @@ class Ignis : JavaPlugin(), Listener {
             val languageFile = File(dataFolder, "language.yml")
             language = translationManager.getTranslated(languageFile)
         })
+
+        val bridge = VersionBridge(this)
 
         // Metrics!
         Metrics(this, 27976)
@@ -143,6 +146,8 @@ class Ignis : JavaPlugin(), Listener {
     }
 
     companion object {
+
+        const val premium: Boolean = true
         lateinit var plugin: Ignis
         lateinit var gson: Gson
 
