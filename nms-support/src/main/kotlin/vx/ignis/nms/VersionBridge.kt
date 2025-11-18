@@ -12,6 +12,10 @@ class VersionBridge(val plugin: JavaPlugin) {
 
         entityProvider = when {
 
+            plugin.server.version.contains("1.21.10") -> {
+                vx.ignis.nms.v1_21_R6.VersionSpecificHumanoidEntityProvider(plugin)
+            }
+
             plugin.server.version.contains("1.21.1") -> {
                 vx.ignis.nms.v1_21_R1.VersionSpecificHumanoidEntityProvider(plugin)
             }
@@ -20,8 +24,8 @@ class VersionBridge(val plugin: JavaPlugin) {
                 vx.ignis.nms.v1_21_R3.VersionSpecificHumanoidEntityProvider(plugin)
             }
 
-            plugin.server.version.contains("1.21.10") -> {
-                vx.ignis.nms.v1_21_R6.VersionSpecificHumanoidEntityProvider(plugin)
+            plugin.server.version.contains("1.21.8") -> {
+                vx.ignis.nms.v1_21_R5.VersionSpecificHumanoidEntityProvider(plugin)
             }
 
             else -> {

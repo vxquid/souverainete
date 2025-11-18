@@ -73,10 +73,10 @@ class Ignis : JavaPlugin(), Listener {
         this.server.pluginManager.registerEvents(this, this)
 
         // Translate language.yml using cache. Must be async.
-        this.server.scheduler.runTaskAsynchronously(this, {_ ->
+        this.server.scheduler.runTaskAsynchronously(this) { _ ->
             val languageFile = File(dataFolder, "language.yml")
             language = translationManager.getTranslated(languageFile)
-        })
+        }
 
         val bridge = VersionBridge(this)
 

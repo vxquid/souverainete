@@ -39,7 +39,6 @@ import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
 import vx.ignis.gameplay.personality.PersonalityManager.Gender.FEMALE
 import vx.ignis.gameplay.personality.PersonalityManager.Gender.MALE
 import java.util.*
-import kotlin.collections.get
 
 class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, HumanoidDataWrapper> = hashMapOf()) : SimplePacketListenerAbstract(), Listener {
 
@@ -132,7 +131,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
 
         // We should send equipment data as well...
         for (it in EquipmentSlot.entries) {
-            val item = humanoid.equipment.getItem(it)
+            val item = humanoid.equipment?.getItem(it)
             val slot = when (it) {
                 EquipmentSlot.HAND -> com.github.retrooper.packetevents.protocol.player.EquipmentSlot.MAIN_HAND
                 EquipmentSlot.OFF_HAND -> com.github.retrooper.packetevents.protocol.player.EquipmentSlot.OFF_HAND

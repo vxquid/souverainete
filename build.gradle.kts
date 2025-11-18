@@ -5,11 +5,11 @@ plugins {
   id("io.papermc.paperweight.userdev") version "2.0.0-beta.17"
   id("xyz.jpenilla.run-paper") version "2.3.1"
   id("xyz.jpenilla.resource-factory-bukkit-convention") version "1.3.0"
-  id("com.gradleup.shadow") version "8.3.3"
+  id("com.gradleup.shadow") version "9.2.2"
 }
 
 group = "ignis"
-version = "0.3.3.3"
+version = "0.3.3.4"
 description = "Let AI make your server alive with AI-generated NPCs, quests, towns, items and a lot more."
 
 bukkitPluginYaml {
@@ -32,7 +32,7 @@ repositories {
 }
 
 dependencies {
-  paperweight.paperDevBundle("1.21.1-R0.1-SNAPSHOT")
+  paperweight.paperDevBundle("1.21.10-R0.1-SNAPSHOT")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")

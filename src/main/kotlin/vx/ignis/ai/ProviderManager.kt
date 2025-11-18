@@ -16,7 +16,7 @@ class ProviderManager {
         if (apiKeys[0] == "YOUR_API_KEY") {
             plugin.logger.severe("You must configure AI provider before using the plugin. Follow installation instructions.")
             plugin.server.pluginManager.disablePlugin(plugin)
-            throw IllegalStateException("ACAI AI provider is not configured.")
+            throw IllegalStateException("Ignis provider is not configured.")
         }
 
         plugin.logger.info("Selected AI provider is ${config.providerType}.")

@@ -15,6 +15,7 @@ dependencies {
     implementation(project(":nms-support:base"))
     implementation(project(":nms-support:v1_21_R1"))
     implementation(project(":nms-support:v1_21_R3"))
+    implementation(project(":nms-support:v1_21_R5"))
     implementation(project(":nms-support:v1_21_R6"))
 }
 
