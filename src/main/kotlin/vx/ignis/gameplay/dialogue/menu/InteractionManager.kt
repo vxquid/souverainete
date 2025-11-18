@@ -16,6 +16,8 @@ import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.event.player.*
 import org.bukkit.inventory.EquipmentSlot
 import vx.ignis.Ignis.Companion.plugin
+import vx.ignis.Ignis.Companion.premium
+import vx.ignis.Ignis.Companion.sendFormattedMessage
 import vx.ignis.gameplay.dialogue.DialogueManager
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundAlpha
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundBlue
@@ -227,7 +229,9 @@ class InteractionManager: Listener {
         }
 
         builder.button(plugin.language.getString("interaction-menu.talk-button")!!) {
-            if (player.getActiveDialogueSession() == null) DialogueSession(player, villager)
+            if (premium) {
+                if (player.getActiveDialogueSession() == null) DialogueSession(player, villager)
+            } else player.sendFormattedMessage("This feature is only available in the premium version of the plugin. Please support the development by purchasing the plugin on Spigot.")
         }
 
         builder.button(plugin.language.getString("interaction-menu.close-button")!!) { menu ->
