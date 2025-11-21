@@ -9,6 +9,7 @@ import org.bukkit.entity.Villager
 import org.bukkit.entity.Villager.Profession
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.BundleMeta
 import org.bukkit.inventory.meta.EnchantmentStorageMeta
@@ -304,6 +305,13 @@ class QuestManager : Listener {
                 }
 
             }
+        }
+    }
+
+    @EventHandler
+    private fun onVillagerDeath(event: EntityDeathEvent) {
+        (event.entity as? Villager)?.quests()?.forEach { quest ->
+            this@QuestManager.invalidateQuest(quest, QuestInvalidationEvent.Reason.NPC_DEATH)
         }
     }
 

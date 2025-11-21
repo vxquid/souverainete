@@ -147,7 +147,7 @@ class Ignis : JavaPlugin(), Listener {
 
     companion object {
 
-        const val premium: Boolean = true
+        val premium: Boolean = true
         lateinit var plugin: Ignis
         lateinit var gson: Gson
 
