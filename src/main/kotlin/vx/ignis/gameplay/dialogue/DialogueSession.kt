@@ -2,7 +2,12 @@
 package vx.ignis.gameplay.dialogue
 
 import com.cryptomorin.xseries.XSound
-import io.papermc.paper.event.player.AsyncChatEvent
+import com.github.retrooper.packetevents.PacketEvents
+import com.github.retrooper.packetevents.event.PacketListenerAbstract
+import com.github.retrooper.packetevents.event.PacketListenerPriority
+import com.github.retrooper.packetevents.event.PacketReceiveEvent
+import com.github.retrooper.packetevents.protocol.packettype.PacketType
+import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientChatMessage
 import net.md_5.bungee.api.ChatMessageType
 import net.md_5.bungee.api.chat.TextComponent
 import org.bukkit.craftbukkit.entity.CraftPlayer
@@ -30,14 +35,15 @@ import vx.ignis.persistent.LivingEntityExtend.getVoiceSound
 import vx.ignis.persistent.VillagerExtend.professionLevelName
 import vx.ignis.util.Daytime
 
-class DialogueSession(val player: Player, val entity: Villager) : Listener {
+class DialogueSession(val player: Player, val entity: Villager) : Listener, PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
 
-    var readyToSend = true
+    var readyToSend = true 
     var cancelled = false
         set(value) {
             if (value) {
                 player.sendFormattedMessage(plugin.language.getString("info-messages.npc-conversation.ended")!!.replace("{npcName}", entity.customName ?: "NPC"))
                 HandlerList.unregisterAll(this)
+                PacketEvents.getAPI().eventManager.unregisterListener(this)
                 activeDialogueSessions.remove(this)
                 (entity as CraftVillager).handle.tradingPlayer = null
             }
@@ -55,6 +61,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
     init {
         player.sendFormattedMessage(plugin.language.getString("info-messages.npc-conversation.started")!!.replace("{npcName}", entity.customName ?: "NPC"))
         plugin.server.pluginManager.registerEvents(this, plugin)
+        PacketEvents.getAPI().eventManager.registerListener(this)
         activeDialogueSessions.add(this)
         plugin.server.scheduler.runTaskTimer(plugin, { task ->
             this.keepAlive(task)
@@ -99,20 +106,24 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener {
         }
     }
 
-    @EventHandler
-    private fun onPlayerChat(event: AsyncChatEvent) {
-        val message = (event.message() as net.kyori.adventure.text.TextComponent).content()
-        if (event.player == player && !cancelled) {
-            event.isCancelled = true
-            if (readyToSend) {
-                plugin.server.scheduler.runTask(plugin) { _ ->
-                    this.handleMessage(message)
-                }
-                dialogueHistory.add("${player.name}: \"${message}\" ->")
-                lastMessageTime = System.currentTimeMillis()
-                player.sendFormattedMessage(playerToNPCMessage.replace("{playerName}", player.name).replace("{message}", message).replace("&", "§"))
-            } else player.sendFormattedMessage(plugin.language.getString("info-messages.npc-conversation.cooldown")!!)
-        }
+    override fun onPacketReceive(event: PacketReceiveEvent) {
+        if (event.user.uuid != player.uniqueId) return
+        if (event.packetType != PacketType.Play.Client.CHAT_MESSAGE) return
+        if (cancelled) return
+
+        val wrapper = WrapperPlayClientChatMessage(event)
+        val message = wrapper.message
+
+        event.isCancelled = true
+
+        if (readyToSend) {
+            plugin.server.scheduler.runTask(plugin) { _ ->
+                this.handleMessage(message)
+            }
+            dialogueHistory.add("${player.name}: \"${message}\" ->")
+            lastMessageTime = System.currentTimeMillis()
+            player.sendFormattedMessage(playerToNPCMessage.replace("{playerName}", player.name).replace("{message}", message).replace("&", "§"))
+        } else player.sendFormattedMessage(plugin.language.getString("info-messages.npc-conversation.cooldown")!!)
     }
 
     data class NPCChatResponseData(val npcResponse: List<String>, val memoryNode: String, val impression: String, val updatedOpinionOnPlayer: String, val directive: String)

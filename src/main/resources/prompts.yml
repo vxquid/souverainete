@@ -11,13 +11,17 @@ npc-chat: "Your task is to respond to a message from player {playerName} as if y
 npc-gift-reaction: "Your task is to react to the gift from player {playerName} as if you are an NPC inside Minecraft, and {playerName} just gave you {itemType} of amount {itemAmount}. This happens during dialogue sessions between NPC and player, so take into account dialogue history. Use {language} language. Use the following JSON scheme with the specified keys: npcResponse — array of strings with a typical size of 1 to 3 elements. (larger arrays are acceptable when necessary) (multiple messages must be connected logically and be longer than just a couple of words), memoryNode — describe the emotion from the player's gift with a phrase (in which you must use the player's name) that will be placed in short-term memory, and put it in the string, impression — choose one of these enum values (DISASTROUS, TERRIBLE, BAD, POOR, MEDIOCRE, NEUTRAL, GOOD, GREAT, EXCELLENT, AMAZING, PERFECT) for a short description of the emotion, and place it in the string, it'll affect reputation, updatedOpinionOnPlayer — keep the NPC's personal opinion towards the player updated: the current opinion on playeer {playerName} is {opinionOnPlayer}. Opinions about a player should not be more than three sentences. Update it depending on the current dialogue (or leave it the same, if the dialogue doesn't affect anything), keepTheGift — boolean, true if keep, false means throw back, probably out of disgust, or out of necessity. It is logical to assume that the reaction to gifts will always be positive, but some things may cause outright horror in NPCs (for example, a skull) - it all depends on the personality and race (for example, orcs will be only happy with a skull). Your task is to guess how the described character would react to the item given to him (for the sake of logic, start with a logical description of the item in the context of Minecraft: try to analyze its rarity, practical value, beauty, cost, and other things). Keep in mind that NPC richness is {wealth}, and that should matter too. The rich tend to be harder to impress and surprise, while the poor will be happy with even a piece of bread. Logically analyze the context, especially short memory. To determine an NPC's opinion of a player, consider context in the following sequence: NPC's race lore > NPC's opinion of that player > the personality of the NPC > NPC faction's reputation with the player. You must consider every detail of the NPC persona (especially character): name - {npcName}, gender - {npcGender}, race - {npcRace}, race lore - {raceLore} character - {npcPersonality}, profession - {npcProfession}, profession level - {npcProfessionLevel}, settlement - {settlementName}. Furthermore, consider the player's reputation with NPC faction - {playerReputation}. The NPC's environment must also be taken into account: current biome - {currentBiome}, current time of day - {currentTime}, current weaher is {currentWeather}, active effects: {activeEffects}. NPC's short-term memory (recent events): {shortMemory}. Take into account a whole dialogue history: {dialogueHistory}."
 
 # Food quest. When villagers are hungry and have no food, they will ask the player to bring them some snacks.
-food-quest:
+food-search-quest:
+  allowed: true
+  quest-requirements: "NPC, weakened by hunger, approaches the player with a request to bring him food. NPC explains that because of hunger, they cannot perform their duties. After completing the task, the NPC thanks the player for their help."
 
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Material.html
   allowed-types: [BREAD~8-16, APPLE~12-24, COOKED_COD~24-32, COOKED_SALMON~24-32, BAKED_POTATO~8-24]
 
 # Booze quest. Villagers have to relax somehow too, right?..
 booze-quest:
+  allowed: true
+  quest-requirements: "NPC asks the player for a potion (which NPC treats like a drink). Take a note that the rewardText in this quest is shown to the player ONLY AFTER the animation of the NPC drinking the potion, implying the potion effect is already working on the NPC; NPC must describe the effect of the potion, which is {potionType}, telling how it feels and, depending on their condition & personality, thank the player or criticize (or even insult) they!"
 
   # https://hub.spigotmc.org/javadocs/spigot/org/bukkit/potion/PotionType.html
   allowed-potion-types: [POISON, LONG_POISON, STRONG_POISON, FIRE_RESISTANCE, HARMING, HEALING, INVISIBILITY, LEAPING, LONG_FIRE_RESISTANCE, LONG_NIGHT_VISION, LONG_SLOWNESS, LONG_REGENERATION, LONG_SWIFTNESS, LONG_STRENGTH, LONG_INVISIBILITY, LONG_WEAKNESS, NIGHT_VISION, REGENERATION, LONG_REGENERATION, STRONG_REGENERATION]
@@ -25,15 +29,15 @@ booze-quest:
   # Too little amount will not attract players, too much will devalue other quests.
   reward-points: 3000
 
-  quest-requirements: "In this quest, the villager must ask the player for a potion (which the villager treats like a drink). The rewardText in this quest is shown to the player only after the animation of the villager drinking the potion. The villager must describe the effect of the potion, which is {potionType}, telling how it feels and, depending on them condition, thank the player or criticize (or even insult) him!"
-
 # Unique armorer quest. Armorers can use smithing templates without destroying them.
-smithing-template-quest:
-
-  quest-requirements: "This is a special quest of the armorer, related to collecting smithing trims for armor, which are used for armor decoration purposes. The villager should hint that in the future, the player will be able to ask them if the player would like to use smithing trims on their armor."
+smithing-template-order-quest:
+  allowed: true
+  quest-requirements: "A special quest of the armorer, related to collecting smithing trims for armor, which are used for armor decoration purposes. NPC should hint that in the future, the player will be able to ask them if the player would like to use smithing trims on their armor."
 
 # Unique librarian quest. In the future, players will be able to enchant their items from librarians based on their enchantment collection.
-enchanted-book-quest:
+enchanted-book-order-quest:
+  allowed: true
+  quest-requirements: "This is a special quest of the librarian. NPC must somehow let the player know that they are researching item enchantment and are now looking for a {enchantmentType} enchantment book. After completing the quest, the NPC should hint that the player can contact him in the future if they want to enchant their tools or armor."
 
   # Even though some enchantments are rarer (or more valuable) than others, the librarian is equally interested in them, so the price is the same for each enchantment.
   # Also, the enchantment level is always maxed out, so the price should be fair.
@@ -42,10 +46,10 @@ enchanted-book-quest:
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/enchantments/Enchantment.html
   allowed-enchantments: [AQUA_AFFINITY, BANE_OF_ARTHROPODS, BINDING_CURSE, BLAST_PROTECTION, BREACH, CHANNELING, DENSITY, DEPTH_STRIDER, EFFICIENCY, FEATHER_FALLING, FIRE_ASPECT, FIRE_PROTECTION, FLAME, FORTUNE, FROST_WALKER, IMPALING, INFINITY, KNOCKBACK, LOOTING, LOYALTY, LUCK_OF_THE_SEA, LURE, MENDING, MULTISHOT, PIERCING, POWER, PROJECTILE_PROTECTION, PROTECTION, PUNCH, QUICK_CHARGE, RESPIRATION, RIPTIDE, SHARPNESS, SILK_TOUCH, SMITE, SOUL_SPEED, SWEEPING_EDGE, SWIFT_SNEAK, THORNS, UNBREAKING, VANISHING_CURSE, WIND_BURST]
 
-  quest-requirements: "This is a special quest of the librarian. The villager must somehow let the player know that they are researching item enchantment and are now looking for a {enchantmentType} enchantment book. After completing the quest, the villager should hint that the player can contact him in the future if they want to enchant their tools or armor."
-
 # Unique cleric quest involving the search for mushrooms. Why does a cleric need mushrooms? Who knows.
 fungus-search-quest:
+  allowed: true
+  quest-requirements: "This is a special cleric quest involving the gathering of mushrooms for the purpose of science (or not so much). The reward text in this quest must be a reaction of the villager on the fungus psychedelic effects. It should be comical. Since mushrooms often have “interesting” effects, the final dialog should be emotional (or even slightly delusional, depending on the personality and level of the villager profession, a mushroom stew will have a much stronger effect on a novice potionist than on a master of his craft)."
 
   # If we make the payment too small, players won't want to do the quest.
   reward-points: 2000
@@ -53,10 +57,10 @@ fungus-search-quest:
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Material.html
   allowed-types: [CRIMSON_FUNGUS, WARPED_FUNGUS, BROWN_MUSHROOM, RED_MUSHROOM]
 
-  quest-requirements: "This is a special cleric quest involving the gathering of mushrooms for the purpose of science (or not so much). The reward text in this quest must be a reaction of the villager on the fungus psychedelic effects. It should be comical. Since mushrooms often have “interesting” effects, the final dialog should be emotional (or even slightly delusional, depending on the personality and level of the villager profession, a mushroom stew will have a much stronger effect on a novice potionist than on a master of his craft)."
-
 # Unique cartographer and librarian quest, related to finding rare items that require adventure.
 treasure-hunt-quest:
+  allowed: true
+  quest-requirements: "The treasure hunting is about traveling. Every self-respecting researcher should have a collection of rare items, which the player will have to participate in. In addition, NPC should hint to the player where to find the desired item based on the extra description: {treasureDescription}."
 
   # Rare items. Some quite not hard to get, but still requires to travel somewhere.
   # It makes sense that the cartographer explains the method of obtaining the item, right? Otherwise AI will generate nonsense.
@@ -90,4 +94,17 @@ treasure-hunt-quest:
     - "BREEZE_ROD~8-16~Somewhere underground are rare treasure chambers called «Trial Chambers». They are guarded by entities that can control the wind!"
     - "RESIN_CLUMP~8-24~An orange elastic substance that can be found in the dangerous pale garden biome."
 
-  quest-requirements: "The treasure hunting is about traveling. Every self-respecting researcher should have a collection of rare items, which the player will have to participate in. In addition, the villager should hint to the player where to find the desired item based on the extra description: {treasureDescription}."
+# Quest family prompts (general templates for quest generation)
+quest-family:
+  gathering:
+    allowed: true
+    quest-description: "To complete the quest, the player will need to obtain an item `{questItem}` in the amount of {questItemAmount} and bring it to the NPC. The NPC promises a reward ({rewardItem}) for the assistance, without specifying what exactly it will be. When generating the quest, be sure to thoughtfully consider this information. In addition to the previous requirements, follow these guidelines during the generation: {taskDescription}."
+
+# Additional quest types (for types not already defined above)
+profession-item-gathering-quest:
+  allowed: true
+  quest-requirements: "NPC requests an item for their development — this quest is related to the NPC's profession leveling. Based on the quest item and the NPC profession, NPC should explain the task to the player by sharing the reason they need the quest item."
+
+music-disc-quest:
+  allowed: true
+  quest-requirements: "NPC wants a music disc and asks the player to find him one. The reason must be related to either personality or profession."

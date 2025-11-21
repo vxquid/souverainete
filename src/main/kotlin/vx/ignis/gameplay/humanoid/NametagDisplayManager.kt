@@ -66,7 +66,7 @@ class NametagDisplayManager : Listener {
         val level = npc.villagerLevel
         // Use language lookup for profession name, with fallback to hardcoded formatting.
         val professionKey = npc.profession.key.key.lowercase()
-        val profession = plugin.language.getString("villager-professions.$professionKey")!!.replace("_", " ").capitalizeWords()
+        val profession = (plugin.language.getString("villager-professions.$professionKey") ?: "ERR").replace("_", " ").capitalizeWords()
         val health = npc.health
         val maxHealth = npc.getAttribute(XAttribute.MAX_HEALTH.get()!!)?.value ?: 20.0
 
