@@ -127,9 +127,6 @@ class GameplayConfiguration {
         @Comment("Scale factors for the display entity (X, Y, Z).")
         var displayScale: List<Float> = listOf(0.65f, 0.65f, 0.65f)
 
-        @Comment("Interval in server ticks between display updates (text refresh and viewer checks).")
-        var updateIntervalTicks: Long = 10L
-
         @Comment("Text template for the NPC name, profession, and level line. Use %s for name and profession, %d for level.")
         var nameProfessionLevelTemplate: String = "§a%s§f, %s §6(⭐%d)"
 

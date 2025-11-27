@@ -223,6 +223,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                     val registered  = humanoidProvider != null
                     val subscribed  = humanoidProvider?.subscribers?.contains(player) ?: false
                     val fixedPacket = metadata.removeIf(MUST_BE_REMOVED)
+                    val forced      = humanoidProvider?.forcedViewers?.contains(player) ?: false
 
                     if (fixedPacket) {
                         player.sendVerbose(" §c> Preventing wrong villager metadata. §7[id ${entity.entityId}]")
@@ -253,21 +254,22 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
 
                                 this.debug("Added a new villager with ID ${entity.entityId} at ${entity.location} to client entities registry.")
                                 player.sendVerbose(" §3> Calling HumanoidInitializationEvent for a new villager. §7[id ${entity.entityId}]")
-                                plugin.server.scheduler.runTask(plugin) { _ ->
+                                plugin.server.scheduler.runTaskLater(plugin, { _ ->
                                     plugin.server.pluginManager.callEvent(HumanoidInitializationEvent(player, entity, controller, metadata))
-                                }
+                                }, 10L)
                             }
                         }
 
-                        enabled && registered && fixedPacket && !subscribed -> {
+                        enabled && registered && (fixedPacket || forced) && !subscribed -> {
                             humanoidProvider.subscribers.add(player)
+                            humanoidProvider.forcedViewers.remove(player)
                             plugin.server.scheduler.runTask(plugin) { _ ->
                                 player.sendVerbose(" §3> Calling HumanoidInitializationEvent for an existing villager. §7[id ${entity.entityId}]")
                                 plugin.server.pluginManager.callEvent(HumanoidInitializationEvent(player, entity, humanoidProvider, metadata))
                             }
                         }
 
-                        enabled && registered && fixedPacket && subscribed -> {
+                        enabled && registered && fixedPacket -> {
                             player.sendVerbose(" §e> Sending fixed villager metadata. §7[id ${entity.entityId}]")
                             player.sendPacket(WrapperPlayServerEntityMetadata(entity.entityId, metadata))
                         }
@@ -314,6 +316,11 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                     if (entity is Villager) {
                         player.sendVerbose(" §4> Destroying disguised villager. §7[id $entityId]")
                         humanoidProvider.subscribers.remove(player)
+                        if (humanoidProvider.subscribers.isEmpty()) {
+                            humanoidRegistry.remove(entity)?.let { data ->
+                                player.sendVerbose(" §4> Due to lack of subscribers, entity with ID ${data.entity.entityId} was unregistred.")
+                            }
+                        } else humanoidProvider.forcedViewers.add(player)
                     }
                 }
 

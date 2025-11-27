@@ -52,7 +52,7 @@ class NametagDisplayManager : Listener {
         }
 
         npc.addPassenger(display)
-        player.showEntity(plugin, display)
+        plugin.server.scheduler.runTaskLater(plugin, { _ -> player.showEntity(plugin, display) }, 5L)
         val pair = npc to player
         displays[pair] = display
         return display
@@ -95,10 +95,11 @@ class NametagDisplayManager : Listener {
     }
 
     private fun startViewerUpdater() {
+
         val config = plugin.gameplayManager.config
         val viewDistance = config.nametag.viewDistance
         val viewDistanceSquared = viewDistance * viewDistance
-        val updateIntervalTicks = config.nametag.updateIntervalTicks
+        val updateIntervalTicks = 20L
 
         object : BukkitRunnable() {
             override fun run() {
@@ -121,11 +122,12 @@ class NametagDisplayManager : Listener {
                     for (npc in nearbyVillagers) {
                         val pair = npc to player
                         if (!displays.containsKey(pair)) {
-                            plugin.server.scheduler.runTask(plugin) { _ -> createPersonalDisplay(npc, player) }
+                            createPersonalDisplay(npc, player)
                         } else {
                             updateDisplayText(displays[pair]!!, npc, player)
                         }
                     }
+
                 }
 
                 // Cleanup
@@ -134,6 +136,7 @@ class NametagDisplayManager : Listener {
                     val (npc, p) = pair
                     if (!npc.isValid || !display.isValid || !p.isOnline ||
                         !cfg.worlds.allowedWorlds.contains(p.world.name) ||
+                        npc.world != p.world ||
                         npc.location.distanceSquared(p.location) > viewDistanceSquared
                     ) {
                         toRemove.add(pair)
