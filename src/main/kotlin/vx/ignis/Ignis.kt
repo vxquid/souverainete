@@ -22,7 +22,6 @@ import vx.ignis.config.lib.TranslationManager
 import vx.ignis.gameplay.GameplayManager
 import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
-import vx.ignis.nms.VersionBridge
 import vx.ignis.serialization.ItemStackSerializer
 import vx.ignis.serialization.LocationSerializer
 import vx.ignis.serialization.UUIDSerializer
@@ -67,6 +66,7 @@ class Ignis : JavaPlugin(), Listener {
     private var latestVersion: String? = null
 
     override fun onEnable() {
+
         RainbowColorTicker.init()
         this.providerManager = ProviderManager()
         this.translationManager = TranslationManager(this, providerManager.client, providerManager.config.language)
@@ -77,8 +77,6 @@ class Ignis : JavaPlugin(), Listener {
             val languageFile = File(dataFolder, "language.yml")
             language = translationManager.getTranslated(languageFile)
         }
-
-        val bridge = VersionBridge(this)
 
         // Metrics!
         Metrics(this, 27976)
