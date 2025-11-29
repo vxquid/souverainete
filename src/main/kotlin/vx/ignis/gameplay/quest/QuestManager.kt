@@ -121,12 +121,12 @@ class QuestManager : Listener {
 
         plugin.server.scheduler.runTaskAsynchronously(plugin, { _ ->
             try {
-                plugin.gameplayManager.questManager.generateQuest(questType, villager as LivingEntity).let { quest ->
+                plugin.gameplayManager.questManager.generateQuest(questType, villager as LivingEntity)?.let { quest ->
                     plugin.gameplayManager.actualQuests.add(quest.id)
-                    villager.addQuest(quest)
+                    quest.let { villager.addQuest(it) }
                 }
             } catch (exception: Exception) {
-                val debug = true
+                val debug = false
                 if (debug) {
                     exception.printStackTrace()
                 }
@@ -151,13 +151,9 @@ class QuestManager : Listener {
      * Avoid using this in the main server tick, or it will cause massive lags!
      * @return If generation is successful, returns a brand-new quest.
      * */
-    @Suppress("KotlinUnreachableCode")
-    fun generateQuest(type: QuestType, questGiver: LivingEntity): Quest {
-
-        class QuestGenerationException : Exception("Error during quest generation!")
+    fun generateQuest(type: QuestType, questGiver: LivingEntity): Quest? {
         val generator = QuestGenerationController(type, questGiver)
-
-        plugin.providerManager.client.sendPromptWithSchema(generator.prompt, GeneratedCharacterDataContainer::class)?.let { data ->
+        return plugin.providerManager.client.sendPromptWithSchema(generator.prompt, GeneratedCharacterDataContainer::class)?.let { data ->
             val quest = Quest(
                 type,
                 type.questFamily,
@@ -172,7 +168,7 @@ class QuestManager : Listener {
                 0.0
             )
             return quest
-        } ?: throw QuestGenerationException()
+        }
     }
 
     fun cancelQuest(player: Player, quest: Quest) {
@@ -390,7 +386,7 @@ class QuestManager : Listener {
             it["npcGender"]       = questGiver.gender.toString()
             it["npcRace"]         = questGiver.race.name
             it["raceDescription"] = questGiver.race.description
-            it["currentBiome"]    = questGiver.location.block.biome.key.toString()
+            it["currentBiome"]    = questGiver.location.block.biome.key.key
 
             // Only villagers can have a profession and settlement (they live in a fucking villages!). I'm planning to add quests to wandering trades and witches as well.
             (questGiver as? Villager)?.let { villager ->

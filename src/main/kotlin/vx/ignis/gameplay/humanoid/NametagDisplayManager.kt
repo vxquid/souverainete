@@ -75,7 +75,7 @@ class NametagDisplayManager : Listener {
         val repStatus = reputationManager.getPlayerReputationStatus(npc, player)
 
         val line1 = config.nametag.nameProfessionLevelTemplate.format(name, profession, level)
-        val line2 = config.nametag.reputationTemplate.format(repValue, repStatus.localizedName) + " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
+        val line2 = config.nametag.reputationTemplate.format(repValue, repStatus.getLocalizedName()) + " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
 
         var text = "$line1\n$line2"
 

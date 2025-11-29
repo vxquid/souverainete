@@ -124,7 +124,6 @@ class SettlementManager: Listener {
 
         private val settlementPrompt = "Answer only in JSON format, without unnecessary text, make sure it will be JSON parseable. Generate settlement names using the following JSON scheme: " +
                 "`settlementName` — string array, five short but creative settlement names, must differ from each other. " +
-                "The writing style must be strictly tailored in the following order: global setting, current biome, naming style. Start with a neutral description — it'll be easier for you to navigate that way. Don't shorten the names — we don't want scraps of phrases, right? Select the most important words (like biome features) with bold Markdown if applicable. Select interesting parts with italic Markdown if applicable. All content must be written in a narrative style to enhance immersion and believability. " +
                 "The following is the information about the settlement: current biome is {currentBiome}, setting is {setting}, naming style is {namingStyle}. {settlementInfo} " +
                 "Avoid these existing settlement names: {existingNames}."
 

@@ -108,6 +108,12 @@ class InteractionManager: Listener {
 
             /* Далее происходит активация чата. Все проверки должны быть выше. */
 
+            // Поддержка Гейзера.
+            if (plugin.geyserProvider?.checkGeyserPlayer(player) == true) {
+                plugin.geyserProvider?.openInteractionMenu(player, villager)
+                return
+            }
+
             val dialogueSession = player.getActiveDialogueSession()
             // Если у игрока есть активная диалоговая сессия, то
             if (dialogueSession != null) {

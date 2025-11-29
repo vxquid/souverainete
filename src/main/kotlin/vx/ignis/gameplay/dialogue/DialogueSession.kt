@@ -130,7 +130,8 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
     fun generateChatReply(player: Player, villager: Villager, playerMessage: String, dialogue: MutableList<String>) {
 
         val npcName = villager.customName ?: "unknown"
-        val npcRace = villager.race.name
+        val raceName = villager.race.name
+        val raceDesc = villager.race.description
 
         val opinionOnPlayer  = villager.getEmotionalMemory().opinions[player.uniqueId] ?: "Unknown. It is their first meeting."
         val shortMemory      = villager.getEmotionalMemory().shortMemory.toString()
@@ -142,7 +143,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             else -> "NPC is ready to trade with the player. If the player suggests to trade, NPC will respond positively."
         }
 
-        val biome = villager.world.getBiome(villager.location).toString().replace("_", " ").lowercase()
+        val biome = villager.world.getBiome(villager.location).key.key.replace("_", " ").lowercase()
         val currentBiome   = biome.split(":").getOrNull(1) ?: biome
         val currentDaytime = Daytime.fromWorldTime(villager.world.time).toString().lowercase()
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
@@ -152,10 +153,11 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "playerName"         to player.name,
             "opinionOnPlayer"    to opinionOnPlayer,
             "npcName"            to npcName,
-            "npcRace"            to npcRace,
+            "npcRace"            to raceName,
+            "raceLore"           to raceDesc,
             "npcGender"          to villager.gender.toString(),
             "npcPersonality"     to villager.getPersonality().toString(),
-            "npcProfession"      to "${villager.profession}",
+            "npcProfession"      to villager.profession.key.key,
             "npcProfessionLevel" to villager.professionLevelName,
             "playerReputation"   to playerReputation.toString(),
             "currentBiome"       to currentBiome,
@@ -186,26 +188,28 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
     fun generateGiftReaction(player: Player, villager: Villager, gift: ItemStack, dialogue: MutableList<String>) {
 
         val npcName = villager.customName ?: "unknown"
-        val npcRace = villager.race.name
+        val raceName = villager.race.name
+        val raceDesc = villager.race.description
 
         val opinionOnPlayer  = villager.getEmotionalMemory().opinions[player.uniqueId] ?: "Unknown. It is their first meeting."
         val shortMemory      = villager.getEmotionalMemory().shortMemory.toString()
         val playerReputation = plugin.gameplayManager.reputationManager.getPlayerReputationStatus(villager, player)
 
-        val biome          = villager.world.getBiome(villager.location).toString().replace("_", " ").lowercase()
+        val biome          = villager.world.getBiome(villager.location).key.key.replace("_", " ").lowercase()
         val currentBiome   = biome.split(":").getOrNull(1) ?: biome
         val currentDaytime = Daytime.fromWorldTime(villager.world.time).toString().lowercase()
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
-        val activeEffects  = villager.activePotionEffects.map { it.type.toString() }.toString()
+        val activeEffects  = villager.activePotionEffects.map { it.type.key.key }.toString()
 
         val placeholders = mapOf(
             "playerName"         to player.name,
             "opinionOnPlayer"    to opinionOnPlayer,
             "npcName"            to npcName,
-            "npcRace"            to npcRace,
+            "npcRace"            to raceName,
+            "raceLore"           to raceDesc,
             "npcGender"          to villager.gender.toString(),
             "npcPersonality"     to villager.getPersonality().toString(),
-            "npcProfession"      to "${villager.profession}",
+            "npcProfession"      to villager.profession.key.key,
             "npcProfessionLevel" to villager.professionLevelName,
             "playerReputation"   to playerReputation.toString(),
             "currentBiome"       to currentBiome,
@@ -222,13 +226,18 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             acc.replace("{${entry.key}}", entry.value)
         }
 
-        plugin.server.scheduler.runTaskAsynchronously(plugin, { _ ->
+        plugin.logger.info(prompt) // FIXME
+
+        plugin.server.scheduler.runTaskAsynchronously(plugin) { _ ->
             plugin.providerManager.client.sendPromptWithSchema(prompt, NPCGiftReaction::class)?.let { reaction ->
                 this.handleGiftReaction(player, villager, gift, reaction)
             } ?: run {
-                player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacy(plugin.language.getString("info-messages.npc-conversation.ai-overloaded")!!))
+                player.spigot().sendMessage(
+                    ChatMessageType.ACTION_BAR,
+                    TextComponent.fromLegacy(plugin.language.getString("info-messages.npc-conversation.ai-overloaded")!!)
+                )
             }
-        })
+        }
 
     }
 

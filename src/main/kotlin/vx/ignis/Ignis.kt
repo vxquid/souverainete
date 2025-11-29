@@ -25,6 +25,7 @@ import vx.ignis.gameplay.settlement.SettlementManager.Companion.settlementsWorld
 import vx.ignis.serialization.ItemStackSerializer
 import vx.ignis.serialization.LocationSerializer
 import vx.ignis.serialization.UUIDSerializer
+import vx.ignis.util.GeyserSupportProvider
 import vx.ignis.util.Metrics
 import vx.ignis.util.RainbowColorTicker
 import vx.ignis.util.UpdateChecker
@@ -37,6 +38,11 @@ class Ignis : JavaPlugin(), Listener {
     lateinit var gameplayManager: GameplayManager
     lateinit var commandManager:  PaperCommandManager
     lateinit var translationManager: TranslationManager
+
+    var geyserProvider: GeyserSupportProvider? = null
+        get() = if (server.pluginManager.isPluginEnabled("Geyser-Spigot")) {
+            if (field == null) GeyserSupportProvider().also { field = it } else field
+        } else null
 
     var language: YamlConfiguration = run {
         val file = File(super.getDataFolder(), "language.yml")

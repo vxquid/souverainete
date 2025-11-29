@@ -21,12 +21,11 @@ class PersonalityManager {
 
     // TODO: Must be configurable.
     private val targetEntityTypes = mutableListOf(EntityType.VILLAGER)
-    private val generationTickDelay = 200L
-    private val alwaysShowName = true
+    private val generationTickDelay = 100L
 
     init {
         this.loadPersonalities()
-        this.generateGenericCharacterData()
+        this.startGenericCharacterDataGenerationTicker()
         this.startTick()
     }
 
@@ -73,24 +72,42 @@ class PersonalityManager {
         val race        = entity.race
         val biome       = entity.world.getBiome(entity.location).key()
 
-        plugin.server.scheduler.runTaskAsynchronously(plugin, { _ ->
+        plugin.server.scheduler.runTaskAsynchronously(plugin) { _ ->
             aiClient.sendPromptWithSchema(
-                prompt = "Your task is to generate NPC data & reaction phrases, taking into account the following NPC info: race (race name: ${race.name}, race description: [{${race.description}}]), personality is ($personality), gender ($gender), biome ($biome). Required JSON schema: " +
-                        "‘npcNames’ (array of five strings; first and second name; must be in naming style!), " +
-                        "‘sleepInterruptionPhrases’ (array of 5 strings; [reaction phrases that NPC says when a player disrupts their sleep]), " +
-                        "‘damagePhrases’ (array of 5 strings; [reaction phrases that NPC says when attacked by a player]), " +
-                        "‘joblessPhrases’ (array of 5 strings; [reaction phrases that NPC says when a player suggests trading, but NPC doesn't have any job]), " +
-                        "‘noItemsToTradePhrases’ (array of 5 strings; [reaction phrases that NPC says when a player suggests trading, but NPC doesn't have any items to trade]), " +
-                        "‘noQuestPhrases’ (array of 5 strings; [reaction phrases that NPC says when a player asks NPC about job, but NPC doesn't have any quests for the player])," +
-                        "‘totemOfUndyingResurrectionPhrases’ (array of 5 strings; [reaction phrases that NPC says when totem of undying saves them from death, must be heavily depends on personality type])," +
-                        "‘imprisonedOrStuckPhrases’ (array of 5 strings; [reaction phrases that NPC says when they being locked in one place for a long time (usually they should ask for help, but it depends on personality)]).",
+                prompt = """
+                    You are an expert in generating immersive NPC data for a Minecraft RPG plugin. Your task is to create detailed, lore-consistent character data and reaction phrases for an NPC based on the provided details. Ensure all outputs are creative, varied, and tailored to the NPC's race, personality, gender, and biome. Phrases should be in first-person perspective, spoken as if by the NPC, and fit a fantasy/medieval style. Keep them concise (under 50 words each) and engaging.
+
+                    NPC Details:
+                    - Race: Name = ${race.name}, Description = ${race.description}
+                    - Personality: Name = ${personality.key}, Definition = ${personality.definition}
+                    - Gender: $gender
+                    - Biome: $biome (adapt phrases to environmental themes, e.g., cold for snowy biomes, mystical for forests).
+
+                    Output strictly as JSON matching this schema (no additional text outside the JSON):
+                    {
+                      "npcNames": [array of 5 unique full names as strings; each name should combine a first and last name in the stylistic conventions of the race (e.g., Elvish names sound elegant and nature-inspired); ensure diversity and cultural fit],
+                      "sleepInterruptionPhrases": [array of 5 unique strings; reactions when a player wakes the NPC from sleep; reflect annoyance or surprise, influenced by personality (e.g., aggressive personalities might threaten)],
+                      "damagePhrases": [array of 5 unique strings; reactions when attacked by a player; show pain, anger, or fear, tailored to personality and race (e.g., a tough orc might taunt back)],
+                      "joblessPhrases": [array of 5 unique strings; responses when a player tries to trade but the NPC has no job; express confusion, refusal, or redirection, fitting the personality],
+                      "noItemsToTradePhrases": [array of 5 unique strings; responses when trading is attempted but no items are available; sound apologetic or dismissive based on personality],
+                      "noQuestPhrases": [array of 5 unique strings; replies when asked about quests/jobs but none are available; could hint at future possibilities or outright refuse, aligned with personality],
+                      "totemOfUndyingResurrectionPhrases": [array of 5 unique strings; exclamations upon resurrection via Totem of Undying; heavily personality-dependent (e.g., grateful for kind personalities, vengeful for aggressive ones); include awe or relief],
+                      "imprisonedOrStuckPhrases": [array of 5 unique strings; pleas or comments when trapped for a long time; usually beg for help, but vary by personality (e.g., proud ones might demand freedom haughtily)]
+                    }
+
+                    Example for a generic NPC (adapt to details):
+                    {
+                      "npcNames": ["Elara Thornewood", "Finnian Oakenshade", "Lirael Silverbrook", "Thrain Ironfist", "Sylas Windwhisper"],
+                      "sleepInterruptionPhrases": ["What in the realms? Can't a weary soul rest?", "Oi, back off! I was dreaming of treasures!"],
+                      ...
+                    }
+                """.trimIndent(),
                 targetClass = CharacterData::class
             )?.let { personalityData ->
                 entity.setCharacterData(personalityData)
                 entity.customName = personalityData.npcNames.random()
-                entity.isCustomNameVisible = alwaysShowName
-            } ?: plugin.logger.warning("Failed to generate character data for entity ${entity.type}.")
-        })
+            }
+        }
     }
 
     data class GenericCharacterData(
@@ -103,20 +120,39 @@ class PersonalityManager {
         val imprisonedOrStuckPhrases: MutableList<String>
     )
 
-    private fun generateGenericCharacterData() {
-        aiClient.sendPromptWithSchema(
-            prompt = "Your task is to generate generic NPC reaction phrases and put it in JSON with specified keys: " +
-                    "‘sleepInterruptionPhrases’ (array of 10 strings; [phrases that NPC says when a player disrupts their sleep]), " +
-                    "‘damagePhrases’ (array of 10 strings; [phrases that NPC says when attacked by a player]), " +
-                    "‘joblessPhrases’ (array of 10 strings; [phrases that NPC says when a player suggests trading, but NPC doesn't have any job]), " +
-                    "‘noItemsToTradePhrases’ (array of 10 strings; [phrases that NPC says when a player suggests trading, but NPC doesn't have any items to trade]), " +
-                    "‘noQuestPhrases’ (array of 10 strings; [phrases that NPC says when a player asks NPC about job, but NPC doesn't have any quests for the player])," +
-                    "‘totemOfUndyingResurrectionPhrases’ (array of 5 strings; [phrases that NPC says when totem of undying saves them from death])," +
-                    "‘imprisonedOrStuckPhrases’ (array of 5 strings; [phrases that NPC says when they being locked in one place for a long time (usually they should ask for help)]).",
-            targetClass = GenericCharacterData::class
-        )?.let { genericCharacter ->
-            this.genericCharacterData = genericCharacter
-        } ?: plugin.logger.warning("Failed to generate generic character data.")
+    private fun startGenericCharacterDataGenerationTicker() {
+        plugin.server.scheduler.runTaskTimerAsynchronously(plugin, { task ->
+            if (::genericCharacterData.isInitialized) {
+                task.cancel()
+                return@runTaskTimerAsynchronously
+            }
+
+            aiClient.sendPromptWithSchema(
+                prompt = """
+                    You are an expert in generating immersive NPC reaction phrases for a Minecraft RPG plugin. Your task is to create generic, versatile reaction phrases that can apply to any NPC when specific data isn't available. Phrases should be in first-person perspective, neutral in tone but varied, fitting a fantasy/medieval style. Keep them concise (under 50 words each) and engaging. Ensure diversity across the arrays to avoid repetition.
+
+                    Output strictly as JSON matching this schema (no additional text outside the JSON):
+                    {
+                      "sleepInterruptionPhrases": [array of 10 unique strings; general reactions to being woken up; mix of annoyance, confusion, and humor],
+                      "damagePhrases": [array of 10 unique strings; general reactions to being attacked; include pain, pleas, or threats],
+                      "joblessPhrases": [array of 10 unique strings; responses to trade attempts without a job; polite refusals or suggestions to find work],
+                      "noItemsToTradePhrases": [array of 10 unique strings; responses when no items are available for trade; apologetic or explanatory],
+                      "noQuestPhrases": [array of 10 unique strings; replies when no quests are available; could encourage patience or redirect],
+                      "totemOfUndyingResurrectionPhrases": [array of 5 unique strings; exclamations upon resurrection; mix of relief, wonder, and determination],
+                      "imprisonedOrStuckPhrases": [array of 5 unique strings; comments when trapped; generally pleas for help, with some frustration or resignation]
+                    }
+
+                    Example:
+                    {
+                      "sleepInterruptionPhrases": ["What? Who's there? I was just drifting off...", "Hey, easy! A fellow needs his rest!"],
+                      ...
+                    }
+                """.trimIndent(),
+                targetClass = GenericCharacterData::class
+            )?.let { genericCharacter ->
+                this.genericCharacterData = genericCharacter
+            }
+        }, 0, generationTickDelay)
     }
 
     data class Personality(

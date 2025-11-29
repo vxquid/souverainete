@@ -73,7 +73,21 @@ class GeminiClient(
 
     override fun translate(yamlConfig: YamlConfiguration): YamlConfiguration? = try {
         val yamlText = yamlConfig.saveToString()
-        val prompt = "Translate YAML file below to $lang, keep the keys and special symbols (like §) and DO NOT translate placeholders. You must wrap the result in ```yaml```. \n```yaml\n${yamlText}\n```"
+        val prompt = """
+            You are a forced, expert-level translator and language replacer. Your sole task is to translate the provided YAML content.
+            
+            **ORIGINAL LANGUAGE:** English
+            **TARGET LANGUAGE:** $lang
+            
+            **ACTIONS REQUIRED:**
+            1. **TRANSLATE ALL** visible string values from English to **$lang**. Translation is MANDATORY.
+            2. **PRESERVE ALL YAML KEYS** exactly as they appear. They are never translated.
+            3. **NEVER** translate any text inside placeholders (e.g., %player%, {amount}, <item>) or special symbols (like §, &). Preserve them precisely.
+            4. The output **MUST** be ONLY the translated YAML content, enclosed in a single **```yaml```** code block. Do NOT include any introductory text, explanations, or comments outside the code block.
+            
+            YAML Content to process:
+            $yamlText
+        """.trimIndent() // Используем тройные кавычки для многострочности
         translateWithRetry(prompt, config.maxRetries)
     } catch (_: Exception) {
         null
@@ -86,19 +100,19 @@ class GeminiClient(
     ): T? {
 
         if (retries <= 0) {
-            logError("Max retries reached for prompt: $prompt")
             return null
         }
 
         val key = try {
             keyManager.getAvailableKey()
-        } catch (e: IllegalStateException) {
-            logError("No available API keys: ${e.message}")
+        } catch (_: IllegalStateException) {
             return null
         }
 
-        val requestBody =
-            createJsonRequest(prompt.escapeJsonString(), "application/json").toRequestBody("application/json".toMediaTypeOrNull())
+        val parser = AdvancedJsonParser()
+        val escapedPrompt = parser.escapeJsonString(prompt)
+        val requestBodyJson = parser.createJsonRequest(escapedPrompt, "application/json")
+        val requestBody = requestBodyJson.toRequestBody("application/json".toMediaTypeOrNull())
         val request = Request.Builder().url("$baseUrl${key.key}").post(requestBody).build()
 
         return client.newCall(request).execute().use { response ->
@@ -107,34 +121,13 @@ class GeminiClient(
                 return sendRequestWithRetry(prompt, responseType, retries - 1)
             }
             val content = response.body?.string() ?: run {
-                logError("Empty response body")
                 return null
             }
             try {
-                val jsonResponse = gson.fromJson(content, JsonObject::class.java)
-                val cleanedContent = jsonResponse
-                    .getAsJsonArray("candidates")
-                    ?.get(0)?.asJsonObject
-                    ?.getAsJsonObject("content")
-                    ?.getAsJsonArray("parts")
-                    ?.get(0)?.asJsonObject
-                    ?.get("text")?.asString
-                    ?.cleanJson()
-                    ?: run {
-                        logError("Failed to extract JSON content from response!")
-                        return null
-                    }
-                gson.fromJson(cleanedContent, JsonObject::class.java)
-                    ?.let { gson.fromJson(it, responseType.java) }
-                    ?: run {
-                        logError("Failed to parse cleaned response as JSON!")
-                        null
-                    }
-            } catch (e: JsonParseException) {
-                logError("Failed to parse JSON: ${e.message}")
+                parser.parseResponse(content, responseType.java)
+            } catch (_: JsonParseException) {
                 sendRequestWithRetry(prompt, responseType, retries - 1)
-            } catch (e: Exception) {
-                logError("Unexpected error parsing response: ${e.message}")
+            } catch (_: Exception) {
                 null
             }
         }
@@ -146,19 +139,19 @@ class GeminiClient(
     ): YamlConfiguration? {
 
         if (retries <= 0) {
-            logError("Max retries reached for translate prompt: $prompt")
             return null
         }
 
         val key = try {
             keyManager.getAvailableKey()
-        } catch (e: IllegalStateException) {
-            logError("No available API keys: ${e.message}")
+        } catch (_: IllegalStateException) {
             return null
         }
 
-        val requestBody =
-            createJsonRequest(prompt.escapeJsonString(), "text/plain").toRequestBody("application/json".toMediaTypeOrNull())
+        val parser = AdvancedJsonParser()
+        val escapedPrompt = parser.escapeJsonString(prompt)
+        val requestBodyJson = parser.createJsonRequest(escapedPrompt, "text/plain")
+        val requestBody = requestBodyJson.toRequestBody("application/json".toMediaTypeOrNull())
         val request = Request.Builder().url("$baseUrl${key.key}").post(requestBody).build()
 
         return client.newCall(request).execute().use { response ->
@@ -167,78 +160,131 @@ class GeminiClient(
                 return translateWithRetry(prompt, retries - 1)
             }
             val content = response.body?.string() ?: run {
-                logError("Empty response body")
                 return null
             }
             try {
-
-                val jsonResponse = gson.fromJson(content, JsonObject::class.java)
-                val extractedText = jsonResponse
-                    .getAsJsonArray("candidates")
-                    ?.get(0)?.asJsonObject
-                    ?.getAsJsonObject("content")
-                    ?.getAsJsonArray("parts")
-                    ?.get(0)?.asJsonObject
-                    ?.get("text")?.asString
-                    ?: run {
-                        logError("Failed to extract text from response!")
-                        return null
-                    }
-                val cleanedData = findYaml(extractedText).unescapeString()
+                val extractedText = parser.extractTextFromResponse(content)
+                val cleanedData = parser.findYaml(extractedText).let { parser.unescapeString(it) }
                 YamlConfiguration.loadConfiguration(StringReader(cleanedData))
-            } catch (e: JsonParseException) {
-                logError("Failed to parse JSON: ${e.message}")
+            } catch (_: JsonParseException) {
                 translateWithRetry(prompt, retries - 1)
-            } catch (e: NullPointerException) {
-                logError("Failed to extract YAML: ${e.message}")
+            } catch (_: NullPointerException) {
                 translateWithRetry(prompt, retries - 1)
-            } catch (e: Exception) {
-                logError("Unexpected error during translation: ${e.message}")
+            } catch (_: Exception) {
                 null
             }
         }
     }
 
-    private fun findYaml(yaml: String): String {
-        val regex = """```yaml([\s\S]*?)```""".toRegex()
-        return regex.find(yaml)?.groups?.get(1)?.value?.trim()
-            ?: throw NullPointerException("Can't find yaml pattern during translation task.")
-    }
+    private inner class AdvancedJsonParser {
 
-    private fun String.cleanJson(): String =
-        trim()
-            .removePrefix("```json")
-            .removePrefix("```")
-            .removeSuffix("```")
-            .trim()
+        fun <T : Any> parseResponse(content: String, responseType: Class<T>): T {
+            val jsonResponse = gson.fromJson(content, JsonObject::class.java)
+            var cleanedContent = jsonResponse
+                .getAsJsonArray("candidates")
+                ?.get(0)?.asJsonObject
+                ?.getAsJsonObject("content")
+                ?.getAsJsonArray("parts")
+                ?.get(0)?.asJsonObject
+                ?.get("text")?.asString
+                ?.let { cleanJson(it) }
+                ?: throw JsonParseException("Failed to extract JSON content from response!")
 
-    private fun String.escapeJsonString(): String =
-        replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
+            cleanedContent = repairJson(cleanedContent) // Attempt repair for resilience
 
-    private fun String.unescapeString(): String =
-        replace(Regex("""\\+n"""), "\n")
-            .replace(Regex("""\\+""""), "\"")
+            return gson.fromJson(cleanedContent, JsonObject::class.java)
+                ?.let { gson.fromJson(it, responseType) }
+                ?: throw JsonParseException("Failed to parse cleaned response as JSON!")
+        }
 
-    private fun createJsonRequest(prompt: String, mimeType: String = "application/json"): String =
-        """{
-            "contents": [{
-                "parts": [{
-                    "text": "$prompt"
-                }]
-            }],
-            "safetySettings": [{
-                "category": "7",
-                "threshold": "4"
-            }],
-            "generationConfig": {
-                "responseMimeType": "$mimeType",
-                "temperature": $temp
+        fun extractTextFromResponse(content: String): String {
+            val jsonResponse = gson.fromJson(content, JsonObject::class.java)
+            return jsonResponse
+                .getAsJsonArray("candidates")
+                ?.get(0)?.asJsonObject
+                ?.getAsJsonObject("content")
+                ?.getAsJsonArray("parts")
+                ?.get(0)?.asJsonObject
+                ?.get("text")?.asString
+                ?: throw JsonParseException("Failed to extract text from response!")
+        }
+
+        fun findYaml(yaml: String): String {
+            val regex = """```yaml([\s\S]*?)```""".toRegex()
+            return regex.find(yaml)?.groups?.get(1)?.value?.trim()
+                ?: throw NullPointerException("Can't find yaml pattern during translation task.")
+        }
+
+        private fun cleanJson(input: String): String =
+            input.trim()
+                .removePrefix("```json")
+                .removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+
+        fun escapeJsonString(input: String): String =
+            input.replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+
+        fun unescapeString(input: String): String =
+            input.replace(Regex("""\\+n"""), "\n")
+                .replace(Regex("""\\+""""), "\"")
+
+        fun createJsonRequest(prompt: String, mimeType: String = "application/json"): String =
+            """{
+                "contents": [{
+                    "parts": [{
+                        "text": "$prompt"
+                    }]
+                }],
+                "safetySettings": [{
+                    "category": "7",
+                    "threshold": "4"
+                }],
+                "generationConfig": {
+                    "responseMimeType": "$mimeType",
+                    "temperature": $temp
+                }
+            }""".trimIndent()
+
+        private fun repairJson(jsonStr: String): String {
+            var repaired = jsonStr.trim()
+
+            // Remove trailing commas
+            repaired = repaired.replace(Regex(",\\s*([}\\]])"), "$1")
+
+            // Balance braces if unbalanced
+            val openBraces = repaired.count { it == '{' }
+            val closeBraces = repaired.count { it == '}' }
+            if (openBraces > closeBraces) {
+                repaired += "}".repeat(openBraces - closeBraces)
+            } else if (closeBraces > openBraces) {
+                repaired = "{".repeat(closeBraces - openBraces) + repaired
             }
-        }""".trimIndent()
+
+            // Balance quotes (simple: ensure even number)
+            val quoteCount = repaired.count { it == '"' }
+            if (quoteCount % 2 != 0) {
+                repaired += "\""
+            }
+
+            // Strip non-JSON prefix/suffix (find first { to last })
+            val start = repaired.indexOf('{').takeIf { it >= 0 } ?: 0
+            val end = repaired.lastIndexOf('}').takeIf { it >= 0 } ?: repaired.length
+            repaired = repaired.substring(start, end + 1)
+
+            // If still invalid, log and return original (to avoid infinite loops)
+            try {
+                gson.fromJson(repaired, JsonObject::class.java)
+            } catch (_: Exception) {
+            }
+
+            return repaired
+        }
+    }
 
     private fun handleFailedResponse(response: Response, key: KeyManager.Key) {
         response.body?.string()?.let { reason ->
@@ -246,14 +292,8 @@ class GeminiClient(
                 key.quota = true
                 plugin.logger.info("Quota exceeded. Resetting key in 60 seconds.")
                 plugin.server.scheduler.runTaskLater(plugin, { _ -> key.quota = false }, 60 * 20)
-            } else {
-                logError("Request failed: ${response.code}, $reason")
             }
-        } ?: logError("Empty response body")
-    }
-
-    private fun logError(message: String) {
-        plugin.logger.warning("[GeminiClient] [ERROR] $message")
+        }
     }
 
 }

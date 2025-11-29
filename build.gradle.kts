@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ignis"
-version = "0.3.3.6"
+version = "0.3.4.1"
 description = "Let AI make your server alive with AI-generated NPCs, quests, towns, items and a lot more."
 
 bukkitPluginYaml {
@@ -29,6 +29,7 @@ repositories {
   maven("https://repo.codemc.io/repository/maven-releases/")
   maven("https://repo.codemc.io/repository/maven-snapshots/")
   maven("https://mvn.lumine.io/repository/maven-public/")
+  maven("https://repo.opencollab.dev/main/")
 }
 
 dependencies {
@@ -42,6 +43,8 @@ dependencies {
   implementation(project(":nms-support:base"))
   compileOnly("com.github.retrooper:packetevents-spigot:2.10.0")
   compileOnly("io.lumine:Mythic-Dist:5.10.0")
+  compileOnly("org.geysermc.geyser:api:2.9.0-SNAPSHOT")
+  compileOnly("org.geysermc.floodgate:api:2.2.4-SNAPSHOT")
 }
 
 tasks {

@@ -71,15 +71,29 @@ class OpenRouterClient(
         val fullPrompt =
             "$rules$prompt\n\nReturn the response as a JSON object strictly adhering to the schema described in the prompt. Ensure the response is valid JSON enclosed in curly braces {} and contains only the fields specified in the schema. Do NOT include code fences (```json```)"
         sendRequestWithRetry(fullPrompt, targetClass, config.maxRetries)
-    } catch (any: Exception) {
+    } catch (_: Exception) {
         null
     }
 
     override fun translate(yamlConfig: YamlConfiguration): YamlConfiguration? = try {
         val yamlText = yamlConfig.saveToString()
-        val prompt = "Translate YAML file below to $lang, keep the keys and special symbols (like §) and DO NOT translate placeholders. Wrap result as ```yaml```. \n```yaml\n${yamlText}\n```"
+        val prompt = """
+            You are a forced, expert-level translator and language replacer. Your sole task is to translate the provided YAML content.
+            
+            **ORIGINAL LANGUAGE:** English
+            **TARGET LANGUAGE:** $lang
+            
+            **ACTIONS REQUIRED:**
+            1. **TRANSLATE ALL** visible string values from English to **$lang**. Translation is MANDATORY.
+            2. **PRESERVE ALL YAML KEYS** exactly as they appear. They are never translated.
+            3. **NEVER** translate any text inside placeholders (e.g., %player%, {amount}, <item>) or special symbols (like §, &). Preserve them precisely.
+            4. The output **MUST** be ONLY the translated YAML content, enclosed in a single **```yaml```** code block. Do NOT include any introductory text, explanations, or comments outside the code block.
+            
+            YAML Content to process:
+            $yamlText
+        """.trimIndent() // Используем тройные кавычки для многострочности
         translateWithRetry(prompt, config.maxRetries)
-    } catch (any: Exception) {
+    } catch (_: Exception) {
         null
     }
 

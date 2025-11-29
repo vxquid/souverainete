@@ -50,7 +50,7 @@ class ReputationManager {
 
         if (previousStatus != newStatus && plugin.gameplayManager.config.reputation.chatNotification) {
             val entityName = entity.customName ?: "nearby inhabitants"
-            val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.localizedName)
+            val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.getLocalizedName())
             player.sendMessage(statusChangeMessage)
             player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
         }
@@ -86,22 +86,27 @@ class ReputationManager {
 
         if (previousStatus != newStatus && plugin.gameplayManager.config.reputation.chatNotification) {
             val entityName = entity.customName ?: entity.type.name.lowercase().capitalize()
-            val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.localizedName)
+            val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.getLocalizedName())
             player.sendMessage(statusChangeMessage)
             player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
         }
 
     }
 
-    enum class Reputation(val localizedName: String, val priceMultiplier: Double) {
-        EXALTED("Exalted", 0.6),
-        REVERED("Revered", 0.7),
-        HONORED("Honored", 0.9),
-        FRIENDLY("Friendly", 0.9),
-        NEUTRAL("Neutral", 1.0),
-        UNFRIENDLY("Unfriendly", 1.25),
-        HOSTILE("Hostile", 1.5),
-        EXILED("Exiled", 2.0)
+    enum class Reputation(val priceMultiplier: Double) {
+        EXALTED(0.6),
+        REVERED(0.7),
+        HONORED(0.9),
+        FRIENDLY(0.9),
+        NEUTRAL(1.0),
+        UNFRIENDLY(1.25),
+        HOSTILE(1.5),
+        EXILED(2.0);
+
+        fun getLocalizedName(): String {
+            return plugin.language.getString("reputation.status.${this.name.lowercase()}")!!
+        }
+
     }
 
     fun getPlayerReputationStatus(entity: LivingEntity, player: Player): Reputation {
