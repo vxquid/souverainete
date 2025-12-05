@@ -49,7 +49,7 @@ class GeminiClient(
             .build()
     }
 
-    private val client = OkHttpClient.Builder().callTimeout(30, TimeUnit.SECONDS).apply {
+    private val client = OkHttpClient.Builder().readTimeout(30, TimeUnit.SECONDS).callTimeout(30, TimeUnit.SECONDS).apply {
         if (proxyHost != "PROXY_HOST") {
             plugin.logger.info("Proxy usage in config.yml detected. Using proxy for requests.")
             proxy(proxy).proxyAuthenticator(proxyAuthenticator)
