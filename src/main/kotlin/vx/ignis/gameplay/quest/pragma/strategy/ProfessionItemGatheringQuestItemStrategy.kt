@@ -35,7 +35,7 @@ class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
         val maxWealth = InventoryWealth.getProfessionLimit(level).maxWealth
         val prioritizedItems = professionItems[profession]
             ?: throw IllegalStateException(
-                "No items configured for profession $profession; check professions.yml!"
+                "No items configured for profession ${profession.key.key}; check professions.yml!"
             )
 
         val selectedItem = selectRandomItemInRange(prioritizedItems, minWealth, maxWealth)
@@ -72,7 +72,7 @@ class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
     ): ItemSelection {
         val fallbackEntry = prioritizedItems.entries
             .minByOrNull { (material, range) -> ItemStack(material, range.min).calculateScore() }
-            ?: throw IllegalStateException("No fallback items available for profession $profession.")
+            ?: throw IllegalStateException("No fallback items available for profession ${profession.key.key}.")
 
         val (material, range) = fallbackEntry
         var amount = range.min
@@ -91,7 +91,7 @@ class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
         }
 
         logger.warning(
-            "Fallback used for profession $profession: $material x$amount (price: $price, may not fit ideal range)"
+            "Fallback used for profession ${profession.key.key}: $material x$amount (price: $price, may not fit ideal range)"
         )
 
         return ItemSelection(material, amount, price)
