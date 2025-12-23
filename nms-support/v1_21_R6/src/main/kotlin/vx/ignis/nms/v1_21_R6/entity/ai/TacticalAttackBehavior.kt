@@ -10,9 +10,12 @@ import net.minecraft.world.entity.ai.behavior.EntityTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
+import net.minecraft.world.entity.npc.Villager
 import net.minecraft.world.item.Items
 import net.minecraft.world.item.ShieldItem
 import net.minecraft.world.phys.Vec3
+import vx.ignis.gameplay.party.PartyManager
+import vx.ignis.gameplay.party.PartyManager.Companion.combatTactic
 import vx.ignis.nms.v1_21_R6.entity.HumanoidVillager
 import kotlin.random.Random
 
@@ -34,6 +37,12 @@ class TacticalAttackBehavior(
     private var lastTargetPos: Vec3? = null
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
+
+        val tactic = (villager as Villager).bukkitLivingEntity.combatTactic
+        if (tactic == PartyManager.CombatTactic.RANGED) {
+            return false
+        }
+
         // --- ГЛАВНОЕ ИСПРАВЛЕНИЕ ---
         // Если в руках стрелковое оружие — мы НЕ должны использовать тактику ближнего боя.
         if (villager.isHolding { it.`is`(Items.BOW) || it.`is`(Items.CROSSBOW) }) {
@@ -45,11 +54,9 @@ class TacticalAttackBehavior(
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
-        // Та же проверка здесь. Если вдруг житель взял лук во время драки — прекращаем бежать бить рукой.
         if (villager.isHolding { it.`is`(Items.BOW) || it.`is`(Items.CROSSBOW) }) {
             return false
         }
-
         val target = getAttackTarget(villager)
         return target != null && target.isAlive && villager.isWithinCombatRange(target)
     }

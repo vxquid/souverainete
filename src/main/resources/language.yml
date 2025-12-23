@@ -26,6 +26,9 @@ quest:
   limit: "You can't have more than §6{playerQuestLimit} §7quests."
   already-accepted: "You already have this quest."
 
+party:
+  member: "§b{playerName} Party Member"
+
 reputation:
   status:
     exiled: "Exiled"

@@ -26,6 +26,7 @@ import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.Ignis.Companion.sendFormattedMessage
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.memory.MemoryManager.Companion.getEmotionalMemory
+import vx.ignis.gameplay.party.PartyManager.Companion.partyLeaderUUID // ИМПОРТ
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.ignis.gameplay.trade.TradeManager.Companion.openTradeMenu
@@ -37,7 +38,7 @@ import vx.ignis.util.Daytime
 
 class DialogueSession(val player: Player, val entity: Villager) : Listener, PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
 
-    var readyToSend = true 
+    var readyToSend = true
     var cancelled = false
         set(value) {
             if (value) {
@@ -143,6 +144,12 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             else -> "NPC is ready to trade with the player. If the player suggests to trade, NPC will respond positively."
         }
 
+        val partyStatus = when {
+            villager.partyLeaderUUID == player.uniqueId -> "IN_PLAYER_PARTY_LEADER (The player is the leader of the group this NPC belongs to. This implies a high level of trust, loyalty, and willingness to follow orders. The NPC should be more assertive, helpful, and respectful.)"
+            villager.partyLeaderUUID != null -> "IN_OTHER_PARTY (This NPC is currently following another player. They are loyal to someone else. They might be polite but distant, or dismissive if the player tries to give orders. Their priority is their own leader.)"
+            else -> "FREE (This NPC is independent and not currently in any party.)"
+        }
+
         val biome = villager.world.getBiome(villager.location).key.key.replace("_", " ").lowercase()
         val currentBiome   = biome.split(":").getOrNull(1) ?: biome
         val currentDaytime = Daytime.fromWorldTime(villager.world.time).toString().lowercase()
@@ -168,6 +175,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "dialogueHistory"    to if (dialogue.isEmpty()) "[NO PREVIOUS MESSAGES. IT IS THE START OF THE DIALOGUE. GREET THE PLAYER IF NEEDED.]" else dialogue.toString(),
             "shortMemory"        to shortMemory,
             "tradeReadiness"     to tradeReadiness,
+            "npcPartyStatus"     to partyStatus // НОВЫЙ ПЛЕЙСХОЛДЕР
         )
 
         val prompt = placeholders.entries.fold(plugin.prompts.getString("npc-chat")!!) { acc, entry ->
@@ -195,6 +203,12 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val shortMemory      = villager.getEmotionalMemory().shortMemory.toString()
         val playerReputation = plugin.gameplayManager.reputationManager.getPlayerReputationStatus(villager, player)
 
+        val partyStatus = when {
+            villager.partyLeaderUUID == player.uniqueId -> "IN_PLAYER_PARTY_LEADER (The player is the leader of the group this NPC belongs to. This implies a high level of trust, loyalty, and willingness to follow orders. The NPC should be more assertive, helpful, and respectful.)"
+            villager.partyLeaderUUID != null -> "IN_OTHER_PARTY (This NPC is currently following another player. They are loyal to someone else. They might be polite but distant, or dismissive if the player tries to give orders. Their priority is their own leader.)"
+            else -> "FREE (This NPC is independent and not currently in any party.)"
+        }
+
         val biome          = villager.world.getBiome(villager.location).key.key.replace("_", " ").lowercase()
         val currentBiome   = biome.split(":").getOrNull(1) ?: biome
         val currentDaytime = Daytime.fromWorldTime(villager.world.time).toString().lowercase()
@@ -220,13 +234,14 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "itemAmount"         to gift.amount.toString(),
             "dialogueHistory"    to if (dialogue.isEmpty()) "[NO PREVIOUS MESSAGES.]" else dialogue.toString(),
             "shortMemory"        to shortMemory,
+            "npcPartyStatus"     to partyStatus
         )
 
         val prompt = placeholders.entries.fold(plugin.prompts.getString("npc-gift-reaction")!!) { acc, entry ->
             acc.replace("{${entry.key}}", entry.value)
         }
 
-        plugin.logger.info(prompt) // FIXME
+        // plugin.logger.info(prompt) // FIXME
 
         plugin.server.scheduler.runTaskAsynchronously(plugin) { _ ->
             plugin.providerManager.client.sendPromptWithSchema(prompt, NPCGiftReaction::class)?.let { reaction ->

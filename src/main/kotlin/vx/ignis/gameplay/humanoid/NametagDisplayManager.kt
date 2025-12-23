@@ -64,7 +64,6 @@ class NametagDisplayManager : Listener {
 
         val name = npc.customName ?: "Unknown"
         val level = npc.villagerLevel
-        // Use language lookup for profession name, with fallback to hardcoded formatting.
         val professionKey = npc.profession.key.key.lowercase()
         val profession = (plugin.language.getString("villager-professions.$professionKey") ?: "ERR").replace("_", " ").capitalizeWords()
         val health = npc.health
@@ -91,11 +90,28 @@ class NametagDisplayManager : Listener {
             text += "\n$line3"
         }
 
+        // --- PARTY STATUS LINE ---
+        val partyManager = plugin.gameplayManager.partyManager
+        val leaderUUID = partyManager.getLeaderUUID(npc)
+
+        if (leaderUUID != null) {
+            val leaderName = Bukkit.getPlayer(leaderUUID)?.name
+                ?: Bukkit.getOfflinePlayer(leaderUUID).name
+                ?: "Unknown"
+
+            // Берем строку из конфига языка (например: "&bНапарник {playerName}")
+            val partyTemplate = plugin.language.getString("party.member") ?: "§b{playerName} Party Member"
+            val line4 = partyTemplate.replace("{playerName}", leaderName)
+
+            // Добавляем новую линию
+            text += "\n$line4"
+        }
+        // -------------------------
+
         display.text = text
     }
 
     private fun startViewerUpdater() {
-
         val config = plugin.gameplayManager.config
         val viewDistance = config.nametag.viewDistance
         val viewDistanceSquared = viewDistance * viewDistance
@@ -127,7 +143,6 @@ class NametagDisplayManager : Listener {
                             updateDisplayText(displays[pair]!!, npc, player)
                         }
                     }
-
                 }
 
                 // Cleanup

@@ -6,9 +6,6 @@ import com.mojang.datafixers.util.Pair
 import com.mojang.serialization.Dynamic
 import net.minecraft.core.Holder
 import net.minecraft.core.component.DataComponents
-import net.minecraft.network.syncher.EntityDataAccessor
-import net.minecraft.network.syncher.EntityDataSerializers
-import net.minecraft.network.syncher.SynchedEntityData
 import net.minecraft.resources.ResourceKey
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.damagesource.DamageSource
@@ -67,11 +64,6 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         val brain = brainProvider().makeBrain(dynamic)
         this.registerBrainGoals(brain)
         return brain
-    }
-
-    override fun defineSynchedData(builder: SynchedEntityData.Builder) {
-        super.defineSynchedData(builder)
-        builder.define<Boolean?>(IS_CHARGING_CROSSBOW, false)
     }
 
     override fun brainProvider(): Brain.Provider<Villager> {
@@ -158,13 +150,12 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
 
             // 2. БОЕВОЙ БЛОК. Система сама выберет то, условие чего вернет true.
             // Важно: Поведение арбалета и лука имеет проверку "isHolding(BOW)", поэтому оно не сработает, если в руке меч.
-
-            // Приоритет 1 для дальнего боя (обычно лучше держать дистанцию первыми)
             .insert(1, CrossbowAttackBehavior(0.65f) as Behavior<Villager>)
             .insert(1, BowAttackBehavior(0.65f) as Behavior<Villager>)
+            .insert(1, TacticalAttackBehavior(0.65f, 15) as Behavior<Villager>)
 
-            // Приоритет 2 для ближнего боя (Меч/Топор/Рука/Щит)
-            .insert(2, TacticalAttackBehavior(0.65f, 15) as Behavior<Villager>)
+            // Следование за лидером (если есть)
+            .insert(2, FollowLeaderBehavior(0.65f, 4.0f, 32.0f) as Behavior<Villager>)
 
             // 3. Разговор
             .insert(3, LookAndFollowDuringConversation(0.65f) as Behavior<Villager>)
@@ -297,8 +288,13 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
             weaponStack
         )
 
-        val dY = target.getY(0.3333333333333333) - arrowEntity.y
+        // 3. РАСЧЕТ БАЛЛИСТИКИ
         val dist = kotlin.math.sqrt(dX * dX + dZ * dZ)
+
+        // Целимся в грудь (60% высоты), а не в колени. Это надежнее.
+        val targetHeightOffset = target.bbHeight * 0.6
+        val targetY = target.y + targetHeightOffset
+        val dY = targetY - arrowEntity.y
 
         if (weaponStack.`is`(Items.CROSSBOW)) {
             // --- АРБАЛЕТ ---
@@ -308,10 +304,11 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
                 1.0f / (this.getRandom().nextFloat() * 0.4f + 0.8f)
             )
 
-            arrowEntity.shoot(dX, dY + dist * 0.2, dZ, 3.5f, 0.5f)
+            // Скорость 3.5 (очень быстро)
+            // Поправка на гравитацию минимальная (0.05), так как стрела летит почти прямо
+            arrowEntity.shoot(dX, dY + dist * 0.05, dZ, 3.5f, 0.5f)
 
-            // --- ИСПРАВЛЕНИЕ 1.21: РАЗРЯДКА ЧЕРЕЗ DATA COMPONENTS ---
-            // Убираем снаряды из компонента, что делает арбалет "незаряженным"
+            // Разрядка (1.21 Data Components)
             weaponStack.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.EMPTY)
 
             this.onCrossbowAttackPerformed()
@@ -323,7 +320,14 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
                 1.0f,
                 1.0f / (this.getRandom().nextFloat() * 0.4f + 0.8f)
             )
-            arrowEntity.shoot(dX, dY + dist * 0.2, dZ, velocity * 1.5f, 1.0f)
+
+            // Увеличиваем скорость лука до 2.5 (быстрее стандарта)
+            // Поправка на гравитацию 0.1 (было 0.2).
+            // При скорости 2.5 стрела падает меньше, поэтому задирать прицел нужно меньше.
+            // velocity обычно равна 1.0 при полном натяжении.
+            val speed = velocity * 2.5f
+
+            arrowEntity.shoot(dX, dY + dist * 0.1, dZ, speed, 1.0f)
         }
 
         this.level().addFreshEntity(arrowEntity)
@@ -361,9 +365,7 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
     }
 
     // Методы для арбалета (из интерфейса CrossbowAttackMob)
-    override fun setChargingCrossbow(charging: Boolean) {
-        this.entityData.set(IS_CHARGING_CROSSBOW, charging) // Нужно зарегистрировать DataWatcher, если хочешь анимацию поднятия рук
-    }
+    override fun setChargingCrossbow(charging: Boolean) {}
 
     override fun canFireProjectileWeapon(weapon: net.minecraft.world.item.ProjectileWeaponItem): Boolean {
         return weapon == Items.BOW || weapon == Items.CROSSBOW || super.canFireProjectileWeapon(weapon)
@@ -375,12 +377,6 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
 
     override fun onCrossbowAttackPerformed() {
         this.noActionTime = 0
-    }
-
-    companion object {
-        // Регистрируем свой ключ данных для хранения состояния зарядки (как у Пилладжера)
-        val IS_CHARGING_CROSSBOW: EntityDataAccessor<Boolean> =
-            SynchedEntityData.defineId(HumanoidVillager::class.java, EntityDataSerializers.BOOLEAN)
     }
 
 }

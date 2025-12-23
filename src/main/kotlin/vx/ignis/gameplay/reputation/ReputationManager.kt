@@ -6,6 +6,7 @@ import org.bukkit.entity.Player
 import org.bukkit.persistence.PersistentDataType
 import vx.ignis.Ignis.Companion.plugin
 import java.util.*
+import kotlin.math.abs
 
 class ReputationManager {
 
@@ -63,7 +64,7 @@ class ReputationManager {
 
         val reputationChangeMessage = (if (aggregatedValue > 0) increaseMessage else decreaseMessage)
             .replace("{entity}", entityDescription)
-            .replace("{amount}", Math.abs(aggregatedValue).toString())
+            .replace("{amount}", abs(aggregatedValue).toString())
         player.sendMessage(reputationChangeMessage)
     }
 

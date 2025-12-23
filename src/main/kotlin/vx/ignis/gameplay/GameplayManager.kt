@@ -14,6 +14,7 @@ import vx.ignis.gameplay.dialogue.menu.InteractionManager
 import vx.ignis.gameplay.dictionary.CustomItemDictionary
 import vx.ignis.gameplay.humanoid.HumanoidManager
 import vx.ignis.gameplay.humanoid.HungerManager
+import vx.ignis.gameplay.party.PartyManager
 import vx.ignis.gameplay.personality.PersonalityManager
 import vx.ignis.gameplay.profession.ProfessionManager
 import vx.ignis.gameplay.quest.QuestManager
@@ -48,6 +49,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     val professionManager  = ProfessionManager()
     val settlementManager  = SettlementManager()
     val hungerManager      = HungerManager.also { it.startTicker() }
+    val partyManager       = PartyManager(plugin)
     val versionBridge      = VersionBridge(plugin)
 
     @EventHandler

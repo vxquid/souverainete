@@ -9,9 +9,12 @@ import net.minecraft.world.entity.ai.behavior.EntityTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
+import net.minecraft.world.entity.npc.Villager
 import net.minecraft.world.entity.projectile.ProjectileUtil
 import net.minecraft.world.item.BowItem
 import net.minecraft.world.item.Items
+import vx.ignis.gameplay.party.PartyManager
+import vx.ignis.gameplay.party.PartyManager.Companion.combatTactic
 import vx.ignis.nms.v1_21_R6.entity.HumanoidVillager
 
 class BowAttackBehavior(
@@ -27,10 +30,16 @@ class BowAttackBehavior(
 
     private var attackTime = -1
     private var strafingTime = -1
-    private var strafingClockwise = false
-    private var strafingBackwards = false
+    private var strafingClockwise = true
+    private var strafingBackwards = true
 
     override fun checkExtraStartConditions(level: ServerLevel, villager: HumanoidVillager): Boolean {
+
+        val tactic = (villager as Villager).bukkitLivingEntity.combatTactic
+        if (tactic == PartyManager.CombatTactic.MELEE) {
+            return false
+        }
+
         return villager.isHolding { it.`is`(Items.BOW) } && getTarget(villager) != null
     }
 
