@@ -41,7 +41,7 @@ dependencies {
   implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT") // Annotations-based commands.
   implementation(project(":nms-support"))
   implementation(project(":nms-support:base"))
-  compileOnly("com.github.retrooper:packetevents-spigot:2.10.0")
+  compileOnly("com.github.retrooper:packetevents-spigot:2.11.1")
   compileOnly("io.lumine:Mythic-Dist:5.10.0")
   compileOnly("org.geysermc.geyser:api:2.9.0-SNAPSHOT")
   compileOnly("org.geysermc.floodgate:api:2.2.4-SNAPSHOT")

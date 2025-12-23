@@ -103,6 +103,7 @@ class InteractionManager: Listener {
         (event.rightClicked as? Villager)?.let { villager ->
 
             if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
+            if (event.isCancelled || !villager.isAware) return
 
             val player: Player = event.player
             val time = System.currentTimeMillis()

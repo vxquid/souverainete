@@ -348,10 +348,10 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
 
             val killType = when {
                 // Если урон "косвенный" (Projectile), значит это выстрел
-                damageSource != null && damageSource.isDirect -> VillagerKillTargetEvent.KillType.RANGED
+                damageSource != null && !damageSource.isDirect -> VillagerKillTargetEvent.KillType.RANGED
 
                 // Если урон прямой (от моба к мобу), значит ближний бой
-                damageSource != null && !damageSource.isDirect -> VillagerKillTargetEvent.KillType.MELEE
+                damageSource != null && damageSource.isDirect -> VillagerKillTargetEvent.KillType.MELEE
 
                 else -> VillagerKillTargetEvent.KillType.OTHER
             }
