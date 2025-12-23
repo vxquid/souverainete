@@ -38,37 +38,29 @@ class DialogueManager {
         }.replace("\\\"", "\"")
 
         when (player.dialogueFormat) {
-
             DialogueFormat.IMMERSIVE -> {
-
-                if (!interrupt && dialogues.containsKey(pair)) {
-                    return
-                }
-
-                DialogueWindow(plugin, player, villager, size, formattedText.split(" "), follow, interrupt, onFinish).schedule()
+                if (!interrupt && dialogues.containsKey(pair)) return
+                DialogueWindow(plugin, player, villager, size, formattedText.split(" "), follow, interrupt, false, onFinish).schedule()
             }
-
+            DialogueFormat.HOLOGRAM -> {
+                if (!interrupt && dialogues.containsKey(pair)) return
+                // ИЗМЕНЕНИЕ: Размер увеличен до 0.9F. Это делает текст крупным и очень разборчивым.
+                DialogueWindow(plugin, player, villager, 0.9F, formattedText.split(" "), follow, interrupt, true, onFinish).schedule()
+            }
             DialogueFormat.CHAT -> {
                 this.sendDialogueInChat(player, villager, formattedText)
             }
-
             DialogueFormat.BOTH -> {
-
-                if (!interrupt && dialogues.containsKey(pair)) {
-                    return
-                }
-
-                DialogueWindow(plugin, player, villager, size, formattedText.split(" "), follow, interrupt, onFinish).schedule()
+                if (!interrupt && dialogues.containsKey(pair)) return
+                DialogueWindow(plugin, player, villager, size, formattedText.split(" "), follow, interrupt, false, onFinish).schedule()
                 this.sendDialogueInChat(player, villager, formattedText)
             }
-
         }
     }
 
     private val cooldownPlayers = mutableListOf<Player>()
-    private fun sendDialogueInChat(player: Player, entity: LivingEntity, message: String) {
+    fun sendDialogueInChat(player: Player, entity: LivingEntity, message: String) {
 
-        // primitive yet clever cooldown system
         if (cooldownPlayers.contains(player)) {
             return
         } else {
@@ -92,7 +84,7 @@ class DialogueManager {
 
         private lateinit var dialogueManager: DialogueManager
 
-                val dialogueFormatKey = NamespacedKey(plugin, "DialogueFormat")
+        val dialogueFormatKey = NamespacedKey(plugin, "DialogueFormat")
         private val dialogueBoxSize = 0.28F
         private val dialogueBoxTextBaseColor = "§f"
         private val dialogueBoxTextImportantColor = "§5"
@@ -104,48 +96,65 @@ class DialogueManager {
 
         val dialogues: ConcurrentHashMap<Pair<Player, LivingEntity>, DialogueWindow> = ConcurrentHashMap()
 
-        fun LivingEntity.talk(player: Player, text: String?, displaySize: Float = dialogueBoxSize, followDuringDialogue: Boolean = true, interruptPreviousDialogue: Boolean = false, onFinish: () -> Unit = {}) {
+        fun LivingEntity.talk(player: Player?, text: String?, displaySize: Float = dialogueBoxSize, followDuringDialogue: Boolean = true, interruptPreviousDialogue: Boolean = false, onFinish: () -> Unit = {}) {
+            if (player == null) return
             text?.let {
                 dialogueManager.startDialogue(player to this, it, size = displaySize, follow = followDuringDialogue, interrupt = interruptPreviousDialogue, onFinish = onFinish)
+            }
+        }
+
+        fun LivingEntity.shout(text: String?, radius: Double = 32.0) {
+            text?.let { msg ->
+                val formattedText = dialogueBoxTextBaseColor + msg.replace(Regex("\\*\\*(.*?)\\*\\*")) { matchResult ->
+                    "$dialogueBoxTextImportantColor${matchResult.groupValues[1]}$dialogueBoxTextBaseColor"
+                }.replace(Regex("\\*(.*?)\\*")) { matchResult ->
+                    "$dialogueBoxTextInterestingColor${matchResult.groupValues[1]}$dialogueBoxTextBaseColor"
+                }.replace("\\\"", "\"")
+
+                this.location.getNearbyPlayers(radius).forEach { player ->
+                    dialogueManager.sendDialogueInChat(player, this, formattedText)
+                }
             }
         }
 
         val Player.dialogueFormat: DialogueFormat
             get() {
                 this.persistentDataContainer.get(dialogueFormatKey, PersistentDataType.STRING)?.let { type ->
-                    return DialogueFormat.valueOf(type)
+                    return try { DialogueFormat.valueOf(type) } catch (e: Exception) { DialogueFormat.IMMERSIVE }
                 }
                 return plugin.gameplayManager.config.dialogue.dialogueFormat.also { type ->
                     this.persistentDataContainer.set(dialogueFormatKey, PersistentDataType.STRING, type.toString())
                 }
             }
-
     }
 
     class DialogueWindow(
         private val plugin: JavaPlugin,
         private val player: Player,
-                val entity: LivingEntity,
+        val entity: LivingEntity,
         private val size: Float,
         private val words: List<String>,
         private val follow: Boolean,
         cancelPrevious: Boolean,
+        private val isHologram: Boolean,
         private val onFinish: () -> Unit = {}
     ) {
 
         private val display: TextDisplay
-        private val displayBackgroundColor = Color.fromARGB(dialogueBackgroundAlpha, dialogueBackgroundRed, dialogueBackgroundGreen, dialogueBackgroundBlue)
+        private val displayBackgroundColor = if (isHologram) {
+            Color.fromARGB(0, 0, 0, 0)
+        } else {
+            Color.fromARGB(dialogueBackgroundAlpha, dialogueBackgroundRed, dialogueBackgroundGreen, dialogueBackgroundBlue)
+        }
 
         private val voice: Sound = entity.getVoiceSound()
         private val pitch: Float = entity.getVoicePitch()
 
         private val height = if (entity is Ageable && !entity.isAdult) 0.75 else 1.25
-        private val maxDistance = 5.5
+        private val maxDistance = 12.0 // Еще увеличил дистанцию, текст большой, видно далеко
 
         private val pauseDurationBetweenSentences = 3000L
         private val pauseDurationBetweenWords = 175L
-
-        // If player is SNEAKING during dialogue, it will speed up!
         private val fastPauseDurationBetweenSentences = 1250L
         private val fastPauseDurationBetweenWords = 100L
 
@@ -162,36 +171,54 @@ class DialogueManager {
         }
 
         fun schedule() {
-
             display.billboard = Display.Billboard.CENTER
             display.isSeeThrough = false
             display.isVisibleByDefault = false
-            player.showEntity(plugin, display)
-            display.transformation =
-                Transformation(Vector3f(0f, 0f, 0f), AxisAngle4f(), Vector3f(size, size, size), AxisAngle4f())
 
+            if (isHologram) {
+                display.isShadowed = true
+                // ИЗМЕНЕНИЕ: Увеличил ширину строки до 350, чтобы крупный текст не переносился каждые два слова
+                display.lineWidth = 350
+            }
+
+            player.showEntity(plugin, display)
             display.backgroundColor = displayBackgroundColor
+
+            if (isHologram) {
+                entity.addPassenger(display)
+
+                // ИЗМЕНЕНИЕ: Подняли еще выше (0.95f), чтобы компенсировать крупный шрифт
+                display.transformation = Transformation(
+                    Vector3f(0f, 0.65f, 0f),
+                    AxisAngle4f(),
+                    Vector3f(size, size, size),
+                    AxisAngle4f()
+                )
+            } else {
+                display.transformation = Transformation(
+                    Vector3f(0f, 0f, 0f),
+                    AxisAngle4f(),
+                    Vector3f(size, size, size),
+                    AxisAngle4f()
+                )
+            }
 
             val task = object : BukkitRunnable() {
                 override fun run() {
-
                     var wordAmount = 0
-
                     for (word in words) {
-
-                        if (!plugin.isEnabled || word.isEmpty() || isCancelled || isDestroyed)
-                            break
+                        if (!plugin.isEnabled || word.isEmpty() || isCancelled || isDestroyed) break
 
                         val sentence = word.last() == '.' || word.last() == '!' || word.last() == '?' || word.last() == ','
                         val lastWord = words.indexOf(word) == words.lastIndex
                         val clear    = ++wordAmount > 10 && sentence && !lastWord
 
                         plugin.server.scheduler.runTask(plugin) { _ ->
-
                             display.text += "$word "
                             player.playSound(entity.location, voice, 1F, pitch)
-
-                            if (follow) (entity as CraftVillager).handle.tradingPlayer = (player as CraftPlayer).handle
+                            if (follow && !isHologram) {
+                                (entity as CraftVillager).handle.tradingPlayer = (player as CraftPlayer).handle
+                            }
                         }
 
                         val pauseDuration = when {
@@ -222,13 +249,13 @@ class DialogueManager {
         }
 
         fun relocate() {
-
             if (checkDistance()) {
                 this.destroy()
                 return
             }
-
-            display.teleport(this.calculatePosition())
+            if (!isHologram) {
+                display.teleport(this.calculatePosition())
+            }
         }
 
         fun destroy() {
@@ -238,12 +265,10 @@ class DialogueManager {
             isDestroyed = true
         }
 
-        private fun checkDistance(): Boolean = player.location.distance(display.location) > maxDistance
+        private fun checkDistance(): Boolean = player.location.distance(entity.location) > maxDistance
 
         private fun calculatePosition(): Location {
             return player.eyeLocation.add(entity.location.add(0.0, if (entity.pose != Pose.SLEEPING) height else height - 0.4, 0.0)).multiply(0.5)
         }
-
     }
-
 }

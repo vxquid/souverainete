@@ -18,12 +18,15 @@ import org.bukkit.inventory.EquipmentSlot
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.Ignis.Companion.premium
 import vx.ignis.Ignis.Companion.sendFormattedMessage
+import vx.ignis.event.VillagerKillTargetEvent
+import vx.ignis.event.VillagerStartFightEvent
 import vx.ignis.gameplay.dialogue.DialogueManager
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundAlpha
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundBlue
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundGreen
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundRed
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.dialogues
+import vx.ignis.gameplay.dialogue.DialogueManager.Companion.shout
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.talk
 import vx.ignis.gameplay.dialogue.DialogueSession
 import vx.ignis.gameplay.dialogue.DialogueSession.Companion.getActiveDialogueSession
@@ -50,6 +53,45 @@ class InteractionManager: Listener {
         val openedMenuList: MutableList<Menu> = mutableListOf()
         val defaultButtonColor = Color.fromARGB(dialogueBackgroundAlpha, dialogueBackgroundRed, dialogueBackgroundGreen, dialogueBackgroundBlue)
     }
+
+    // --- НОВЫЕ БОЕВЫЕ ЛИСЕНЕРЫ ---
+
+    @EventHandler
+    private fun onVillagerStartFight(event: VillagerStartFightEvent) {
+        val villager = event.villager
+
+        if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
+
+        // Получаем фразу из характера или берем дефолтную
+        val phrases = villager.getCharacterData()?.startFightPhrases ?: genericReactionMessages.startFightPhrases
+
+        if (phrases.isNotEmpty()) {
+            val message = phrases.random()
+            villager.shout(message)
+        }
+    }
+
+    @EventHandler
+    private fun onVillagerKillTarget(event: VillagerKillTargetEvent) {
+        val villager = event.villager
+
+        if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
+
+        // Выбираем пул фраз в зависимости от типа убийства
+        val phrases = when (event.killType) {
+            VillagerKillTargetEvent.KillType.RANGED ->
+                villager.getCharacterData()?.rangedKillPhrases ?: genericReactionMessages.rangedKillPhrases
+            else -> // MELEE or OTHER
+                villager.getCharacterData()?.meleeKillPhrases ?: genericReactionMessages.meleeKillPhrases
+        }
+
+        if (phrases.isNotEmpty()) {
+            val message = phrases.random()
+            villager.shout(message)
+        }
+    }
+
+    // -----------------------------
 
     @EventHandler
     private fun whenVillagerDies(event: EntityDeathEvent) {

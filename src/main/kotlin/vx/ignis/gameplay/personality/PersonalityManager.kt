@@ -92,14 +92,11 @@ class PersonalityManager {
                       "noItemsToTradePhrases": [array of 5 unique strings; responses when trading is attempted but no items are available; sound apologetic or dismissive based on personality],
                       "noQuestPhrases": [array of 5 unique strings; replies when asked about quests/jobs but none are available; could hint at future possibilities or outright refuse, aligned with personality],
                       "totemOfUndyingResurrectionPhrases": [array of 5 unique strings; exclamations upon resurrection via Totem of Undying; heavily personality-dependent (e.g., grateful for kind personalities, vengeful for aggressive ones); include awe or relief],
-                      "imprisonedOrStuckPhrases": [array of 5 unique strings; pleas or comments when trapped for a long time; usually beg for help, but vary by personality (e.g., proud ones might demand freedom haughtily)]
-                    }
-
-                    Example for a generic NPC (adapt to details):
-                    {
-                      "npcNames": ["Elara Thornewood", "Finnian Oakenshade", "Lirael Silverbrook", "Thrain Ironfist", "Sylas Windwhisper"],
-                      "sleepInterruptionPhrases": ["What in the realms? Can't a weary soul rest?", "Oi, back off! I was dreaming of treasures!"],
-                      ...
+                      "imprisonedOrStuckPhrases": [array of 5 unique strings; pleas or comments when trapped for a long time; usually beg for help, but vary by personality (e.g., proud ones might demand freedom haughtily)],
+                      
+                      "startFightPhrases": [array of 5 unique strings; battle cries, threats, or confident remarks when the NPC enters combat mode; highly dependent on personality (e.g., a coward might panic, a warrior will shout a challenge)],
+                      "meleeKillPhrases": [array of 5 unique strings; victory lines after killing an enemy in close combat; emphasize strength, brutality, or relief],
+                      "rangedKillPhrases": [array of 5 unique strings; victory lines after killing an enemy with a projectile (bow/crossbow); emphasize precision, sharp-shooting skills, or distance]
                     }
                 """.trimIndent(),
                 targetClass = CharacterData::class
@@ -117,7 +114,12 @@ class PersonalityManager {
         val noItemsToTradePhrases: MutableList<String>,
         val noQuestPhrases: MutableList<String>,
         val totemOfUndyingResurrectionPhrases: MutableList<String>,
-        val imprisonedOrStuckPhrases: MutableList<String>
+        val imprisonedOrStuckPhrases: MutableList<String>,
+
+        // New generic pools
+        val startFightPhrases: MutableList<String>,
+        val meleeKillPhrases: MutableList<String>,
+        val rangedKillPhrases: MutableList<String>
     )
 
     private fun startGenericCharacterDataGenerationTicker() {
@@ -139,13 +141,11 @@ class PersonalityManager {
                       "noItemsToTradePhrases": [array of 10 unique strings; responses when no items are available for trade; apologetic or explanatory],
                       "noQuestPhrases": [array of 10 unique strings; replies when no quests are available; could encourage patience or redirect],
                       "totemOfUndyingResurrectionPhrases": [array of 5 unique strings; exclamations upon resurrection; mix of relief, wonder, and determination],
-                      "imprisonedOrStuckPhrases": [array of 5 unique strings; comments when trapped; generally pleas for help, with some frustration or resignation]
-                    }
-
-                    Example:
-                    {
-                      "sleepInterruptionPhrases": ["What? Who's there? I was just drifting off...", "Hey, easy! A fellow needs his rest!"],
-                      ...
+                      "imprisonedOrStuckPhrases": [array of 5 unique strings; comments when trapped; generally pleas for help, with some frustration or resignation],
+                      
+                      "startFightPhrases": [array of 10 unique strings; general battle cries or defensive shouts when a fight starts],
+                      "meleeKillPhrases": [array of 10 unique strings; general victory lines after striking down an enemy up close],
+                      "rangedKillPhrases": [array of 10 unique strings; general victory lines after shooting an enemy from afar (e.g. 'Right between the eyes!', 'Got them!')]
                     }
                 """.trimIndent(),
                 targetClass = GenericCharacterData::class
@@ -206,12 +206,16 @@ class PersonalityManager {
             val noItemsToTradePhrases: List<String>,
             val noQuestPhrases: List<String>,
             val totemOfUndyingResurrectionPhrases: MutableList<String>,
-            val imprisonedOrStuckPhrases: MutableList<String>
+            val imprisonedOrStuckPhrases: MutableList<String>,
+
+            // New specific pools
+            val startFightPhrases: List<String>,
+            val meleeKillPhrases: List<String>,
+            val rangedKillPhrases: List<String>
         ) {
             override fun toString(): String {
                 return gson.toJson(this).toString()
             }
         }
     }
-
 }

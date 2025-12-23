@@ -44,12 +44,12 @@ class ReputationManager {
 
         // Уведомление об изменении репутации
         if (plugin.gameplayManager.config.reputation.chatNotification && value != 0) {
-            val entityDescription = entity.customName ?: "nearby inhabitants"
+            val entityDescription = entity.customName ?: "NPC"
             notifyReputationChange(player, value, entityDescription)
         }
 
         if (previousStatus != newStatus && plugin.gameplayManager.config.reputation.chatNotification) {
-            val entityName = entity.customName ?: "nearby inhabitants"
+            val entityName = entity.customName ?: "NPC"
             val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.getLocalizedName())
             player.sendMessage(statusChangeMessage)
             player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)

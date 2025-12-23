@@ -102,7 +102,7 @@ class EquipmentManager : Listener {
             WOODEN_SWORD, STONE_SWORD, IRON_SWORD,
             GOLDEN_SWORD, DIAMOND_SWORD, NETHERITE_SWORD,
             WOODEN_AXE, STONE_AXE, IRON_AXE,
-            DIAMOND_AXE, NETHERITE_AXE -> EquipmentSlot.HAND
+            DIAMOND_AXE, NETHERITE_AXE, BOW, CROSSBOW -> EquipmentSlot.HAND
 
             SHIELD, TOTEM_OF_UNDYING -> EquipmentSlot.OFF_HAND
 

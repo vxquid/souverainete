@@ -37,7 +37,7 @@ class GameplayConfiguration {
         var dialogueFormat: DialogueFormat = DialogueFormat.IMMERSIVE
 
         enum class DialogueFormat {
-            IMMERSIVE, CHAT, BOTH
+            IMMERSIVE, CHAT, HOLOGRAM, BOTH
         }
 
     }
