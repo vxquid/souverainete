@@ -34,61 +34,126 @@ import vx.ignis.gameplay.event.PlayerAcceptQuestEvent
 import vx.ignis.gameplay.party.PartyManager.CombatTactic
 import vx.ignis.gameplay.party.PartyManager.PartyState
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.getCharacterData
+import vx.ignis.gameplay.personality.PersonalityManager.GenericCharacterData
 import vx.ignis.gameplay.quest.QuestManager.Quest
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
 import vx.ignis.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.ignis.persistent.LivingEntityExtend.quests
 
-class InteractionManager: Listener {
+/**
+ * Manages all physical interactions between players and Humanoid Villagers.
+ *
+ * Responsibilities:
+ * - Handling right-click interactions to open menus or start dialogues.
+ * - Managing the Text Display Menu system (opening, closing, relocating).
+ * - reacting to combat events (start fight, kill target) with shouting phrases.
+ * - Handling party management interactions.
+ */
+class InteractionManager : Listener {
 
-    private val genericReactionMessages by lazy { plugin.gameplayManager.personalityManager.genericCharacterData }
+    /**
+     * Lazy reference to generic character data.
+     * Used as a fallback if a specific NPC lacks a personality or generated phrases.
+     */
+    private val genericReactionMessages: GenericCharacterData? by lazy {
+        plugin.gameplayManager.personalityManager.genericCharacterData
+    }
 
-    // Ссылка на PartyManager (предполагаем, что он инициализирован в GameplayManager)
-    private val partyManager by lazy { plugin.gameplayManager.partyManager }
+    /**
+     * Lazy reference to the PartyManager for handling companion logic.
+     */
+    private val partyManager by lazy {
+        plugin.gameplayManager.partyManager
+    }
+
+    // Map to handle click debouncing (preventing double executions).
+    private val lastInteraction = mutableMapOf<Player, Long>()
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
+
+        // Ticker to relocate menu text displays relative to the player's view
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
             openedMenuList.toList().forEach(Menu::relocate)
         }, 0L, 1L)
     }
 
     companion object {
+        // Registry of currently opened text-display menus
         val openedMenuList: MutableList<Menu> = mutableListOf()
-        val defaultButtonColor = Color.fromARGB(dialogueBackgroundAlpha, dialogueBackgroundRed, dialogueBackgroundGreen, dialogueBackgroundBlue)
+
+        // Standard background color for menu buttons
+        val defaultButtonColor = Color.fromARGB(
+            dialogueBackgroundAlpha,
+            dialogueBackgroundRed,
+            dialogueBackgroundGreen,
+            dialogueBackgroundBlue
+        )
     }
 
-    // --- БОЕВЫЕ ЛИСЕНЕРЫ ---
+    // ============================================================================================
+    // COMBAT LISTENERS
+    // ============================================================================================
 
+    /**
+     * Triggered when a custom villager enters combat.
+     * Makes the NPC shout a battle cry based on their personality.
+     */
     @EventHandler
     private fun onVillagerStartFight(event: VillagerStartFightEvent) {
         val villager = event.villager
         if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
-        val phrases = villager.getCharacterData()?.startFightPhrases ?: genericReactionMessages.startFightPhrases
-        if (phrases.isNotEmpty()) villager.shout(phrases.random())
+
+        // Prioritize specific character data, fall back to generic data, or use an empty list.
+        val phrases = villager.getCharacterData()?.startFightPhrases
+            ?: genericReactionMessages?.startFightPhrases
+            ?: emptyList()
+
+        if (phrases.isNotEmpty()) {
+            villager.shout(phrases.random())
+        }
     }
 
+    /**
+     * Triggered when a custom villager kills a target.
+     * Makes the NPC shout a victory phrase based on the kill type (Melee/Ranged).
+     */
     @EventHandler
     private fun onVillagerKillTarget(event: VillagerKillTargetEvent) {
         val villager = event.villager
         if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
+
         val phrases = when (event.killType) {
-            VillagerKillTargetEvent.KillType.RANGED -> villager.getCharacterData()?.rangedKillPhrases ?: genericReactionMessages.rangedKillPhrases
-            else -> villager.getCharacterData()?.meleeKillPhrases ?: genericReactionMessages.meleeKillPhrases
+            VillagerKillTargetEvent.KillType.RANGED ->
+                villager.getCharacterData()?.rangedKillPhrases
+                    ?: genericReactionMessages?.rangedKillPhrases
+            else ->
+                villager.getCharacterData()?.meleeKillPhrases
+                    ?: genericReactionMessages?.meleeKillPhrases
+        } ?: emptyList()
+
+        if (phrases.isNotEmpty()) {
+            villager.shout(phrases.random())
         }
-        if (phrases.isNotEmpty()) villager.shout(phrases.random())
     }
 
-    // -----------------------------
+    // ============================================================================================
+    // INTERACTION LOGIC
+    // ============================================================================================
 
+    /**
+     * Cleans up menus and dialogues when a villager dies.
+     */
     @EventHandler
     private fun whenVillagerDies(event: EntityDeathEvent) {
         (event.entity as? Villager)?.let { villager ->
+            // Close active menus
             openedMenuList.filter { it.villager == villager }.forEach(Menu::destroy)
+            // Close active dialogues
             dialogues.values.filter { it.entity == villager }.forEach(DialogueManager.DialogueWindow::destroy)
 
-            // TODO: Удалить из пати, если умер
+            // Note: Party removal is handled within PartyManager itself via its own Death listener.
         }
     }
 
@@ -97,160 +162,142 @@ class InteractionManager: Listener {
         lastInteraction[event.player] = System.currentTimeMillis()
     }
 
-    private val lastInteraction = mutableMapOf<Player, Long>()
+    /**
+     * The main entry point for interacting with a Villager.
+     * Handles debouncing, sleeping checks, active dialogues, and opening the main menu.
+     */
     @EventHandler(priority = EventPriority.HIGHEST)
     private fun handleVillagerInteraction(event: PlayerInteractEntityEvent) {
-        (event.rightClicked as? Villager)?.let { villager ->
+        val villager = event.rightClicked as? Villager ?: return
 
-            if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
-            if (event.isCancelled || !villager.isAware) return
+        // 1. World & State Checks
+        if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
+        if (event.isCancelled || !villager.isAware) return
 
-            val player: Player = event.player
-            val time = System.currentTimeMillis()
-            val last = lastInteraction.computeIfAbsent(player) { System.currentTimeMillis() }
+        // 2. Debounce Check (200ms cooldown)
+        val player: Player = event.player
+        val time = System.currentTimeMillis()
+        val last = lastInteraction.computeIfAbsent(player) { System.currentTimeMillis() }
 
-            if (time - last <= 200) return else lastInteraction[player] = time
+        if (time - last <= 200) return else lastInteraction[player] = time
 
-            event.isCancelled = true
+        event.isCancelled = true
 
-            openedMenuList.find { it.viewer == player }?.let { menu ->
-                menu.invokeSelected()
-                menu.destroy()
-                (villager as CraftVillager).handle.tradingPlayer = null
-                return
-            }
-
-            if (dialogues.containsKey(player to villager)) return
-
-            if (villager.pose == Pose.SLEEPING) {
-                val message = villager.getCharacterData()?.sleepInterruptionPhrases?.random() ?: genericReactionMessages.sleepInterruptionPhrases.random()
-                villager.talk(player, message, followDuringDialogue = false)
-                return
-            }
-
-            if (plugin.geyserProvider?.checkGeyserPlayer(player) == true) {
-                plugin.geyserProvider?.openInteractionMenu(player, villager)
-                return
-            }
-
-            val dialogueSession = player.getActiveDialogueSession()
-            if (dialogueSession != null) {
-                if (dialogueSession.entity == villager) this.showDialogueMenu(player, villager)
-                return
-            }
-
-            player.inventory.heldItemSlot = 4
-            this.showDefaultMenu(player, villager)
+        // 3. Handle Active Menu Interaction (Clicking again selects the option)
+        openedMenuList.find { it.viewer == player }?.let { menu ->
+            menu.invokeSelected()
+            menu.destroy()
+            (villager as CraftVillager).handle.tradingPlayer = null
+            return
         }
+
+        // 4. Block interaction if a dialogue is currently running
+        if (dialogues.containsKey(player to villager)) return
+
+        // 5. Handle Sleeping State
+        if (villager.pose == Pose.SLEEPING) {
+            val message = villager.getCharacterData()?.sleepInterruptionPhrases?.randomOrNull()
+                ?: genericReactionMessages?.sleepInterruptionPhrases?.randomOrNull()
+
+            message?.let { villager.talk(player, it, followDuringDialogue = false) }
+            return
+        }
+
+        // 6. Geyser Bedrock Player Support
+        if (plugin.geyserProvider?.checkGeyserPlayer(player) == true) {
+            plugin.geyserProvider?.openInteractionMenu(player, villager)
+            return
+        }
+
+        // 7. Resume or Open Dialogue Session
+        val dialogueSession = player.getActiveDialogueSession()
+        if (dialogueSession != null) {
+            if (dialogueSession.entity == villager) this.showDialogueMenu(player, villager)
+            return
+        }
+
+        // 8. Open Default Interaction Menu
+        player.inventory.heldItemSlot = 4 // Reset slot to middle for easier scrolling
+        this.showDefaultMenu(player, villager)
     }
 
     @EventHandler
     private fun handlePlayerQuit(event: PlayerQuitEvent) {
-        openedMenuList.removeIf { it.viewer == event.player}
+        openedMenuList.removeIf { it.viewer == event.player }
     }
 
+    // ============================================================================================
+    // MENUS
+    // ============================================================================================
+
+    /**
+     * Shows a simplified menu when a dialogue session is already active.
+     */
     private fun showDialogueMenu(player: Player, villager: Villager) {
         val builder = Builder(villager, player)
 
-        // Quest button
-        builder.button(plugin.language.getString("interaction-menu.quests-button")!!) {
-            if (villager.profession == Villager.Profession.NONE) {
-                val message = villager.getCharacterData()?.joblessPhrases?.random() ?: genericReactionMessages.joblessPhrases.random()
-                villager.talk(player, message, followDuringDialogue = true)
-                return@button
-            }
-            if (villager.quests().isEmpty()) {
-                val message = villager.getCharacterData()?.noQuestPhrases?.random() ?: genericReactionMessages.noQuestPhrases.random()
-                villager.talk(player, message, followDuringDialogue = true)
-                return@button
-            }
-            if (villager.quests().isNotEmpty()) {
-                this.showQuestListMenu(player, villager)
+        // [Quest]
+        builder.button(plugin.language.getString("interaction-menu.quests-button") ?: "Quests") {
+            handleQuestButtonClick(player, villager)
+        }
+
+        // [Trade]
+        builder.button(plugin.language.getString("interaction-menu.trade-button") ?: "Trade") {
+            handleTradeButtonClick(player, villager)
+        }
+
+        // [Gift]
+        builder.button(plugin.language.getString("interaction-menu.gift-button") ?: "Gift") {
+            if (player.getActiveDialogueSession()?.giftAwaiting == false) {
+                player.getActiveDialogueSession()?.giftAwaiting = true
             }
         }
 
-        // Trade button
-        builder.button(plugin.language.getString("interaction-menu.trade-button")!!) {
-            if (villager.profession == Villager.Profession.NONE) {
-                val message = villager.getCharacterData()?.joblessPhrases?.random() ?: genericReactionMessages.joblessPhrases.random()
-                villager.talk(player, message, followDuringDialogue = true)
-                return@button
-            }
-            plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                if (!villager.openTradeMenu(player)) {
-                    val message = villager.getCharacterData()?.noItemsToTradePhrases?.random() ?: genericReactionMessages.noItemsToTradePhrases.random()
-                    villager.talk(player, message, followDuringDialogue = true)
-                }
-            }, 1L)
-        }
-
-        // Gift button
-        builder.button(plugin.language.getString("interaction-menu.gift-button")!!) {
-            if (player.getActiveDialogueSession()?.giftAwaiting == false) player.getActiveDialogueSession()?.giftAwaiting = true
-        }
-
-        // Interrupt button
-        builder.button(plugin.language.getString("interaction-menu.interrupt-button")!!) {
+        // [Stop]
+        builder.button(plugin.language.getString("interaction-menu.interrupt-button") ?: "Stop") {
             player.getActiveDialogueSession()?.cancelled = true
         }
 
-        // Close button
-        builder.button(plugin.language.getString("interaction-menu.close-button")!!) { menu ->
+        // [Close]
+        builder.button(plugin.language.getString("interaction-menu.close-button") ?: "Close") { menu ->
             menu.destroy()
         }
 
         builder.build()
     }
 
+    /**
+     * Shows the main interaction menu.
+     */
     private fun showDefaultMenu(player: Player, villager: Villager) {
-
         val builder = Builder(villager, player)
 
-        // Quests
-        builder.button(plugin.language.getString("interaction-menu.quests-button")!! + " §8[${villager.quests().count()}]") {
-            if (villager.profession == Villager.Profession.NONE) {
-                val message = villager.getCharacterData()?.joblessPhrases?.random() ?: genericReactionMessages.joblessPhrases.random()
-                villager.talk(player, message, followDuringDialogue = true)
-                return@button
-            }
-            if (villager.quests().isEmpty()) {
-                val message = villager.getCharacterData()?.noQuestPhrases?.random() ?: genericReactionMessages.noQuestPhrases.random()
-                villager.talk(player, message, followDuringDialogue = true)
-                return@button
-            }
-            if (villager.quests().isNotEmpty()) {
-                this.showQuestListMenu(player, villager)
-            }
+        // [Quest]
+        val questLabel = (plugin.language.getString("interaction-menu.quests-button") ?: "Quests") +
+                " §8[${villager.quests().count()}]"
+        builder.button(questLabel) {
+            handleQuestButtonClick(player, villager)
         }
 
-        // Trade
-        builder.button(plugin.language.getString("interaction-menu.trade-button")!!) {
-            if (villager.profession == Villager.Profession.NONE) {
-                val message = villager.getCharacterData()?.joblessPhrases?.random() ?: genericReactionMessages.joblessPhrases.random()
-                villager.talk(player, message, followDuringDialogue = true)
-                return@button
-            }
-            plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                if (!villager.openTradeMenu(player)) {
-                    val message = villager.getCharacterData()?.noItemsToTradePhrases?.random() ?: genericReactionMessages.noItemsToTradePhrases.random()
-                    villager.talk(player, message, followDuringDialogue = true)
-                }
-            }, 1L)
+        // [Trade]
+        builder.button(plugin.language.getString("interaction-menu.trade-button") ?: "Trade") {
+            handleTradeButtonClick(player, villager)
         }
 
         // --- PARTY LOGIC ---
         if (partyManager.isMember(player, villager)) {
-            // Если житель в пати -> Открываем меню управления
-            // Текст: "Напарник" или "Управление"
-            builder.button(plugin.language.getString("interaction-menu.party-control-button") ?: "§bManage Companion", isRainbow = true) {
+            // If already in party -> Show Party Management Submenu
+            val manageText = plugin.language.getString("interaction-menu.party-control-button") ?: "§bManage Companion"
+            builder.button(manageText, isRainbow = true) {
                 this.showPartyMenu(player, villager)
             }
         } else if (!partyManager.hasParty(villager)) {
-            // Если свободен -> Пригласить
-            builder.button(plugin.language.getString("interaction-menu.party-invite-button") ?: "Follow Me") { menu ->
+            // If free -> Show Invite Button
+            val inviteText = plugin.language.getString("interaction-menu.party-invite-button") ?: "Follow Me"
+            builder.button(inviteText) { menu ->
                 if (partyManager.addMember(player, villager)) {
-                    // Опционально: звук успеха
                     player.playSound(player.location, org.bukkit.Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f)
+                    // Optional: Villager says something positive here
                     menu.destroy()
                 } else {
                     player.sendFormattedMessage("Your party is full!")
@@ -260,26 +307,30 @@ class InteractionManager: Listener {
         }
         // -------------------
 
-        // Talk
-        builder.button(plugin.language.getString("interaction-menu.talk-button")!!) {
+        // [Talk] (Premium Only)
+        builder.button(plugin.language.getString("interaction-menu.talk-button") ?: "Talk") {
             if (premium) {
                 if (player.getActiveDialogueSession() == null) DialogueSession(player, villager)
-            } else player.sendFormattedMessage("Feature locked.")
+            } else {
+                player.sendFormattedMessage("This feature is only available in the premium version.")
+            }
         }
 
-        // Close
-        builder.button(plugin.language.getString("interaction-menu.close-button")!!) { menu ->
+        // [Close]
+        builder.button(plugin.language.getString("interaction-menu.close-button") ?: "Close") { menu ->
             menu.destroy()
         }
 
         builder.build()
     }
 
-    // --- НОВОЕ ПОДМЕНЮ УПРАВЛЕНИЯ НАПАРНИКОМ ---
+    /**
+     * Shows the submenu for managing a companion.
+     */
     private fun showPartyMenu(player: Player, villager: Villager) {
         val builder = Builder(villager, player)
 
-        // 1. Кнопка поведения (Стой / Иди)
+        // 1. Movement Order (Follow / Stay)
         val currentState = partyManager.getPartyState(villager)
         val movementText = if (currentState == PartyState.FOLLOW)
             "§eOrder: §aFollow"
@@ -289,20 +340,18 @@ class InteractionManager: Listener {
         builder.button(movementText) { menu ->
             val newState = partyManager.togglePartyState(villager)
 
-            // Фраза реакции (опционально)
             val response = if (newState == PartyState.STAY) "I'll hold this position." else "Right behind you."
             villager.talk(player, response, followDuringDialogue = false, displaySize = 0.4f)
 
-            // Перерисовываем меню, чтобы обновить текст кнопки
             menu.destroy()
-            this.showPartyMenu(player, villager)
+            this.showPartyMenu(player, villager) // Re-open to update button text
         }
 
-        // 2. Кнопка тактики (Авто / Ближний / Дальний)
+        // 2. Combat Tactic (Auto / Melee / Ranged)
         val currentTactic = partyManager.getCombatTactic(villager)
-        val tacticColor = when(currentTactic) {
-            CombatTactic.AUTO -> "§a" // Green
-            CombatTactic.MELEE -> "§c" // Red
+        val tacticColor = when (currentTactic) {
+            CombatTactic.AUTO -> "§a"   // Green
+            CombatTactic.MELEE -> "§c"  // Red
             CombatTactic.RANGED -> "§b" // Aqua
         }
         val tacticText = "§eTactic: $tacticColor${currentTactic.name}"
@@ -310,7 +359,6 @@ class InteractionManager: Listener {
         builder.button(tacticText) { menu ->
             val newTactic = partyManager.cycleCombatTactic(villager)
 
-            // Фраза реакции
             val response = when (newTactic) {
                 CombatTactic.AUTO -> "I'll fight as I see fit."
                 CombatTactic.MELEE -> "Swords up! Close quarters it is."
@@ -318,20 +366,23 @@ class InteractionManager: Listener {
             }
             villager.talk(player, response, followDuringDialogue = false, displaySize = 0.4f)
 
-            // Перерисовываем меню
             menu.destroy()
-            this.showPartyMenu(player, villager)
+            this.showPartyMenu(player, villager) // Re-open
         }
 
-        // 3. Кнопка увольнения (Kick)
-        builder.button(plugin.language.getString("interaction-menu.party-kick-button") ?: "§4Dismiss") { menu ->
+        // 3. Set Home (Future Feature Placeholder)
+        // builder.button("§eSet Home") { ... }
+
+        // 4. Dismiss (Kick)
+        val dismissText = plugin.language.getString("interaction-menu.party-kick-button") ?: "§4Dismiss"
+        builder.button(dismissText) { menu ->
             partyManager.removeMember(player, villager)
             villager.talk(player, "Farewell, traveler.", followDuringDialogue = false)
             menu.destroy()
         }
 
-        // 4. Назад
-        builder.button(plugin.language.getString("interaction-menu.return-button")!!) { menu ->
+        // 5. Back
+        builder.button(plugin.language.getString("interaction-menu.return-button") ?: "Return") { menu ->
             menu.destroy()
             this.showDefaultMenu(player, villager)
         }
@@ -339,15 +390,51 @@ class InteractionManager: Listener {
         builder.build()
     }
 
+    // ============================================================================================
+    // HELPER METHODS
+    // ============================================================================================
+
+    private fun handleQuestButtonClick(player: Player, villager: Villager) {
+        if (villager.profession == Villager.Profession.NONE) {
+            val message = villager.getCharacterData()?.joblessPhrases?.randomOrNull()
+                ?: genericReactionMessages?.joblessPhrases?.randomOrNull()
+            message?.let { villager.talk(player, it, followDuringDialogue = true) }
+            return
+        }
+        if (villager.quests().isEmpty()) {
+            val message = villager.getCharacterData()?.noQuestPhrases?.randomOrNull()
+                ?: genericReactionMessages?.noQuestPhrases?.randomOrNull()
+            message?.let { villager.talk(player, it, followDuringDialogue = true) }
+            return
+        }
+        this.showQuestListMenu(player, villager)
+    }
+
+    private fun handleTradeButtonClick(player: Player, villager: Villager) {
+        if (villager.profession == Villager.Profession.NONE) {
+            val message = villager.getCharacterData()?.joblessPhrases?.randomOrNull()
+                ?: genericReactionMessages?.joblessPhrases?.randomOrNull()
+            message?.let { villager.talk(player, it, followDuringDialogue = true) }
+            return
+        }
+        plugin.server.scheduler.runTaskLater(plugin, { _ ->
+            if (!villager.openTradeMenu(player)) {
+                val message = villager.getCharacterData()?.noItemsToTradePhrases?.randomOrNull()
+                    ?: genericReactionMessages?.noItemsToTradePhrases?.randomOrNull()
+                message?.let { villager.talk(player, it, followDuringDialogue = true) }
+            }
+        }, 1L)
+    }
+
     private fun showQuestSuggestionMenu(player: Player, villager: Villager, quest: Quest) {
         val builder = Builder(villager, player)
-        builder.button(plugin.language.getString("interaction-menu.accept-button")!!) {
+        builder.button(plugin.language.getString("interaction-menu.accept-button") ?: "Accept") {
             plugin.server.pluginManager.callEvent(PlayerAcceptQuestEvent(player, villager, quest))
         }
-        builder.button(plugin.language.getString("interaction-menu.decline-button")!!) { menu ->
+        builder.button(plugin.language.getString("interaction-menu.decline-button") ?: "Decline") { menu ->
             menu.destroy()
         }
-        builder.button(plugin.language.getString("interaction-menu.close-button")!!) { menu ->
+        builder.button(plugin.language.getString("interaction-menu.close-button") ?: "Close") { menu ->
             menu.destroy()
         }
         builder.build()
@@ -355,23 +442,23 @@ class InteractionManager: Listener {
 
     private fun showQuestListMenu(player: Player, villager: Villager) {
         val builder = Builder(villager, player)
-        val quests  = villager.quests().toMutableList()
+        val quests = villager.quests().toMutableList()
 
         quests.forEach { quest ->
             val useRainbow = false
             builder.button(quest.name, isRainbow = useRainbow) {
-                val description = (villager.let { villager ->
-                    return@let when (villager.reputationOf(player)) {
-                        Reputation.EXALTED -> quest.data.reputationBasedQuestDescriptions[7]
-                        Reputation.REVERED -> quest.data.reputationBasedQuestDescriptions[6]
-                        Reputation.HONORED -> quest.data.reputationBasedQuestDescriptions[5]
-                        Reputation.FRIENDLY -> quest.data.reputationBasedQuestDescriptions[4]
-                        Reputation.NEUTRAL -> quest.data.reputationBasedQuestDescriptions[3]
-                        Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestDescriptions[2]
-                        Reputation.HOSTILE -> quest.data.reputationBasedQuestDescriptions[1]
-                        Reputation.EXILED -> quest.data.reputationBasedQuestDescriptions[0]
+                val description = (villager.let { npc ->
+                    return@let when (npc.reputationOf(player)) {
+                        Reputation.EXALTED -> quest.data.reputationBasedQuestDescriptions.getOrNull(7)
+                        Reputation.REVERED -> quest.data.reputationBasedQuestDescriptions.getOrNull(6)
+                        Reputation.HONORED -> quest.data.reputationBasedQuestDescriptions.getOrNull(5)
+                        Reputation.FRIENDLY -> quest.data.reputationBasedQuestDescriptions.getOrNull(4)
+                        Reputation.NEUTRAL -> quest.data.reputationBasedQuestDescriptions.getOrNull(3)
+                        Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestDescriptions.getOrNull(2)
+                        Reputation.HOSTILE -> quest.data.reputationBasedQuestDescriptions.getOrNull(1)
+                        Reputation.EXILED -> quest.data.reputationBasedQuestDescriptions.getOrNull(0)
                     }
-                }).replace("%playerName%", player.name)
+                } ?: "Quest description missing.").replace("%playerName%", player.name)
 
                 villager.talk(player, description) {
                     this.showQuestSuggestionMenu(player, villager, quest)
@@ -379,7 +466,7 @@ class InteractionManager: Listener {
             }
         }
 
-        builder.button(plugin.language.getString("interaction-menu.return-button")!!) { menu ->
+        builder.button(plugin.language.getString("interaction-menu.return-button") ?: "Back") { menu ->
             menu.destroy()
             this.showDefaultMenu(player, villager)
         }
@@ -387,11 +474,18 @@ class InteractionManager: Listener {
         builder.build()
     }
 
+    // ============================================================================================
+    // MENU CONTROLS & EVENTS
+    // ============================================================================================
+
     @EventHandler
     private fun onPlayerItemHeld(event: PlayerItemHeldEvent) {
         val player = event.player
-        val menu   = openedMenuList.find { it.viewer == player } ?: return
+        val menu = openedMenuList.find { it.viewer == player } ?: return
+
         event.isCancelled = true
+
+        // Double scroll fix & Sound
         if (System.currentTimeMillis() - menu.lastScrollTime > 250) {
             menu.lastScrollTime = System.currentTimeMillis()
             player.playSound(player.location, Sound.UI_BUTTON_CLICK, 1F, 2F)
@@ -412,32 +506,65 @@ class InteractionManager: Listener {
 
     @EventHandler
     private fun onPlayerDamageEntity(event: EntityDamageByEntityEvent) {
-        (event.damager as? Player)?.let { player ->
-            (event.entity as? Villager)?.let { entity ->
-                if (dialogues.contains(player to entity)) {
-                    dialogues[player to entity]?.destroy()
-                    event.isCancelled = true
-                    return
+        val player = event.damager as? Player ?: return
+        val entity = event.entity as? Villager ?: return
+
+        // 1. Dialogue interruption check
+        if (dialogues.contains(player to entity)) {
+            dialogues[player to entity]?.destroy()
+            event.isCancelled = true
+            return
+        }
+
+        // 2. Totem Resurrection logic
+        if (event.finalDamage >= entity.health) {
+            if (entity.equipment?.getItem(EquipmentSlot.OFF_HAND)?.type == Material.TOTEM_OF_UNDYING) {
+                val message = entity.getCharacterData()?.totemOfUndyingResurrectionPhrases?.randomOrNull()
+                    ?: genericReactionMessages?.totemOfUndyingResurrectionPhrases?.randomOrNull()
+
+                message?.let {
+                    entity.talk(
+                        player, it,
+                        displaySize = 0.55F,
+                        followDuringDialogue = false,
+                        interruptPreviousDialogue = true
+                    )
                 }
-                if (event.finalDamage >= entity.health) {
-                    if (entity.equipment?.getItem(EquipmentSlot.OFF_HAND)?.type == Material.TOTEM_OF_UNDYING) {
-                        val message = entity.getCharacterData()?.totemOfUndyingResurrectionPhrases?.random() ?: genericReactionMessages.totemOfUndyingResurrectionPhrases.random()
-                        entity.talk(player, message, displaySize = 0.55F, followDuringDialogue = false, interruptPreviousDialogue = true)
-                    }
-                    return
-                }
-                val message = entity.getCharacterData()?.damagePhrases?.random() ?: genericReactionMessages.damagePhrases.random()
-                entity.talk(player, message, displaySize = 0.55F, followDuringDialogue = false, interruptPreviousDialogue = true)
             }
+            return
+        }
+
+        // 3. Standard Damage Reaction
+        val message = entity.getCharacterData()?.damagePhrases?.randomOrNull()
+            ?: genericReactionMessages?.damagePhrases?.randomOrNull()
+
+        message?.let {
+            entity.talk(
+                player, it,
+                displaySize = 0.55F,
+                followDuringDialogue = false,
+                interruptPreviousDialogue = true
+            )
         }
     }
 
     class Builder(villager: Villager, viewer: Player) {
         private val menu: Menu = Menu(villager, viewer)
-        fun button(name: String, buttonColor: Color = defaultButtonColor, isRainbow: Boolean = false, action: (Menu) -> Unit): Builder {
-            menu.addLine(name, buttonColor, isRainbow, { action(menu) })
+
+        fun button(
+            name: String,
+            buttonColor: Color = defaultButtonColor,
+            isRainbow: Boolean = false,
+            action: (Menu) -> Unit
+        ): Builder {
+            menu.addLine(name, buttonColor, isRainbow) {
+                action(menu)
+            }
             return this
         }
-        fun build(): Menu { return menu }
+
+        fun build(): Menu {
+            return menu
+        }
     }
 }
