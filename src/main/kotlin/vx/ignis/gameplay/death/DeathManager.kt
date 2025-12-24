@@ -70,24 +70,19 @@ class DeathManager : Listener {
             // 1. Взять на плечи / Снять с плеч
             if (player.isSneaking) {
                 if (villager.vehicle == null) {
-                    // --- ВЗЯТЬ ---
-                    // ВАЖНО: Выключаем режим лежания, иначе хитбокс жителя
-                    // застрянет в голове игрока и его сбросит сервер.
-                    villager.isGliding = false
-                    villager.isSwimming = false
-
                     if (player.addPassenger(villager)) {
+                        villager.pose = Pose.SITTING
                         player.sendActionBar(Component.text("You are carrying ${villager.customName}", NamedTextColor.YELLOW))
                     }
                 } else {
-                    // --- БРОСИТЬ ---
+
                     villager.leaveVehicle()
 
                     // Возвращаем позу лежания с небольшой задержкой,
                     // чтобы он успел "отлипнуть" от игрока
                     plugin.server.scheduler.runTaskLater(plugin, { _ ->
                         if (isDowned(villager)) {
-                            villager.isGliding = true
+                            villager.pose = if (Random.nextBoolean()) Pose.SLEEPING else Pose.SWIMMING
                         }
                     }, 5L)
                 }

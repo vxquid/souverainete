@@ -17,6 +17,7 @@ dependencies {
     implementation(project(":nms-support:v1_21_R3"))
     implementation(project(":nms-support:v1_21_R5"))
     implementation(project(":nms-support:v1_21_R6"))
+    implementation(project(":nms-support:v1_21_R7"))
 }
 
 kotlin {

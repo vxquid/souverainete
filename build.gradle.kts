@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ignis"
-version = "0.3.4.2"
+version = "0.3.5"
 description = "Let AI make your server alive with AI-generated NPCs, quests, towns, items and a lot more."
 
 bukkitPluginYaml {
@@ -33,7 +33,7 @@ repositories {
 }
 
 dependencies {
-  paperweight.paperDevBundle("1.21.10-R0.1-SNAPSHOT")
+  paperweight.paperDevBundle("1.21.11-R0.1-SNAPSHOT")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")

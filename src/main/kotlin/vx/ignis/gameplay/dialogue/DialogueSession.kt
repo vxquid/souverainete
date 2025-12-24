@@ -26,17 +26,20 @@ import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.Ignis.Companion.sendFormattedMessage
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.memory.MemoryManager.Companion.getEmotionalMemory
-import vx.ignis.gameplay.party.PartyManager.Companion.partyLeaderUUID // ИМПОРТ
+import vx.ignis.gameplay.party.PartyManager.Companion.partyLeaderUUID
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.ignis.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.ignis.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.ignis.persistent.LivingEntityExtend.getVoicePitch
 import vx.ignis.persistent.LivingEntityExtend.getVoiceSound
+import vx.ignis.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import vx.ignis.persistent.VillagerExtend.professionLevelName
 import vx.ignis.util.Daytime
 
 class DialogueSession(val player: Player, val entity: Villager) : Listener, PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
+
+    private val MAX_SHORT_MEMORY_SIZE = 5 // Добавлена константа для ограничения короткой памяти
 
     var readyToSend = true
     var cancelled = false
@@ -95,6 +98,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
     private fun onPlayerDropItem(event: PlayerDropItemEvent) {
         if (giftAwaiting && event.player == player && !cancelled) {
             if (readyToSend) {
+                entity.addItemToQuillInventory(event.itemDrop.itemStack)
                 this.cooldown()
                 this.generateGiftReaction(player, entity, event.itemDrop.itemStack.clone(), dialogueHistory)
                 plugin.gameplayManager.humanoidManager.protocolListener.temporaryEquip(entity, EquipmentSlot.HAND, event.itemDrop.itemStack, 60)
@@ -272,6 +276,10 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             // NPC memory modification.
             entity.getEmotionalMemory().let { memory ->
                 memory.shortMemory.add(reaction.memoryNode)
+                // Ограничение короткой памяти
+                if (memory.shortMemory.size > MAX_SHORT_MEMORY_SIZE) {
+                    memory.shortMemory.removeAt(0)
+                }
                 memory.opinions[player.uniqueId] = reaction.updatedOpinionOnPlayer
                 memory.save(entity)
             }
@@ -282,13 +290,29 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             var delay = 0L
             for (message in reaction.npcResponse) {
                 plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                    player.sendFormattedMessage(npcResponseMessage.replace("{npcName}", entity.customName ?: "NPC").replace("{message}", message))
+                    // Новая логика форматирования: аква курсив для сообщений-действий в астерисках
+                    val formattedMessage = if (message.startsWith("*") && message.endsWith("*")) {
+                        val cleanedMessage = message.removePrefix("*").removeSuffix("*")
+                        // Заменяем стандартный цвет §f на Aqua §b и Italic §o
+                        npcResponseMessage
+                            .replace("§f{message}", "§7§o{message}")
+                            .replace("{npcName}", entity.customName ?: "NPC")
+                            .replace("{message}", cleanedMessage)
+                    } else {
+                        // Стандартное форматирование для обычных сообщений
+                        npcResponseMessage
+                            .replace("{npcName}", entity.customName ?: "NPC")
+                            .replace("{message}", message)
+                    }
+
+                    player.sendFormattedMessage(formattedMessage)
                     player.playSound(player.eyeLocation, XSound.UI_TOAST_IN.get() ?: throw NullPointerException(), 1F, 1.25F)
                     // Handling directive only on last message of the response.
                     if (reaction.npcResponse.last() == message) {
                         if (!reaction.keepTheGift) {
+                            entity.takeItemFromQuillInventory(gift, gift.amount)
                             entity.world.dropItem(entity.location, gift)
-                        } else entity.addItemToQuillInventory(gift)
+                        }
                         readyToSend = true
                         // Modifying reputation after talking. We should add check for it.
                         plugin.gameplayManager.reputationManager.addReputation(entity, player, impression.score)
@@ -309,6 +333,10 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             // NPC memory modification.
             entity.getEmotionalMemory().let { memory ->
                 memory.shortMemory.add(responseData.memoryNode)
+                // Ограничение короткой памяти
+                if (memory.shortMemory.size > MAX_SHORT_MEMORY_SIZE) {
+                    memory.shortMemory.removeAt(0)
+                }
                 memory.opinions[player.uniqueId] = responseData.updatedOpinionOnPlayer
                 memory.save(entity)
             }
@@ -320,7 +348,22 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             var delay = 0L
             for (message in responseData.npcResponse) {
                 plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                    player.sendFormattedMessage(npcResponseMessage.replace("{npcName}", entity.customName ?: "NPC").replace("{message}", message))
+                    // Новая логика форматирования: аква курсив для сообщений-действий в астерисках
+                    val formattedMessage = if (message.startsWith("*") && message.endsWith("*")) {
+                        val cleanedMessage = message.removePrefix("*").removeSuffix("*")
+                        // Заменяем стандартный цвет §f на Aqua §b и Italic §o
+                        npcResponseMessage
+                            .replace("§f{message}", "§7§o{message}")
+                            .replace("{npcName}", entity.customName ?: "NPC")
+                            .replace("{message}", cleanedMessage)
+                    } else {
+                        // Стандартное форматирование для обычных сообщений
+                        npcResponseMessage
+                            .replace("{npcName}", entity.customName ?: "NPC")
+                            .replace("{message}", message)
+                    }
+
+                    player.sendFormattedMessage(formattedMessage)
                     player.playSound(player.eyeLocation, XSound.UI_TOAST_IN.get() ?: throw NullPointerException(), 1F, 1.25F)
                     // Handling directive only on last message of the response.
                     if (responseData.npcResponse.last() == message) {

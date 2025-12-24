@@ -94,9 +94,9 @@ class PersonalityManager {
                       "totemOfUndyingResurrectionPhrases": [array of 5 unique strings; exclamations upon resurrection via Totem of Undying; heavily personality-dependent (e.g., grateful for kind personalities, vengeful for aggressive ones); include awe or relief],
                       "imprisonedOrStuckPhrases": [array of 5 unique strings; pleas or comments when trapped for a long time; usually beg for help, but vary by personality (e.g., proud ones might demand freedom haughtily)],
                       
-                      "startFightPhrases": [array of 5 unique strings; battle cries, threats, or confident remarks when the NPC enters combat mode; highly dependent on personality (e.g., a coward might panic, a warrior will shout a challenge)],
-                      "meleeKillPhrases": [array of 5 unique strings; victory lines after killing an enemy in close combat; emphasize strength, brutality, or relief],
-                      "rangedKillPhrases": [array of 5 unique strings; victory lines after killing an enemy with a projectile (bow/crossbow); emphasize precision, sharp-shooting skills, or distance]
+                      "startFightPhrases": [array of 10 unique strings; battle cries, threats, or confident remarks when the NPC enters combat mode; highly dependent on personality (e.g., a coward might panic, a warrior will shout a challenge)],
+                      "meleeKillPhrases": [array of 10 unique strings; victory lines after killing an enemy in close combat; emphasize strength, brutality, or relief],
+                      "rangedKillPhrases": [array of 10 unique strings; victory lines after killing an enemy with a projectile (bow/crossbow); emphasize precision, sharp-shooting skills, or distance]
                     }
                 """.trimIndent(),
                 targetClass = CharacterData::class
