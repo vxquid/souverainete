@@ -25,9 +25,22 @@ quest:
   accepted: "You have accepted the quest §6{quest}§7."
   limit: "You can't have more than §6{playerQuestLimit} §7quests."
   already-accepted: "You already have this quest."
+  description-missing: "Quest description missing."
 
 party:
   member: "§b{playerName} Party Member"
+  full: "Your party is full!"
+  dismiss-response: "Farewell, traveler."
+  order:
+    follow: "§eOrder: §aFollow"
+    stay: "§eOrder: §cStay Here"
+    response-follow: "Right behind you."
+    response-stay: "I'll hold this position."
+  tactic:
+    prefix: "§eTactic: "
+    response-auto: "I'll fight as I see fit."
+    response-melee: "Swords up! Close quarters it is."
+    response-ranged: "I'll keep my distance and shoot."
 
 reputation:
   status:
@@ -76,6 +89,7 @@ command-message:
     deactivated: "§cVerbose mode deactivated."
 
 info-messages:
+  premium-only: "This feature is only available in the premium version."
   quest-chat-info:
     quest-giver: "NPC: §6{npcName}"
     task-description: "Task Description: §f{desc}"
@@ -94,17 +108,9 @@ info-messages:
     amount: "You have §d{questAmount} §7quests."
     statistics: "§6Questing Statistics"
     totally-generated: "In total, §3{questCount} §7quests have been generated."
-    dqi-amount: "Total amount of dynamic quest items is §d{dqiAmount}§7."
     completed: "You have completed §2{questsCompleted} §7quests."
     failed: "You have failed §4{questsFailed} §7quests."
     xp-earned: "You have earned §e{xpEarned}xp §7by completing quests."
-    hold-item: "You must hold something in your hand to use this command."
-    dqi-added: "You have added a new dynamic quest item for §6{entityType} §7entity type."
-    mm-dqi-added: "You have added a new dynamic quest item for §6{entityType} §7mythic mob."
-    ee-not-exist: "Entity type §6{entityType} §7doesn't exist."
-    deleted-dqi-by-ee: "Deleted §e{rowsAffected} §7dynamic quest items from §6{entityType}§7."
-    deleted-dqi-by-id: "Deleted dynamic quest item with ID §b{id}§7."
-    non-existent-id: "Deleted dynamic quest item failed; no item with ID §b{id}§7 found."
 
 # Interaction menu buttons.
 interaction-menu:
@@ -119,6 +125,9 @@ interaction-menu:
   accept-button: "Accept"
   decline-button: "Decline"
   close-button: "Close"
+  party-invite-button: "Follow Me"
+  party-control-button: "§bManage Companion"
+  party-kick-button: "§4Dismiss"
 
 # Error messages. THAT WAS AN ERROR.
 command-error-message:

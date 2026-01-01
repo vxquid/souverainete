@@ -1,5 +1,6 @@
 package vx.ignis.util
 
+import org.bukkit.Sound
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.geysermc.cumulus.form.Form
@@ -9,9 +10,12 @@ import org.geysermc.floodgate.api.FloodgateApi
 import org.geysermc.geyser.api.GeyserApi
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.Ignis.Companion.premium
+import vx.ignis.Ignis.Companion.sendFormattedMessage
 import vx.ignis.gameplay.dialogue.DialogueSession
 import vx.ignis.gameplay.dialogue.DialogueSession.Companion.getActiveDialogueSession
 import vx.ignis.gameplay.event.PlayerAcceptQuestEvent
+import vx.ignis.gameplay.party.PartyManager.CombatTactic
+import vx.ignis.gameplay.party.PartyManager.PartyState
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
 import vx.ignis.gameplay.trade.TradeManager.Companion.openTradeMenu
@@ -19,15 +23,17 @@ import vx.ignis.persistent.LivingEntityExtend.quests
 
 class GeyserSupportProvider {
 
-    val dialogueBoxTextBaseColor        = "&f"
-    val dialogueBoxTextImportantColor   = "&5"
-    val dialogueBoxTextInterestingColor = "&5"
+    private val dialogueBoxTextBaseColor        = "&f"
+    private val dialogueBoxTextImportantColor   = "&5"
+    private val dialogueBoxTextInterestingColor = "&5"
+
+    private val partyManager by lazy { plugin.gameplayManager.partyManager }
 
     init {
         plugin.logger.info("Geyser usage detected. Support for Bedrock Edition players will be provided.")
     }
 
-    fun checkGeyserPlayer(player: Player) : Boolean = try {
+    fun checkGeyserPlayer(player: Player): Boolean = try {
         GeyserApi.api().connectionByUuid(player.uniqueId) != null
     } catch (_: Exception) {
         false
@@ -41,109 +47,186 @@ class GeyserSupportProvider {
         }
     }
 
-    // QI automatically detects if the player is playing through Geyser, and if true, selects a menu from Form. Suddenly, Bedrock Edition has one cool feature — the ability to create your own GUI.
     fun openInteractionMenu(player: Player, villager: Villager) {
+        // Load localized strings
+        val questBtnText = plugin.language.getString("interaction-menu.quests-button") ?: "Quests"
+        val tradeBtnText = plugin.language.getString("interaction-menu.trade-button") ?: "Trade"
+        val giftBtnText = plugin.language.getString("interaction-menu.gift-button") ?: "Gift"
+        val interruptBtnText = plugin.language.getString("interaction-menu.interrupt-button") ?: "Interrupt Conversation"
+        val closeBtnText = plugin.language.getString("interaction-menu.close-button") ?: "Close"
+        val talkBtnText = plugin.language.getString("interaction-menu.talk-button") ?: "Chat"
+        val acceptBtnText = plugin.language.getString("interaction-menu.accept-button") ?: "Accept"
+        val declineBtnText = plugin.language.getString("interaction-menu.decline-button") ?: "Decline" // Unused in main menu but good for consistancy
 
-        val questListForm = SimpleForm.builder()
-            .title(plugin.language.getString("interaction-menu.quests-button")!!)
+        val partyManageText = plugin.language.getString("interaction-menu.party-control-button") ?: "§bManage Companion"
+        val partyInviteText = plugin.language.getString("interaction-menu.party-invite-button") ?: "Follow Me"
 
-        villager.quests().forEach { quest ->
-            questListForm.button(quest.name)
-        }
+        // Quest List Form
+        val questListForm = SimpleForm.builder().title(questBtnText)
+        villager.quests().forEach { quest -> questListForm.button(quest.name) }
+        questListForm.button(closeBtnText)
 
-        questListForm.button(plugin.language.getString("interaction-menu.close-button")!!)
         questListForm.validResultHandler { response ->
-
             val buttonName = response.clickedButton().text()
-            if (buttonName == plugin.language.getString("interaction-menu.close-button")!!) return@validResultHandler
+            if (buttonName == closeBtnText) return@validResultHandler
 
-            val quest = villager.quests().find { it.name == response.clickedButton().text() } ?: return@validResultHandler
+            val quest = villager.quests().find { it.name == buttonName } ?: return@validResultHandler
 
-            // Looking for a quest description.
-            val questDescription = quest.let {
-                when (villager.reputationOf(player)) {
-                    Reputation.EXALTED -> quest.data.reputationBasedQuestDescriptions[7]
-                    Reputation.REVERED -> quest.data.reputationBasedQuestDescriptions[6]
-                    Reputation.HONORED -> quest.data.reputationBasedQuestDescriptions[5]
-                    Reputation.FRIENDLY -> quest.data.reputationBasedQuestDescriptions[4]
-                    Reputation.NEUTRAL -> quest.data.reputationBasedQuestDescriptions[3]
-                    Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestDescriptions[2]
-                    Reputation.HOSTILE -> quest.data.reputationBasedQuestDescriptions[1]
-                    Reputation.EXILED -> quest.data.reputationBasedQuestDescriptions[0]
-                }.replace("%playerName%", player.name)
-            }
+            val questDescriptionRaw = villager.let { npc ->
+                when (npc.reputationOf(player)) {
+                    Reputation.EXALTED -> quest.data.reputationBasedQuestDescriptions.getOrNull(0)
+                    Reputation.REVERED -> quest.data.reputationBasedQuestDescriptions.getOrNull(1)
+                    Reputation.HONORED -> quest.data.reputationBasedQuestDescriptions.getOrNull(2)
+                    Reputation.FRIENDLY -> quest.data.reputationBasedQuestDescriptions.getOrNull(3)
+                    Reputation.NEUTRAL -> quest.data.reputationBasedQuestDescriptions.getOrNull(4)
+                    Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestDescriptions.getOrNull(5)
+                    Reputation.HOSTILE -> quest.data.reputationBasedQuestDescriptions.getOrNull(6)
+                    Reputation.EXILED -> quest.data.reputationBasedQuestDescriptions.getOrNull(7)
+                }
+            } ?: (plugin.language.getString("quest.description-missing") ?: "Quest description missing.")
 
-            // Markdown parsing.
+            val questDescription = questDescriptionRaw.replace("%playerName%", player.name)
+
+            // Markdown parsing
             val formattedQuestDescription = dialogueBoxTextBaseColor + questDescription.replace(Regex("\\*\\*(.*?)\\*\\*")) { matchResult ->
                 "${dialogueBoxTextImportantColor}${matchResult.groupValues[1]}${dialogueBoxTextBaseColor}"
             }.replace(Regex("\\*(.*?)\\*")) { matchResult ->
                 "${dialogueBoxTextInterestingColor}${matchResult.groupValues[1]}${dialogueBoxTextBaseColor}"
             }.replace("\\\"", "\"")
 
-            // Menu with quest description.
+            // Quest Detail Modal
             val questDescriptionForm = ModalForm.builder()
-                .title(response.clickedButton().text())
+                .title(buttonName)
                 .content(formattedQuestDescription)
-                .button1(plugin.language.getString("interaction-menu.accept-button")!!)
-                .button2(plugin.language.getString("interaction-menu.close-button")!!)
+                .button1(acceptBtnText)
+                .button2(closeBtnText)
                 .validResultHandler { responseData ->
-                    if (responseData.clickedButtonText() == plugin.language.getString("interaction-menu.accept-button")!!) {
+                    if (responseData.clickedButtonText() == acceptBtnText) {
                         plugin.server.scheduler.runTask(plugin) { _ ->
                             plugin.server.pluginManager.callEvent(PlayerAcceptQuestEvent(player, villager, quest))
                         }
                     }
                 }
-
             this.openForm(player, questDescriptionForm.build())
         }
 
+        // Active Dialogue Menu
         val dialogueSessionForm = SimpleForm.builder()
             .title(villager.customName ?: "Unknown")
-            .button(plugin.language.getString("interaction-menu.quests-button")!!)
-            .button(plugin.language.getString("interaction-menu.trade-button")!!)
-            .button(plugin.language.getString("interaction-menu.gift-button")!!)
-            .button(plugin.language.getString("interaction-menu.interrupt-button")!!)
-            .button(plugin.language.getString("interaction-menu.close-button")!!)
+            .button(questBtnText)
+            .button(tradeBtnText)
+            .button(giftBtnText)
+            .button(interruptBtnText)
+            .button(closeBtnText)
             .validResultHandler { responseData ->
-                if (responseData.clickedButton().text() == plugin.language.getString("interaction-menu.quests-button")!!) {
-                    this.openForm(player, questListForm.build())
-                }
-                if (responseData.clickedButton().text() == plugin.language.getString("interaction-menu.trade-button")!!) {
-                    plugin.server.scheduler.runTask(plugin) { _ ->
-                        villager.openTradeMenu(player)
-                    }
-                }
-                if (responseData.clickedButton().text() == plugin.language.getString("interaction-menu.gift-button")!!) {
-                    if (player.getActiveDialogueSession()?.giftAwaiting == false) player.getActiveDialogueSession()?.giftAwaiting = true
-                }
-                if (responseData.clickedButton().text() == plugin.language.getString("interaction-menu.interrupt-button")!!) {
-                    player.getActiveDialogueSession()?.cancelled = true
+                val clickedText = responseData.clickedButton().text()
+                when (clickedText) {
+                    questBtnText -> this.openForm(player, questListForm.build())
+                    tradeBtnText -> plugin.server.scheduler.runTask(plugin) { _ -> villager.openTradeMenu(player) }
+                    giftBtnText -> if (player.getActiveDialogueSession()?.giftAwaiting == false) player.getActiveDialogueSession()?.giftAwaiting = true
+                    interruptBtnText -> player.getActiveDialogueSession()?.cancelled = true
                 }
             }
 
-        val mainForm = SimpleForm.builder()
+        // Main Interaction Menu
+        val mainFormBuilder = SimpleForm.builder()
             .title(villager.customName ?: "Unknown")
-            .button(plugin.language.getString("interaction-menu.quests-button")!!)
-            .button(plugin.language.getString("interaction-menu.trade-button")!!)
-            .button(plugin.language.getString("interaction-menu.talk-button")!!)
-            .button(plugin.language.getString("interaction-menu.close-button")!!)
-            .validResultHandler { responseData ->
-                if (responseData.clickedButton().text() == plugin.language.getString("interaction-menu.quests-button")!!) {
-                    this.openForm(player, questListForm.build())
-                }
-                if (responseData.clickedButton().text() == plugin.language.getString("interaction-menu.trade-button")!!) {
-                    plugin.server.scheduler.runTask(plugin) { _ ->
-                        villager.openTradeMenu(player)
+            .button(questBtnText)
+            .button(tradeBtnText)
+
+        // Party Logic Buttons
+        val isPartyMember = partyManager.isMember(player, villager)
+        val canInvite = !partyManager.hasParty(villager) && villager.reputationOf(player).ordinal <= 3
+
+        if (isPartyMember) {
+            mainFormBuilder.button(partyManageText)
+        } else if (canInvite) {
+            mainFormBuilder.button(partyInviteText)
+        }
+
+        mainFormBuilder.button(talkBtnText)
+        mainFormBuilder.button(closeBtnText)
+
+        mainFormBuilder.validResultHandler { responseData ->
+            val clickedText = responseData.clickedButton().text()
+
+            when (clickedText) {
+                questBtnText -> this.openForm(player, questListForm.build())
+                tradeBtnText -> plugin.server.scheduler.runTask(plugin) { _ -> villager.openTradeMenu(player) }
+                partyManageText -> this.openPartyControlMenu(player, villager)
+                partyInviteText -> {
+                    if (partyManager.addMember(player, villager)) {
+                        player.playSound(player.location, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f)
+                        this.openInteractionMenu(player, villager) // Refresh
+                    } else {
+                        player.sendFormattedMessage(plugin.language.getString("party.full") ?: "Your party is full!")
                     }
                 }
-                if (responseData.clickedButton().text() == plugin.language.getString("interaction-menu.talk-button")!!) {
+                talkBtnText -> {
                     if (premium) {
                         if (player.getActiveDialogueSession() == null) DialogueSession(player, villager)
+                    } else {
+                        player.sendFormattedMessage(plugin.language.getString("info-messages.premium-only") ?: "This feature is only available in the premium version.")
                     }
                 }
             }
+        }
 
-        this.openForm(player, if(player.getActiveDialogueSession() != null) dialogueSessionForm.build() else mainForm.build())
+        this.openForm(player, if (player.getActiveDialogueSession() != null) dialogueSessionForm.build() else mainFormBuilder.build())
+    }
+
+    private fun openPartyControlMenu(player: Player, villager: Villager) {
+        // Load Party Strings
+        val closeBtnText = plugin.language.getString("interaction-menu.close-button") ?: "Close"
+        val dismissBtnText = plugin.language.getString("interaction-menu.party-kick-button") ?: "§4Dismiss"
+        val returnBtnText = plugin.language.getString("interaction-menu.return-button") ?: "Return"
+
+        // Order Button Text
+        val currentState = partyManager.getPartyState(villager)
+        val orderBtnText = if (currentState == PartyState.FOLLOW)
+            plugin.language.getString("party.order.follow") ?: "§eOrder: §aFollow"
+        else
+            plugin.language.getString("party.order.stay") ?: "§eOrder: §cStay Here"
+
+        // Tactic Button Text
+        val currentTactic = partyManager.getCombatTactic(villager)
+        val tacticColor = when (currentTactic) {
+            CombatTactic.AUTO -> "§a"
+            CombatTactic.MELEE -> "§c"
+            CombatTactic.RANGED -> "§b"
+        }
+        val tacticPrefix = plugin.language.getString("party.tactic.prefix") ?: "§eTactic: "
+        val tacticBtnText = "$tacticPrefix$tacticColor${currentTactic.name}"
+
+        // Build Form
+        val form = SimpleForm.builder()
+            .title(plugin.language.getString("interaction-menu.party-control-button") ?: "Companion")
+            .button(orderBtnText)
+            .button(tacticBtnText)
+            .button(dismissBtnText)
+            .button(returnBtnText)
+            .validResultHandler { response ->
+                when (response.clickedButton().text()) {
+                    orderBtnText -> {
+                        partyManager.togglePartyState(villager)
+                        this.openPartyControlMenu(player, villager) // Re-open to update text
+                    }
+                    tacticBtnText -> {
+                        partyManager.cycleCombatTactic(villager)
+                        this.openPartyControlMenu(player, villager) // Re-open to update text
+                    }
+                    dismissBtnText -> {
+                        partyManager.removeMember(player, villager)
+                        val msg = plugin.language.getString("party.dismiss-response") ?: "Farewell, traveler."
+                        player.sendFormattedMessage(msg) // Send to chat as feedback
+                        this.openInteractionMenu(player, villager)
+                    }
+                    returnBtnText -> {
+                        this.openInteractionMenu(player, villager)
+                    }
+                }
+            }
+        this.openForm(player, form.build())
     }
 
 }

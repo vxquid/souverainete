@@ -222,14 +222,14 @@ class QuestManager : Listener {
     /* Определяем текст после завершения квеста на основании репутации игрока. */
     private fun determineFinishingDialogue(player: Player, entity: LivingEntity, quest: Quest) : String {
         return when (entity.reputationOf(player)) {
-            Reputation.EXALTED    -> quest.data.reputationBasedQuestFinishingDialogues[7]
-            Reputation.REVERED    -> quest.data.reputationBasedQuestFinishingDialogues[6]
-            Reputation.HONORED    -> quest.data.reputationBasedQuestFinishingDialogues[5]
-            Reputation.FRIENDLY   -> quest.data.reputationBasedQuestFinishingDialogues[4]
-            Reputation.NEUTRAL    -> quest.data.reputationBasedQuestFinishingDialogues[3]
-            Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestFinishingDialogues[2]
-            Reputation.HOSTILE    -> quest.data.reputationBasedQuestFinishingDialogues[1]
-            Reputation.EXILED     -> quest.data.reputationBasedQuestFinishingDialogues[0]
+            Reputation.EXALTED    -> quest.data.reputationBasedQuestFinishingDialogues[0]
+            Reputation.REVERED    -> quest.data.reputationBasedQuestFinishingDialogues[1]
+            Reputation.HONORED    -> quest.data.reputationBasedQuestFinishingDialogues[2]
+            Reputation.FRIENDLY   -> quest.data.reputationBasedQuestFinishingDialogues[3]
+            Reputation.NEUTRAL    -> quest.data.reputationBasedQuestFinishingDialogues[4]
+            Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestFinishingDialogues[5]
+            Reputation.HOSTILE    -> quest.data.reputationBasedQuestFinishingDialogues[6]
+            Reputation.EXILED     -> quest.data.reputationBasedQuestFinishingDialogues[7]
         }.replace("%playerName%", player.name)
     }
 
