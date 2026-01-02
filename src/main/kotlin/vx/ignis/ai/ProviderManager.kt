@@ -8,7 +8,7 @@ import vx.ignis.config.lib.ConfigurationManager
 
 class ProviderManager {
 
-    val config: ProviderConfiguration = ConfigurationManager.load(ProviderConfiguration::class.java)
+    val config: ProviderConfiguration = ConfigurationManager.load(plugin, ProviderConfiguration::class.java)
 
     val client: AIClient = run {
 

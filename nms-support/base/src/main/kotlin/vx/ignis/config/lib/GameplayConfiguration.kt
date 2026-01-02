@@ -1,6 +1,6 @@
-package vx.ignis.config
+package vx.ignis.config.lib
 
-import org.bukkit.entity.Display.Billboard
+import org.bukkit.entity.Display
 import vx.ignis.config.lib.annotations.Comment
 import vx.ignis.config.lib.annotations.Configuration
 import vx.ignis.config.lib.annotations.Header
@@ -20,6 +20,7 @@ class GameplayConfiguration {
     val quest      = QuestConfig()
     val profession = ProfessionConfig()
     val uniqueItem = UniqueItemConfig()
+    val party      = PartyConfig()
 
     class GeneralConfig {
         @Comment("Message prefix.")
@@ -140,7 +141,7 @@ class GameplayConfiguration {
         var hungerTemplate: String = "§c%s (%.1f / %.1f)"
 
         @Comment("Billboard rendering mode for the display. FIXED, VERTICAL, HORIZONTAL, CENTER.")
-        var billboard: Billboard = Billboard.CENTER
+        var billboard: Display.Billboard = Display.Billboard.CENTER
 
         @Comment("Whether the display entity renders as see-through (ignores blocks).")
         var seeThrough: Boolean = false
@@ -321,6 +322,20 @@ class GameplayConfiguration {
 
         @Comment("Base armor toughness for netherite armor.")
         var baseArmorToughnessNetherite: Double = 3.0
+    }
+
+    class PartyConfig {
+        @Comment("Maximum number of members allowed in a player's party.")
+        var maxPartySize: Int = 1
+
+        @Comment("Whether party members are automatically removed from the party list when they die.")
+        var removeMemberOnDeath: Boolean = true
+
+        @Comment("Default combat tactic for new party members.", "AUTO, MELEE, RANGED")
+        var defaultCombatTactic: String = "AUTO"
+
+        @Comment("Default state for new party members.", "FOLLOW, STAY")
+        var defaultPartyState: String = "FOLLOW"
     }
 
 }

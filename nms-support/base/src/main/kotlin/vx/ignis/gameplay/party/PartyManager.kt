@@ -11,11 +11,14 @@ import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
+import vx.ignis.config.lib.GameplayConfiguration
+
 import java.util.*
 
-class PartyManager(private val plugin: JavaPlugin) : Listener {
-
-    private val maxPartySize = 1
+class PartyManager(
+    private val plugin: JavaPlugin,
+    private val config: GameplayConfiguration
+) : Listener {
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
@@ -27,7 +30,7 @@ class PartyManager(private val plugin: JavaPlugin) : Listener {
     }
 
     enum class CombatTactic {
-        AUTO,   // ИИ сам решает (как раньше)
+        AUTO,   // ИИ сам решает
         MELEE,  // Только ближний бой
         RANGED  // Только дальний бой
     }
@@ -72,14 +75,28 @@ class PartyManager(private val plugin: JavaPlugin) : Listener {
 
         // Используем extension для получения списка
         val currentMembers = leader.partyMemberUUIDs.toMutableList()
-        if (currentMembers.size >= maxPartySize) return false
+
+        // Проверка лимита из конфига
+        if (currentMembers.size >= config.party.maxPartySize) return false
 
         // Установка лидера через extension
         villager.partyLeaderUUID = leader.uniqueId
 
-        // При вступлении сбрасываем настройки на дефолт
-        villager.partyState = PartyState.FOLLOW
-        villager.combatTactic = CombatTactic.AUTO
+        // При вступлении сбрасываем настройки на дефолт из конфига
+        val defaultState = try {
+            PartyState.valueOf(config.party.defaultPartyState)
+        } catch (_: IllegalArgumentException) {
+            PartyState.FOLLOW
+        }
+
+        val defaultTactic = try {
+            CombatTactic.valueOf(config.party.defaultCombatTactic)
+        } catch (_: IllegalArgumentException) {
+            CombatTactic.AUTO
+        }
+
+        villager.partyState = defaultState
+        villager.combatTactic = defaultTactic
 
         currentMembers.add(villager.uniqueId)
         leader.partyMemberUUIDs = currentMembers // Сохранение через extension
@@ -117,6 +134,9 @@ class PartyManager(private val plugin: JavaPlugin) : Listener {
 
     @EventHandler
     private fun onVillagerDeath(event: EntityDeathEvent) {
+        // Проверяем настройку конфига
+        if (!config.party.removeMemberOnDeath) return
+
         val villager = event.entity as? Villager ?: return
         val leaderUUID = villager.partyLeaderUUID ?: return
 
@@ -132,7 +152,7 @@ class PartyManager(private val plugin: JavaPlugin) : Listener {
     // --- COMPANION OBJECT (Global Access) ---
 
     companion object {
-        // Ключи теперь публичные и статические, берут плагин из глобального контекста Ignis
+        // Ключи публичные и статические
         val leaderKey = NamespacedKey("ignis", "party_leader")
         val membersKey = NamespacedKey("ignis", "party_members")
         val stateKey = NamespacedKey("ignis", "party_state")
@@ -149,7 +169,7 @@ class PartyManager(private val plugin: JavaPlugin) : Listener {
             get() {
                 val stateName = this.persistentDataContainer.get(stateKey, PersistentDataType.STRING)
                     ?: return PartyState.FOLLOW
-                return try { PartyState.valueOf(stateName) } catch (e: Exception) { PartyState.FOLLOW }
+                return try { PartyState.valueOf(stateName) } catch (_: Exception) { PartyState.FOLLOW }
             }
             set(value) {
                 this.persistentDataContainer.set(stateKey, PersistentDataType.STRING, value.name)
@@ -162,19 +182,19 @@ class PartyManager(private val plugin: JavaPlugin) : Listener {
             get() {
                 val tacticName = this.persistentDataContainer.get(tacticKey, PersistentDataType.STRING)
                     ?: return CombatTactic.AUTO
-                return try { CombatTactic.valueOf(tacticName) } catch (e: Exception) { CombatTactic.AUTO }
+                return try { CombatTactic.valueOf(tacticName) } catch (_: Exception) { CombatTactic.AUTO }
             }
             set(value) {
                 this.persistentDataContainer.set(tacticKey, PersistentDataType.STRING, value.name)
             }
 
         /**
-         * UUID лидера пати (если есть). Можно и читать, и писать (с осторожностью).
+         * UUID лидера пати (если есть).
          */
         var LivingEntity.partyLeaderUUID: UUID?
             get() {
                 val uuidStr = this.persistentDataContainer.get(leaderKey, PersistentDataType.STRING) ?: return null
-                return try { UUID.fromString(uuidStr) } catch (e: IllegalArgumentException) { null }
+                return try { UUID.fromString(uuidStr) } catch (_: IllegalArgumentException) { null }
             }
             set(value) {
                 if (value == null) {
@@ -193,7 +213,7 @@ class PartyManager(private val plugin: JavaPlugin) : Listener {
                 return try {
                     val type = object : TypeToken<List<UUID>>() {}.type
                     gson.fromJson(json, type) ?: emptyList()
-                } catch (e: Exception) { emptyList() }
+                } catch (_: Exception) { emptyList() }
             }
             set(value) {
                 if (value.isEmpty()) {
@@ -204,5 +224,4 @@ class PartyManager(private val plugin: JavaPlugin) : Listener {
                 }
             }
     }
-
 }

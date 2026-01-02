@@ -7,8 +7,8 @@ import org.bukkit.event.Listener
 import org.bukkit.event.world.WorldLoadEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.config.GameplayConfiguration
 import vx.ignis.config.lib.ConfigurationManager
+import vx.ignis.config.lib.GameplayConfiguration
 import vx.ignis.gameplay.dialogue.DialogueManager
 import vx.ignis.gameplay.dialogue.menu.InteractionManager
 import vx.ignis.gameplay.dictionary.CustomItemDictionary
@@ -26,7 +26,7 @@ import vx.ignis.nms.VersionBridge
 
 class GameplayManager(val firstWorld: World) : Listener {
 
-    val config: GameplayConfiguration    = ConfigurationManager.load(GameplayConfiguration::class.java)
+    val config: GameplayConfiguration    = ConfigurationManager.load(plugin, GameplayConfiguration::class.java)
     val allowedWorlds: MutableSet<World> = mutableSetOf(firstWorld)
 
     val actualQuests = firstWorld.persistentDataContainer.get(NamespacedKey(plugin, "ActualQuests"), PersistentDataType.LONG_ARRAY)?.toMutableList() ?: mutableListOf<Long>().toLongArray().also {
@@ -49,7 +49,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     val professionManager  = ProfessionManager()
     val settlementManager  = SettlementManager()
     val hungerManager      = HungerManager.also { it.startTicker() }
-    val partyManager       = PartyManager(plugin)
+    val partyManager       = PartyManager(plugin, plugin.gameplayManager.config)
     //val deathManager       = DeathManager()
     val versionBridge      = VersionBridge(plugin)
 

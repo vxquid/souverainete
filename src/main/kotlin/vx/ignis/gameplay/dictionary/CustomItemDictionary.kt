@@ -12,11 +12,11 @@ import java.nio.file.Path
 
 class CustomItemDictionary : Listener {
 
-    private val dictionary = ConfigurationManager.load(DictionaryConfiguration::class.java)
+    private val dictionary = ConfigurationManager.load(plugin, DictionaryConfiguration::class.java)
 
     private fun saveDictionary(): Boolean {
         return try {
-            ConfigurationManager.save(dictionary)
+            ConfigurationManager.save(plugin, dictionary)
             true
         } catch (e: Exception) {
             e.printStackTrace()

@@ -1,8 +1,8 @@
 package vx.ignis.config.lib
 
+import org.bukkit.plugin.java.JavaPlugin
 import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
-import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.config.lib.annotations.Comment
 import vx.ignis.config.lib.annotations.Configuration
 import vx.ignis.config.lib.annotations.Header
@@ -22,7 +22,7 @@ object ConfigurationManager {
         width = 80
     })
 
-    fun <T : Any> load(configClass: Class<T>): T {
+    fun <T : Any> load(plugin: JavaPlugin, configClass: Class<T>): T {
         val configInstance = configClass.getDeclaredConstructor().newInstance()
         val configPath = configClass.getAnnotation(Configuration::class.java)?.name ?: "config.yml"
         val configFile = plugin.dataFolder.resolve(configPath)
@@ -30,7 +30,7 @@ object ConfigurationManager {
         if (!configFile.exists()) {
             configFile.parentFile?.mkdirs()
             configFile.createNewFile()
-            save(configInstance)
+            save(plugin, configInstance)
             return configInstance
         }
 
@@ -49,7 +49,7 @@ object ConfigurationManager {
         return configInstance
     }
 
-    fun save(config: Any) {
+    fun save(plugin: JavaPlugin, config: Any) {
         val configPath = config::class.java.getAnnotation(Configuration::class.java)?.name ?: "config.yml"
         val configFile = plugin.dataFolder.resolve(configPath)
         val data = toMap(config)

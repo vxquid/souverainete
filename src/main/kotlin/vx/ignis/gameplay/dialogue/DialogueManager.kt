@@ -14,7 +14,7 @@ import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
 import org.joml.Vector3f
 import vx.ignis.Ignis.Companion.plugin
-import vx.ignis.config.GameplayConfiguration.DialogueConfig.DialogueFormat
+import vx.ignis.config.lib.GameplayConfiguration.DialogueConfig.DialogueFormat
 import vx.ignis.persistent.LivingEntityExtend.getVoicePitch
 import vx.ignis.persistent.LivingEntityExtend.getVoiceSound
 import java.util.concurrent.ConcurrentHashMap
