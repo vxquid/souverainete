@@ -10,12 +10,14 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.player.PlayerInteractEntityEvent
+import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.scheduler.BukkitRunnable
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.gameplay.dialogue.DialogueManager.Companion.shout
 import vx.ignis.gameplay.party.PartyManager.Companion.partyLeaderUUID
+import vx.ignis.persistent.LivingEntityExtend.settlement
 import kotlin.random.Random
 
 class DeathManager : Listener {
@@ -23,6 +25,7 @@ class DeathManager : Listener {
     private val downedKey = NamespacedKey(plugin, "is_downed")
     private val downedTimerKey = NamespacedKey(plugin, "downed_death_timer")
 
+    // Режим можно менять через конфиг или команды, здесь по умолчанию KNOCKOUT
     var deathMode: DeathMode = DeathMode.KNOCKOUT
     private val bleedOutTime = 1200L
 
@@ -39,6 +42,7 @@ class DeathManager : Listener {
     fun onEntityDamage(event: EntityDamageEvent) {
         val villager = event.entity as? Villager ?: return
 
+        // Если житель не в пати и режим не фатализм — игнорируем (пусть умирает как обычно, если не настроено иначе)
         if (!plugin.gameplayManager.partyManager.hasParty(villager) && deathMode != DeathMode.FATALISM) return
 
         if (villager.health - event.finalDamage <= 0) {
@@ -50,8 +54,11 @@ class DeathManager : Listener {
                 }
                 DeathMode.KNOCKOUT -> {
                     event.isCancelled = true
-                    // Если уже в нокауте и бьют — можно отнимать время таймера или добить
-                    if (!isDowned(villager)) {
+                    // Если уже в нокауте и бьют — добиваем или ускоряем смерть.
+                    // Здесь логика: если в нокауте и получил летал — отправляем домой/на смерть.
+                    if (isDowned(villager)) {
+                        handleRespawn(villager)
+                    } else {
                         knockoutVillager(villager)
                     }
                 }
@@ -61,6 +68,9 @@ class DeathManager : Listener {
 
     @EventHandler
     fun onPlayerInteract(event: PlayerInteractEntityEvent) {
+        // Исправление бага с мгновенным сбросом: обрабатываем только главную руку
+        if (event.hand != EquipmentSlot.HAND) return
+
         val villager = event.rightClicked as? Villager ?: return
         val player = event.player
 
@@ -72,14 +82,14 @@ class DeathManager : Listener {
                 if (villager.vehicle == null) {
                     if (player.addPassenger(villager)) {
                         villager.pose = Pose.SITTING
-                        player.sendActionBar(Component.text("You are carrying ${villager.customName}", NamedTextColor.YELLOW))
+                        val carryMsg = plugin.language.getString("death-messages.carry-start")
+                            ?.replace("{villagerName}", villager.customName ?: "Villager")
+                            ?: "Carrying villager"
+                        player.sendActionBar(Component.text(carryMsg, NamedTextColor.YELLOW))
                     }
                 } else {
-
                     villager.leaveVehicle()
-
-                    // Возвращаем позу лежания с небольшой задержкой,
-                    // чтобы он успел "отлипнуть" от игрока
+                    // Возвращаем позу с задержкой
                     plugin.server.scheduler.runTaskLater(plugin, { _ ->
                         if (isDowned(villager)) {
                             villager.pose = if (Random.nextBoolean()) Pose.SLEEPING else Pose.SWIMMING
@@ -93,11 +103,11 @@ class DeathManager : Listener {
             val item = player.inventory.itemInMainHand
             if (isReviveItem(item)) {
                 item.amount -= 1
-                reviveVillager(villager)
-                player.sendMessage(Component.text("You revived ${villager.customName}!", NamedTextColor.GREEN))
-                player.playSound(player.location, Sound.ENTITY_VILLAGER_YES, 1f, 1f)
+                reviveVillager(villager, player)
             } else {
-                player.sendActionBar(Component.text("Needs a Golden Apple or Potion to revive!", NamedTextColor.RED))
+                val neededMsg = plugin.language.getString("death-messages.needs-revive-item")
+                    ?: "Needs a Golden Apple or Potion!"
+                player.sendActionBar(Component.text(neededMsg, NamedTextColor.RED))
             }
         }
     }
@@ -109,25 +119,26 @@ class DeathManager : Listener {
         villager.persistentDataContainer.set(downedTimerKey, PersistentDataType.LONG, System.currentTimeMillis() + (bleedOutTime * 50))
 
         villager.health = 1.0
-        villager.isAware = false // Отключает AI
+        villager.isAware = false
         villager.pose = if (Random.nextBoolean()) Pose.SLEEPING else Pose.SWIMMING
 
+        // Фразы можно вынести в конфиг, но пока оставим хардкод или добавим в lang
         val helpPhrases = listOf("I'm down!", "Help me!", "Too much blood...", "Don't let me die!")
         villager.shout(helpPhrases.random())
     }
 
-    private fun reviveVillager(villager: Villager) {
-        villager.persistentDataContainer.remove(downedKey)
-        villager.persistentDataContainer.remove(downedTimerKey)
-
-        villager.isAware = true
-        villager.isGlowing = false
-        villager.pose = Pose.STANDING
-        villager.leaveVehicle()
+    private fun reviveVillager(villager: Villager, savior: org.bukkit.entity.Player) {
+        cleanDownedState(villager)
 
         val maxHealth = villager.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
         villager.health = maxHealth * 0.2
 
+        val reviveMsg = plugin.language.getString("death-messages.revived")
+            ?.replace("{villagerName}", villager.customName ?: "Villager")
+            ?: "You revived the villager!"
+
+        savior.sendMessage(Component.text(reviveMsg, NamedTextColor.GREEN))
+        savior.playSound(savior.location, Sound.ENTITY_VILLAGER_YES, 1f, 1f)
         villager.shout("Thanks! I owe you one.")
     }
 
@@ -137,18 +148,14 @@ class DeathManager : Listener {
 
     private fun isReviveItem(item: ItemStack): Boolean {
         if (!item.hasItemMeta()) return item.type == Material.GOLDEN_APPLE || item.type == Material.ENCHANTED_GOLDEN_APPLE
-
-        return item.type == Material.GOLDEN_APPLE ||
-                item.type == Material.ENCHANTED_GOLDEN_APPLE ||
-                (item.type == Material.POTION) // Можно добавить проверку на тип зелья
+        return item.type == Material.GOLDEN_APPLE || item.type == Material.ENCHANTED_GOLDEN_APPLE || item.type == Material.POTION
     }
 
     private fun startBleedOutTicker() {
         object : BukkitRunnable() {
             override fun run() {
                 for (world in Bukkit.getWorlds()) {
-                    // Оптимизация: перебираем только живых сущностей
-                    for (entity in world.livingEntities) {
+                    world.livingEntities.forEach { entity ->
                         if (entity is Villager && isDowned(entity)) {
                             checkBleedOut(entity)
                         }
@@ -162,17 +169,62 @@ class DeathManager : Listener {
         val deathTime = villager.persistentDataContainer.get(downedTimerKey, PersistentDataType.LONG) ?: return
 
         if (System.currentTimeMillis() > deathTime) {
+            villager.shout("I couldn't hold on...")
             handleRespawn(villager)
-            villager.shout("I couldn't hold on... Meeting you at home.")
         } else {
-            // Частицы крови
-            villager.world.spawnParticle(org.bukkit.Particle.DAMAGE_INDICATOR, villager.location.add(0.0, 0.5, 0.0), 1)
+            villager.world.spawnParticle(Particle.DAMAGE_INDICATOR, villager.location.add(0.0, 0.5, 0.0), 1)
         }
     }
 
-    // --- LOGIC: RESPAWN ---
+    // --- LOGIC: RESPAWN / DEATH ---
 
     private fun handleRespawn(villager: Villager) {
+        // Сначала очищаем состояние нокаута
+        cleanDownedState(villager)
+
+        val homeSettlement = villager.settlement
+
+        // 1. Если нет поселения — смерть
+        if (homeSettlement == null) {
+            villager.health = 0.0 // Это вызовет анимацию смерти и дроп
+
+            // Сообщение о смерти
+            val deathMsg = plugin.language.getString("death-messages.permanent-death")
+                ?.replace("{villagerName}", villager.customName ?: "A villager")
+                ?: "${villager.customName} has perished."
+
+            // Отправляем сообщение лидеру пати, если он есть
+            villager.partyLeaderUUID?.let { uuid ->
+                Bukkit.getPlayer(uuid)?.sendMessage(Component.text(deathMsg, NamedTextColor.RED))
+            }
+            return
+        }
+
+        // 2. Если есть поселение — эвакуация
+        val targetLoc = homeSettlement.data.center
+
+        // Обязательно загружаем чанк перед телепортацией
+        if (!targetLoc.chunk.isLoaded) {
+            targetLoc.chunk.load()
+        }
+
+        villager.teleport(targetLoc)
+        villager.health = villager.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
+        villager.world.playSound(targetLoc, Sound.BLOCK_BELL_RESONATE, 1f, 1f) // Звук колокола при возвращении
+
+        // Сообщение об эвакуации всем игрокам в мире (или только лидеру, по желанию. Сделаем лидеру).
+        val escapedMsg = plugin.language.getString("death-messages.returned-home")
+            ?.replace("{villagerName}", villager.customName ?: "Villager")
+            ?.replace("{settlementName}", homeSettlement.data.settlementName)
+            ?: "${villager.customName} was critically injured and returned to ${homeSettlement.data.settlementName}."
+
+        // Оповещаем бывших сопартийцев (или просто игроков в мире, если хотите глобально)
+        homeSettlement.world.players.forEach { player ->
+            player.sendMessage(Component.text(escapedMsg, NamedTextColor.GOLD))
+        }
+    }
+
+    private fun cleanDownedState(villager: Villager) {
         if (isDowned(villager)) {
             villager.persistentDataContainer.remove(downedKey)
             villager.persistentDataContainer.remove(downedTimerKey)
@@ -180,20 +232,7 @@ class DeathManager : Listener {
             villager.isGliding = false
             villager.isGlowing = false
             villager.leaveVehicle()
+            villager.pose = Pose.STANDING
         }
-
-        val leaderUUID = villager.partyLeaderUUID
-        val targetLocation: Location = if (leaderUUID != null) {
-            val player = Bukkit.getPlayer(leaderUUID)
-            player?.respawnLocation
-                ?: Bukkit.getOfflinePlayer(leaderUUID).respawnLocation
-                ?: villager.world.spawnLocation
-        } else {
-            villager.world.spawnLocation
-        }
-
-        villager.teleport(targetLocation)
-        villager.health = villager.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0
-        villager.world.playSound(targetLocation, Sound.BLOCK_BEACON_ACTIVATE, 1f, 1f)
     }
 }

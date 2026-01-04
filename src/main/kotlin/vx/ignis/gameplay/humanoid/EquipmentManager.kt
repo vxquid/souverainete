@@ -20,14 +20,38 @@ import kotlin.random.Random
 
 class EquipmentManager : Listener {
 
+    companion object {
+        // Интервал обновления экипировки в тиках (20 тиков = 1 секунда)
+        // 100 тиков = 5 секунд
+        private const val UPDATE_INTERVAL_TICKS = 100L
+    }
+
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
+        startEquipmentTicker()
+    }
+
+    private fun startEquipmentTicker() {
+        plugin.server.scheduler.runTaskTimer(plugin, Runnable {
+            tick()
+        }, UPDATE_INTERVAL_TICKS, UPDATE_INTERVAL_TICKS)
+    }
+
+    fun tick() {
+        plugin.gameplayManager.allowedWorlds.forEach { world ->
+            // Оптимизация: используем getEntitiesByClass вместо фильтрации всех сущностей мира
+            world.getEntitiesByClass(Villager::class.java).forEach { villager ->
+                if (villager.isValid) { // Проверяем, что энтити жив и валиден
+                    this.equipBestEquipmentFor(villager)
+                }
+            }
+        }
     }
 
     @EventHandler
     private fun onWorldLoad(event: WorldLoadEvent) {
         if (plugin.gameplayManager.allowedWorlds.contains(event.world)) {
-            event.world.entities.filterIsInstance<Villager>().forEach {
+            event.world.getEntitiesByClass(Villager::class.java).forEach {
                 this.removeEquipment(it)
                 this.equipBestEquipmentFor(it)
             }
@@ -37,9 +61,13 @@ class EquipmentManager : Listener {
     @EventHandler
     private fun onChunkLoad(event: ChunkLoadEvent) {
         if (plugin.gameplayManager.allowedWorlds.contains(event.world)) {
-            event.chunk.entities.filterIsInstance<Villager>().forEach {
-                this.removeEquipment(it)
-                this.equipBestEquipmentFor(it)
+            // Оптимизация поиска сущностей в чанке
+            val villagers = event.chunk.entities.filterIsInstance<Villager>()
+            if (villagers.isNotEmpty()) {
+                villagers.forEach {
+                    this.removeEquipment(it)
+                    this.equipBestEquipmentFor(it)
+                }
             }
         }
     }
@@ -56,12 +84,6 @@ class EquipmentManager : Listener {
         }
     }
 
-    fun tick() {
-        plugin.gameplayManager.allowedWorlds.forEach { world ->
-            world.entities.filterIsInstance<Villager>().forEach(this::equipBestEquipmentFor)
-        }
-    }
-
     private fun removeEquipment(villager: Villager) {
         EquipmentSlot.entries.forEach { slot ->
             villager.equipment?.clear()
@@ -71,8 +93,10 @@ class EquipmentManager : Listener {
     private fun equipBestEquipmentFor(villager: Villager) {
         val changes = mutableMapOf<EquipmentSlot, ItemStack>()
 
-        // Фильтруем непустые предметы из саб-инвентаря
+        // Получаем предметы (ленивая инициализация инвентаря произойдет здесь, если его еще нет)
         val availableItems = villager.subInventory.filterNotNull()
+
+        if (availableItems.isEmpty()) return
 
         // Проходим по каждому слоту
         for (slot in EquipmentSlot.entries) {
@@ -168,8 +192,9 @@ class EquipmentManager : Listener {
 
             val equipped = villager.equipment?.getItem(slot)
 
-            // We're not equipping the same items.
-            if (equipped?.isSimilar(item) == true)
+            // Если предмет уже надет и он похож на тот, что мы хотим надеть - пропускаем.
+            // Это предотвращает спам звуков каждые 5 секунд.
+            if (equipped != null && equipped.isSimilar(item))
                 continue
 
             villager.asHumanoid()?.equip(slot, item)

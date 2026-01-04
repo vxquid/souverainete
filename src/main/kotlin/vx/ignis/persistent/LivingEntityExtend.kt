@@ -4,6 +4,7 @@ import com.cryptomorin.xseries.XSound
 import com.google.common.reflect.TypeToken
 import com.google.gson.JsonSyntaxException
 import org.bukkit.Bukkit
+import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.Sound
 import org.bukkit.entity.LivingEntity
@@ -61,7 +62,82 @@ object LivingEntityExtend {
         get() = persistentDataContainer.get(inventoryKey, PersistentDataType.STRING)?.let {
             InventorySerializer.inventoryFromJSON(it)
         } ?: Bukkit.createInventory(null, 54).also { inv ->
+            // 1. Сначала добавляем расовые предметы (как и было)
             race.spawnItems.forEach { item -> inv.addItem(item.build()) }
+
+            // --- НАСТРОЙКА ВЕСОВ (Чем больше число, тем выше шанс) ---
+
+            // Пул только для гарантированного оружия
+            val weaponWeights = mapOf(
+                Material.STONE_SWORD to 60,
+                Material.BOW to 60,
+                Material.CROSSBOW to 40,
+                Material.IRON_SWORD to 25,
+                Material.DIAMOND_SWORD to 5,
+                Material.NETHERITE_SWORD to 1
+            )
+
+            // Общий пул (Оружие + Броня + Щиты) для дополнительных роллов
+            val armorAndMiscWeights = mapOf(
+                Material.LEATHER_HELMET to 80, Material.LEATHER_CHESTPLATE to 80,
+                Material.LEATHER_LEGGINGS to 80, Material.LEATHER_BOOTS to 80,
+
+                Material.CHAINMAIL_HELMET to 50, Material.CHAINMAIL_CHESTPLATE to 50,
+                Material.CHAINMAIL_LEGGINGS to 50, Material.CHAINMAIL_BOOTS to 50,
+
+                Material.SHIELD to 40,
+
+                Material.IRON_HELMET to 20, Material.IRON_CHESTPLATE to 20,
+                Material.IRON_LEGGINGS to 20, Material.IRON_BOOTS to 20,
+
+                Material.DIAMOND_CHESTPLATE to 3, Material.NETHERITE_CHESTPLATE to 1
+            )
+
+            // Объединяем пулы для доп. предметов
+            val globalPool = weaponWeights + armorAndMiscWeights
+
+            // --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ВЫБОРА ---
+            fun pickWeighted(weights: Map<Material, Int>): ItemStack {
+                val totalWeight = weights.values.sum()
+                var random = (0 until totalWeight).random()
+
+                for ((material, weight) in weights) {
+                    random -= weight
+                    if (random < 0) return ItemStack(material)
+                }
+                return ItemStack(weights.keys.last()) // На всякий случай
+            }
+
+            // 2. Гарантированное оружие (Меч, Лук или Арбалет)
+            inv.addItem(pickWeighted(weaponWeights))
+
+            // 3. Ролл количества дополнительных предметов (например, от 0 до 4 предметов)
+            // Можно сделать тоже взвешенным: чаще выпадает 1-2 предмета, реже 4.
+            val rollCountWeights = mapOf(
+                0 to 10, // 10% шанс, что больше ничего не будет
+                1 to 30, // 30% шанс на 1 доп. предмет
+                2 to 40, // 40% шанс на 2 доп. предмета
+                3 to 15, // 15% шанс на 3 доп. предмета
+                4 to 5   // 5% шанс на фулл закуп
+            )
+
+            val totalRollsWeight = rollCountWeights.values.sum()
+            var randomRoll = (0 until totalRollsWeight).random()
+            var itemsCount = 0
+            for ((count, weight) in rollCountWeights) {
+                randomRoll -= weight
+                if (randomRoll < 0) {
+                    itemsCount = count
+                    break
+                }
+            }
+
+            // 4. Заполнение слотов
+            repeat(itemsCount) {
+                inv.addItem(pickWeighted(globalPool))
+            }
+
+            // Сохранение
             persistentDataContainer.set(inventoryKey, PersistentDataType.STRING, InventorySerializer.inventoryToJSON(inv).toString())
         }
 

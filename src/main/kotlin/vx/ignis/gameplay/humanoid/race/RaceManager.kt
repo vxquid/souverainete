@@ -145,7 +145,7 @@ class RaceManager {
         val maleDeathSound: PitchedSound,
         val femaleHurtSound: PitchedSound,
         val femaleDeathSound: PitchedSound,
-        val spawnItems: List<SpawnItemStack>,
+        val spawnItems: MutableList<SpawnItemStack>,
         val attributes: Map<XAttribute, Double>,
         val maleSkins: MutableMap<Float, TextureProperty>,
         val femaleSkins: MutableMap<Float, TextureProperty>,
@@ -183,7 +183,7 @@ class RaceManager {
                 PitchedSound(XSound.ENTITY_VILLAGER_DEATH, 0.95, 1.05),
                 PitchedSound(XSound.ENTITY_VILLAGER_HURT, 0.95, 1.05),
                 PitchedSound(XSound.ENTITY_VILLAGER_DEATH, 0.95, 1.05),
-                listOf(
+                mutableListOf(
                     SpawnItemStack(XMaterial.EMERALD, 32, 64),
                     SpawnItemStack(XMaterial.IRON_INGOT, 32, 64),
                     SpawnItemStack(XMaterial.LEATHER, 32, 64),

@@ -10,10 +10,11 @@ settlement-reputation:
   decrease: "§9Reputation with {entity} decreased by {amount}."
   status-update: "§eYour reputation with {entity} has shifted to {status}."
 
-# Messages about entering and exiting the settlement.
-settlement-entering:
+# Settlement related messages.
+settlement:
   entering: "You entering a settlement."
   leaving: "You leaving a settlement."
+  created: "§eA new settlement has been founded: §6{settlementName}§e."
 
 quest:
   finished: "You have finished the quest §6{quest}§7."
@@ -139,3 +140,11 @@ command-error-message:
 update:
   new-version-available: "§7A new version is available: §6{newVersion}§7. Please consider updating."
   check-failed: "§7Failed to check for updates: {errorMessage}."
+
+# Party member death messages.
+death-messages:
+  permanent-death: "§c{villagerName} has succumbed to their wounds and perished."
+  returned-home: "§e{villagerName} §7sustained critical injuries and was evacuated back to §6{settlementName}§7."
+  carry-start: "You are carrying {villagerName}"
+  needs-revive-item: "Needs a Golden Apple or Potion to revive!"
+  revived: "You revived {villagerName}!"

@@ -21,7 +21,7 @@ class PersonalityManager {
 
     // TODO: Must be configurable.
     private val targetEntityTypes = mutableListOf(EntityType.VILLAGER)
-    private val generationTickDelay = 100L
+    private val generationTickDelay = 250L
 
     init {
         this.loadPersonalities()

@@ -7,24 +7,24 @@ import vx.ignis.config.lib.annotations.Configuration
 class ProviderConfiguration {
 
     @Comment(
-        "The provider type for content generation. Choose between GEMINI or OPENROUTER.",
-        "GEMINI is free, supports multiple API keys for automatic failover, but may be less stable.",
-        "OPENROUTER supports any model available on openrouter.ai but requires payment (with competitive pricing; however trial is available). Much more stable."
+        "The provider type for content generation. Choose between GEMINI, OPENROUTER, GROQ, DEEPSEEK, CHATGPT.",
+        "GEMINI (aistudio.google.com) have a free tier, but since December 7 (2025), it's unusable because of too low request limitation (20 RPD).",
+        "OPENROUTER (openrouter.ai) requires payment (with competitive pricing; however trial is available). The best option, but paid.",
+        "GROQ (console.groq.com) is free and recommended. Suitable for testing and gaming, but may be too limited for production (if we are talking about a free plan and large servers).",
+        "DEEPSEEK (deepseek.com) is paid-only but the cheapest option.",
+        "CHATGPT (chatgpt.com)"
     )
-    var providerType: ProviderType = ProviderType.GEMINI
+    var providerType: ProviderType = ProviderType.GROQ
 
     @Comment(
         "For GEMINI, default model is \"gemini-2.5-flash-lite\".",
-        "For OPENROUTER, default model is \"google/gemini-2.5-flash-lite\"."
+        "For OPENROUTER, default model is \"google/gemini-2.5-flash-lite\".",
+        "For GROQ, I recommend \"openai/gpt-oss-120b\".",
+        "For DEEPSEEK, default model is \"deepseek-chat\"."
     )
-    var model = "gemini-2.5-flash-lite"
+    var model = "openai/gpt-oss-120b"
 
-    @Comment(
-        "List of API keys for the provider. For GEMINI, multiple keys can be used for automatic rotation upon quota limits.",
-        "Note: Each GEMINI key requires a separate Google account (you may ask players for assistance in creating accounts).",
-        "For OPENROUTER, only the first key in the list is used; additional keys are ignored."
-    )
-    var apiKey: List<String> = listOf("YOUR_API_KEY")
+    var apiKey: String = "YOUR_API_KEY"
 
     @Comment(
         "The language for generated content. Specify the desired language (e.g., 'English', 'Spanish', 'Russian', 'Dalek Language', 'Moonspeak', etc.)."
@@ -35,11 +35,6 @@ class ProviderConfiguration {
         "The naming convention for generated content. For example, 'English Names' for standard English-style names."
     )
     var namingStyle: String = "Fantasy Names"
-
-    @Comment(
-        "Enables or disables the use of profanity in generated content. Set to true to allow swearing."
-    )
-    var swearing: Boolean = true
 
     @Comment(
         "The thematic setting for content generation. For example, 'Fantasy' for a fantasy-themed world."
@@ -54,7 +49,7 @@ class ProviderConfiguration {
     @Comment(
         "The maximum number of retry attempts after a failed content generation request."
     )
-    var maxRetries: Int = 3
+    var maxRetries: Int = 1
 
     @Comment(
         "Proxy configuration for connecting to Gemini in regions where it is restricted (e.g., Russia, China). Won't be used if host name is PROXY_HOST."
@@ -80,7 +75,7 @@ class ProviderConfiguration {
     )
 
     enum class ProviderType {
-        GEMINI, OPENROUTER
+        GEMINI, OPENROUTER, GROQ, DEEPSEEK, CHATGPT
     }
 
 }

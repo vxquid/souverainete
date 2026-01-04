@@ -56,34 +56,44 @@ class GameplayConfiguration {
         var statusUpdateSound: String = "ui.hud.bubble_pop"
 
         @Comment("Required reputation for EXILED status.")
-        var exiledRequired: Int = -10000
+        var exiledRequired: Int = -1000
 
         @Comment("Required reputation for HOSTILE status.")
-        var hostileRequired: Int = -5000
+        var hostileRequired: Int = -500
 
         @Comment("Required reputation for UNFRIENDLY status.")
-        var unfriendlyRequired: Int = -2500
+        var unfriendlyRequired: Int = -250
 
         @Comment("Required reputation for NEUTRAL status.")
         var neutralRequired: Int = 0
 
         @Comment("Required reputation for FRIENDLY status.")
-        var friendlyRequired: Int = 1000
+        var friendlyRequired: Int = 250
 
         @Comment("Required reputation for HONORED status.")
-        var honoredRequired: Int = 5000
+        var honoredRequired: Int = 750
 
         @Comment("Required reputation for REVERED status.")
-        var reveredRequired: Int = 10000
+        var reveredRequired: Int = 1500
 
         @Comment("Required reputation for EXALTED status.")
-        var exaltedRequired: Int = 20000
+        var exaltedRequired: Int = 2500
 
     }
 
     class SettlementConfig {
         @Comment("Show entry message on settlement entry.")
-        var trackPlayerSettlementEntry: Boolean = true
+        val defaultName: String = "Unknown Settlement"
+        var trackEntry: Boolean = true
+        val titleColor: String = "§6"
+        val detectionDistance: Double = 128.0
+        val villagersRequired: Int = 5
+        val broadcastCreation: Boolean = true
+        val movementTickInterval: Long = 40L
+        val detectionInterval: Long = 200L
+        val titleFadeIn: Int = 20
+        val titleStay: Int = 40
+        val titleFadeOut: Int = 20
     }
 
     class HungerConfig {
@@ -155,7 +165,7 @@ class GameplayConfiguration {
         var lifetimeDuration: Long = 192000L
 
         @Comment("Interval in ticks for quest generation.")
-        var intervalTicks: Long = 200L
+        var intervalTicks: Long = 400L
 
         @Comment("Reputation score multiplier for quest completion.")
         var reputationMultiplier: Double = 0.005
@@ -326,7 +336,7 @@ class GameplayConfiguration {
 
     class PartyConfig {
         @Comment("Maximum number of members allowed in a player's party.")
-        var maxPartySize: Int = 1
+        var maxPartySize: Int = 2
 
         @Comment("Whether party members are automatically removed from the party list when they die.")
         var removeMemberOnDeath: Boolean = true
