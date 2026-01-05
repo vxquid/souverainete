@@ -46,6 +46,9 @@ class GameplayConfiguration {
     class HumanoidConfig {
         @Comment("Enable humanoid villagers with skins and player models.")
         var humanoidVillagers: Boolean = true
+
+        @Comment("If you have plugins such as entity-culler or others that interfere with the display of creatures, enable this.")
+        var adaptivePacketManipulator: Boolean = false
     }
 
     class ReputationConfig {

@@ -25,7 +25,6 @@ import vx.ignis.gameplay.event.QuestInvalidationEvent
 import vx.ignis.gameplay.humanoid.HungerManager.eat
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.gender
-import vx.ignis.gameplay.personality.PersonalityManager.Companion.getCharacterData
 import vx.ignis.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.ignis.gameplay.quest.ProgressTracker.Companion.experienceEarnedByQuests
 import vx.ignis.gameplay.quest.ProgressTracker.Companion.questTracker
@@ -84,10 +83,6 @@ class QuestManager : Listener {
         }
 
         val villager = this.selectRandomVillager(world) ?: run {
-            return
-        }
-
-        if (villager.getCharacterData() == null) run {
             return
         }
 

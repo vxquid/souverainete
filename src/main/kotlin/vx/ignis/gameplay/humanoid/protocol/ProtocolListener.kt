@@ -47,7 +47,8 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
         private val newIndexing = XReflection.supports(21, 9)
         private val skinIDKey = NamespacedKey(plugin, "SkinID")
         private val skinKey = NamespacedKey(plugin, "Skin")
-        private val HUMANOID_VILLAGERS_ENABLED = plugin.gameplayManager.config.humanoid.humanoidVillagers
+        private val HUMANOID_VILLAGERS_ENABLED  = plugin.gameplayManager.config.humanoid.humanoidVillagers
+        private val ADAPTIVE_PACKET_MANIPULATOR = plugin.gameplayManager.config.humanoid.adaptivePacketManipulator
 
         // Predicate for removing invalid and necessary EntityData (especially VILLAGER_DATA, which causes a protocol error on the client).
         private val MUST_BE_REMOVED: (EntityData<*>) -> Boolean = {
@@ -223,7 +224,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                     val registered  = humanoidProvider != null
                     val subscribed  = humanoidProvider?.subscribers?.contains(player) ?: false
                     val fixedPacket = metadata.removeIf(MUST_BE_REMOVED)
-                    val forced      = humanoidProvider?.forcedViewers?.contains(player) ?: false
+                    val forced      = if (ADAPTIVE_PACKET_MANIPULATOR) humanoidProvider?.forcedViewers?.contains(player) ?: false else false
 
                     if (fixedPacket) {
                         player.sendVerbose(" §c> Preventing wrong villager metadata. §7[id ${entity.entityId}]")
@@ -262,7 +263,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
 
                         enabled && registered && (fixedPacket || forced) && !subscribed -> {
                             humanoidProvider.subscribers.add(player)
-                            humanoidProvider.forcedViewers.remove(player)
+                            if (ADAPTIVE_PACKET_MANIPULATOR) humanoidProvider.forcedViewers.remove(player)
                             plugin.server.scheduler.runTask(plugin) { _ ->
                                 player.sendVerbose(" §3> Calling HumanoidInitializationEvent for an existing villager. §7[id ${entity.entityId}]")
                                 plugin.server.pluginManager.callEvent(HumanoidInitializationEvent(player, entity, humanoidProvider, metadata))
@@ -320,7 +321,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                             humanoidRegistry.remove(entity)?.let { data ->
                                 player.sendVerbose(" §4> Due to lack of subscribers, entity with ID ${data.entity.entityId} was unregistred.")
                             }
-                        } else humanoidProvider.forcedViewers.add(player)
+                        } else if (ADAPTIVE_PACKET_MANIPULATOR) humanoidProvider.forcedViewers.add(player)
                     }
                 }
 

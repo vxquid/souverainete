@@ -6,6 +6,7 @@ import org.bukkit.event.player.PlayerJoinEvent
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.Ignis.Companion.sendFormattedMessage
 import vx.ignis.ai.base.AIClient
+import vx.ignis.ai.base.DummyClient
 import vx.ignis.config.ProviderConfiguration
 import vx.ignis.config.ProviderConfiguration.ProviderType
 import vx.ignis.config.lib.ConfigurationManager

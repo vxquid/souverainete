@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "ignis"
-version = "0.3.6"
+version = "0.4"
 description = "Let AI make your server alive with AI-generated NPCs, quests, towns, items and a lot more."
 
 bukkitPluginYaml {

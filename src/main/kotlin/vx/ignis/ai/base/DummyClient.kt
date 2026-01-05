@@ -1,7 +1,6 @@
-package vx.ignis.ai
+package vx.ignis.ai.base
 
 import org.bukkit.configuration.file.YamlConfiguration
-import vx.ignis.ai.base.AIClient
 import kotlin.reflect.KClass
 
 class DummyClient() : AIClient {

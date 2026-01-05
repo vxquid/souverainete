@@ -31,10 +31,9 @@ import vx.ignis.gameplay.dialogue.DialogueManager.Companion.talk
 import vx.ignis.gameplay.dialogue.DialogueSession
 import vx.ignis.gameplay.dialogue.DialogueSession.Companion.getActiveDialogueSession
 import vx.ignis.gameplay.event.PlayerAcceptQuestEvent
+import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.party.PartyManager.CombatTactic
 import vx.ignis.gameplay.party.PartyManager.PartyState
-import vx.ignis.gameplay.personality.PersonalityManager.Companion.getCharacterData
-import vx.ignis.gameplay.personality.PersonalityManager.GenericCharacterData
 import vx.ignis.gameplay.quest.QuestManager.Quest
 import vx.ignis.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.ignis.gameplay.reputation.ReputationManager.Reputation
@@ -42,10 +41,6 @@ import vx.ignis.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.ignis.persistent.LivingEntityExtend.quests
 
 class InteractionManager : Listener {
-
-    private val genericReactionMessages: GenericCharacterData? by lazy {
-        plugin.gameplayManager.personalityManager.genericCharacterData
-    }
 
     private val partyManager by lazy {
         plugin.gameplayManager.partyManager
@@ -80,9 +75,7 @@ class InteractionManager : Listener {
         val villager = event.villager
         if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
 
-        val phrases = villager.getCharacterData()?.startFightPhrases
-            ?: genericReactionMessages?.startFightPhrases
-            ?: emptyList()
+        val phrases = villager.race.phrases.startFight
 
         if (phrases.isNotEmpty()) {
             villager.shout(phrases.random())
@@ -95,13 +88,9 @@ class InteractionManager : Listener {
         if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
 
         val phrases = when (event.killType) {
-            VillagerKillTargetEvent.KillType.RANGED ->
-                villager.getCharacterData()?.rangedKillPhrases
-                    ?: genericReactionMessages?.rangedKillPhrases
-            else ->
-                villager.getCharacterData()?.meleeKillPhrases
-                    ?: genericReactionMessages?.meleeKillPhrases
-        } ?: emptyList()
+            VillagerKillTargetEvent.KillType.RANGED -> villager.race.phrases.rangedKill
+            else -> villager.race.phrases.meleeKill
+        }
 
         if (phrases.isNotEmpty()) {
             villager.shout(phrases.random())
@@ -150,8 +139,7 @@ class InteractionManager : Listener {
         if (dialogues.containsKey(player to villager)) return
 
         if (villager.pose == Pose.SLEEPING) {
-            val message = villager.getCharacterData()?.sleepInterruptionPhrases?.randomOrNull()
-                ?: genericReactionMessages?.sleepInterruptionPhrases?.randomOrNull()
+            val message = villager.race.phrases.sleepInterruption.randomOrNull()
 
             message?.let { villager.talk(player, it, followDuringDialogue = false) }
             return
@@ -322,14 +310,14 @@ class InteractionManager : Listener {
 
     private fun handleQuestButtonClick(player: Player, villager: Villager) {
         if (villager.profession == Villager.Profession.NONE) {
-            val message = villager.getCharacterData()?.joblessPhrases?.randomOrNull()
-                ?: genericReactionMessages?.joblessPhrases?.randomOrNull()
+            val message = villager.race.phrases.jobless.randomOrNull()
+
             message?.let { villager.talk(player, it, followDuringDialogue = true) }
             return
         }
         if (villager.quests().isEmpty()) {
-            val message = villager.getCharacterData()?.noQuestPhrases?.randomOrNull()
-                ?: genericReactionMessages?.noQuestPhrases?.randomOrNull()
+            val message = villager.race.phrases.noQuest.randomOrNull()
+
             message?.let { villager.talk(player, it, followDuringDialogue = true) }
             return
         }
@@ -338,15 +326,15 @@ class InteractionManager : Listener {
 
     private fun handleTradeButtonClick(player: Player, villager: Villager) {
         if (villager.profession == Villager.Profession.NONE) {
-            val message = villager.getCharacterData()?.joblessPhrases?.randomOrNull()
-                ?: genericReactionMessages?.joblessPhrases?.randomOrNull()
+            val message = villager.race.phrases.jobless.randomOrNull()
+
             message?.let { villager.talk(player, it, followDuringDialogue = true) }
             return
         }
         plugin.server.scheduler.runTaskLater(plugin, { _ ->
             if (!villager.openTradeMenu(player)) {
-                val message = villager.getCharacterData()?.noItemsToTradePhrases?.randomOrNull()
-                    ?: genericReactionMessages?.noItemsToTradePhrases?.randomOrNull()
+                val message = villager.race.phrases.noItemsToTrade.randomOrNull()
+
                 message?.let { villager.talk(player, it, followDuringDialogue = true) }
             }
         }, 1L)
@@ -443,8 +431,7 @@ class InteractionManager : Listener {
 
         if (event.finalDamage >= entity.health) {
             if (entity.equipment?.getItem(EquipmentSlot.OFF_HAND)?.type == Material.TOTEM_OF_UNDYING) {
-                val message = entity.getCharacterData()?.totemOfUndyingResurrectionPhrases?.randomOrNull()
-                    ?: genericReactionMessages?.totemOfUndyingResurrectionPhrases?.randomOrNull()
+                val message = entity.race.phrases.totemResurrection.randomOrNull()
 
                 message?.let {
                     entity.talk(
@@ -458,8 +445,7 @@ class InteractionManager : Listener {
             return
         }
 
-        val message = entity.getCharacterData()?.damagePhrases?.randomOrNull()
-            ?: genericReactionMessages?.damagePhrases?.randomOrNull()
+        val message = entity.race.phrases.damage.randomOrNull()
 
         message?.let {
             entity.talk(
