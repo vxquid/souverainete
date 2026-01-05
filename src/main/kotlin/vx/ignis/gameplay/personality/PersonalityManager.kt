@@ -45,7 +45,6 @@ class PersonalityManager : Listener {
     // ============================================================================================
     // ИВЕНТЫ: Мгновенная инициализация при появлении в мире
     // ============================================================================================
-
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     fun onCreatureSpawn(event: CreatureSpawnEvent) {
         val entity = event.entity

@@ -24,6 +24,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.scheduler.BukkitTask
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.Ignis.Companion.sendFormattedMessage
+import vx.ignis.ai.base.DummyClient
 import vx.ignis.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.ignis.gameplay.memory.MemoryManager.Companion.getEmotionalMemory
 import vx.ignis.gameplay.party.PartyManager.Companion.partyLeaderUUID
@@ -39,7 +40,7 @@ import vx.ignis.util.Daytime
 
 class DialogueSession(val player: Player, val entity: Villager) : Listener, PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
 
-    private val MAX_SHORT_MEMORY_SIZE = 5 // Добавлена константа для ограничения короткой памяти
+    private val MAX_SHORT_MEMORY_SIZE = 10 // Добавлена константа для ограничения короткой памяти
 
     var readyToSend = true
     var cancelled = false
@@ -133,6 +134,11 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
 
     data class NPCChatResponseData(val npcResponse: List<String>, val memoryNode: String, val impression: String, val updatedOpinionOnPlayer: String, val directive: String)
     fun generateChatReply(player: Player, villager: Villager, playerMessage: String, dialogue: MutableList<String>) {
+
+        if (plugin.providerManager.client is DummyClient) {
+            player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent("§cAI is not configured..."))
+            return
+        }
 
         val npcName = villager.customName ?: "unknown"
         val raceName = villager.race.name
@@ -253,7 +259,8 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             } ?: run {
                 player.spigot().sendMessage(
                     ChatMessageType.ACTION_BAR,
-                    TextComponent.fromLegacy(plugin.language.getString("info-messages.npc-conversation.ai-overloaded")!!)
+                    if (plugin.providerManager.client is DummyClient) TextComponent("§cAI is not configured...")
+                    else TextComponent.fromLegacy(plugin.language.getString("info-messages.npc-conversation.ai-overloaded")!!)
                 )
             }
         }
