@@ -9,6 +9,7 @@ import org.bukkit.persistence.PersistentDataType
 import vx.ignis.Ignis.Companion.plugin
 import vx.ignis.config.lib.ConfigurationManager
 import vx.ignis.config.lib.GameplayConfiguration
+import vx.ignis.gameplay.death.DeathManager
 import vx.ignis.gameplay.dialogue.DialogueManager
 import vx.ignis.gameplay.dialogue.menu.InteractionManager
 import vx.ignis.gameplay.dictionary.CustomItemDictionary
@@ -50,7 +51,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     val settlementManager  = SettlementManager()
     val hungerManager      = HungerManager.also { it.startTicker() }
     val partyManager       = PartyManager(plugin, plugin.gameplayManager.config)
-    //val deathManager       = DeathManager()
+    val deathManager       = DeathManager()
     val versionBridge      = VersionBridge(plugin)
 
     @EventHandler

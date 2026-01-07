@@ -26,7 +26,7 @@ class DeathManager : Listener {
     private val downedTimerKey = NamespacedKey(plugin, "downed_death_timer")
 
     // Режим можно менять через конфиг или команды, здесь по умолчанию KNOCKOUT
-    var deathMode: DeathMode = DeathMode.KNOCKOUT
+    var deathMode: DeathMode = DeathMode.valueOf(plugin.gameplayManager.config.party.deathHandleStrategy)
     private val bleedOutTime = 1200L
 
     init {

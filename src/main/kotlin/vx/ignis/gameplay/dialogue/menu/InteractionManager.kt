@@ -214,7 +214,7 @@ class InteractionManager : Listener {
             builder.button(manageText, isRainbow = true) {
                 this.showPartyMenu(player, villager)
             }
-        } else if (!partyManager.hasParty(villager) && villager.reputationOf(player).ordinal <= 3) {
+        } else if (!partyManager.hasParty(villager) /*&& villager.reputationOf(player).ordinal <= 3*/) {
             val inviteText = plugin.language.getString("interaction-menu.party-invite-button") ?: "Follow Me"
             builder.button(inviteText) { menu ->
                 if (partyManager.addMember(player, villager)) {

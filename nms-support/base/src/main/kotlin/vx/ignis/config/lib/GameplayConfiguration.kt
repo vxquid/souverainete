@@ -349,6 +349,14 @@ class GameplayConfiguration {
 
         @Comment("Default state for new party members.", "FOLLOW, STAY")
         var defaultPartyState: String = "FOLLOW"
+
+        @Comment(
+            "FATALISM: Vanilla behavior. Villagers die permanently.",
+            "RESPAWN: Villagers escape to their settlement on lethal damage (dies if homeless).",
+            "KNOCKOUT: Villagers fall down and bleed out. Can be revived with GAP or carried. Bleeding out triggers RESPAWN logic."
+        )
+        var deathHandleStrategy: String = "KNOCKOUT"
+
     }
 
 }
