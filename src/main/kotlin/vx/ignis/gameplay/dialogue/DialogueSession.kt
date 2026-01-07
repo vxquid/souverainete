@@ -10,8 +10,6 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientChatMessage
 import net.md_5.bungee.api.ChatMessageType
 import net.md_5.bungee.api.chat.TextComponent
-import org.bukkit.craftbukkit.entity.CraftPlayer
-import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
@@ -40,7 +38,7 @@ import vx.ignis.util.Daytime
 
 class DialogueSession(val player: Player, val entity: Villager) : Listener, PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
 
-    private val MAX_SHORT_MEMORY_SIZE = 10 // Добавлена константа для ограничения короткой памяти
+    private val MAX_SHORT_MEMORY_SIZE = 10
 
     var readyToSend = true
     var cancelled = false
@@ -50,7 +48,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
                 HandlerList.unregisterAll(this)
                 PacketEvents.getAPI().eventManager.unregisterListener(this)
                 activeDialogueSessions.remove(this)
-                (entity as CraftVillager).handle.tradingPlayer = null
+                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = null
             }
             field = value
         }
@@ -90,7 +88,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         if (timeout || tooFar || differentWorld || someoneIsDead) {
             this.cancelled = true
         } else {
-            (entity as CraftVillager).handle.tradingPlayer = (player as CraftPlayer).handle // (player as CraftPlayer).handle
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = player
         }
 
     }

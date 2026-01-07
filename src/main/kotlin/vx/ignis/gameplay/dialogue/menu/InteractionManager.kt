@@ -4,7 +4,6 @@ import org.bukkit.Color
 import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.block.data.type.Bed
-import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Player
 import org.bukkit.entity.Pose
 import org.bukkit.entity.Villager
@@ -132,7 +131,7 @@ class InteractionManager : Listener {
         openedMenuList.find { it.viewer == player }?.let { menu ->
             menu.invokeSelected()
             menu.destroy()
-            (villager as CraftVillager).handle.tradingPlayer = null
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager).talkingPlayer = null
             return
         }
 

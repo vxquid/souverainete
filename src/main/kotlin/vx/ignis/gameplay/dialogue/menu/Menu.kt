@@ -2,8 +2,6 @@ package vx.ignis.gameplay.dialogue.menu
 
 import org.bukkit.Color
 import org.bukkit.Location
-import org.bukkit.craftbukkit.entity.CraftPlayer
-import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.*
 import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
@@ -53,7 +51,7 @@ class Menu(
         }
         updatePosition()
         updateSelection()
-        (villager as CraftVillager).handle.tradingPlayer = (viewer as CraftPlayer).handle
+        plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager).talkingPlayer = viewer
     }
 
     private fun updatePosition() {

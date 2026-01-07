@@ -4,11 +4,8 @@ import org.bukkit.Color
 import org.bukkit.Location
 import org.bukkit.NamespacedKey
 import org.bukkit.Sound
-import org.bukkit.craftbukkit.entity.CraftPlayer
-import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.*
 import org.bukkit.persistence.PersistentDataType
-import org.bukkit.plugin.java.JavaPlugin
 import org.bukkit.scheduler.BukkitRunnable
 import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
@@ -40,19 +37,19 @@ class DialogueManager {
         when (player.dialogueFormat) {
             DialogueFormat.IMMERSIVE -> {
                 if (!interrupt && dialogues.containsKey(pair)) return
-                DialogueWindow(plugin, player, villager, size, formattedText.split(" "), follow, interrupt, false, onFinish).schedule()
+                DialogueWindow(player, villager, size, formattedText.split(" "), follow, interrupt, false, onFinish).schedule()
             }
             DialogueFormat.HOLOGRAM -> {
                 if (!interrupt && dialogues.containsKey(pair)) return
                 // ИЗМЕНЕНИЕ: Размер увеличен до 0.9F. Это делает текст крупным и очень разборчивым.
-                DialogueWindow(plugin, player, villager, 0.9F, formattedText.split(" "), follow, interrupt, true, onFinish).schedule()
+                DialogueWindow(player, villager, 0.9F, formattedText.split(" "), follow, interrupt, true, onFinish).schedule()
             }
             DialogueFormat.CHAT -> {
                 this.sendDialogueInChat(player, villager, formattedText)
             }
             DialogueFormat.BOTH -> {
                 if (!interrupt && dialogues.containsKey(pair)) return
-                DialogueWindow(plugin, player, villager, size, formattedText.split(" "), follow, interrupt, false, onFinish).schedule()
+                DialogueWindow(player, villager, size, formattedText.split(" "), follow, interrupt, false, onFinish).schedule()
                 this.sendDialogueInChat(player, villager, formattedText)
             }
         }
@@ -129,7 +126,6 @@ class DialogueManager {
     }
 
     class DialogueWindow(
-        private val plugin: JavaPlugin,
         private val player: Player,
         val entity: LivingEntity,
         private val size: Float,
@@ -217,7 +213,7 @@ class DialogueManager {
                             display.text += "$word "
                             player.playSound(entity.location, voice, 1F, pitch)
                             if (follow && !isHologram) {
-                                (entity as CraftVillager).handle.tradingPlayer = (player as CraftPlayer).handle
+                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = null
                             }
                         }
 
@@ -260,7 +256,7 @@ class DialogueManager {
 
         fun destroy() {
             display.remove()
-            (entity as CraftVillager).handle.tradingPlayer = null
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = null
             dialogues.remove(player to entity, this@DialogueWindow)
             isDestroyed = true
         }
