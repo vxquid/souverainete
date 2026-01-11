@@ -170,17 +170,17 @@ class UniqueItemManager {
                 addedAttributes.add(attrName)
 
                 when (attribute) {
-                    XAttribute.ATTACK_SPEED -> attackSpeed += gameplayConfig.uniqueItem.attackSpeedIncrement
-                    XAttribute.ATTACK_DAMAGE -> attackDamage += gameplayConfig.uniqueItem.attackDamageIncrement
-                    XAttribute.BLOCK_BREAK_SPEED -> blockBreakSpeed += gameplayConfig.uniqueItem.blockBreakSpeedIncrement
-                    XAttribute.BLOCK_INTERACTION_RANGE -> blockInteractionRange += gameplayConfig.uniqueItem.blockInteractionRangeIncrement
-                    XAttribute.MAX_HEALTH -> maxHealth += gameplayConfig.uniqueItem.maxHealthIncrement
-                    XAttribute.ARMOR -> armor += gameplayConfig.uniqueItem.armorIncrement
-                    XAttribute.ARMOR_TOUGHNESS -> armorToughness += gameplayConfig.uniqueItem.armorToughnessIncrement
+                    XAttribute.ATTACK_SPEED -> attackSpeed += 0.3
+                    XAttribute.ATTACK_DAMAGE -> attackDamage += 1.5
+                    XAttribute.BLOCK_BREAK_SPEED -> blockBreakSpeed += 0.4
+                    XAttribute.BLOCK_INTERACTION_RANGE -> blockInteractionRange += 0.5
+                    XAttribute.MAX_HEALTH -> maxHealth += 2.0
+                    XAttribute.ARMOR -> armor += 1.0
+                    XAttribute.ARMOR_TOUGHNESS -> armorToughness += 1.0
                     XAttribute.SCALE -> {
-                        scale += gameplayConfig.uniqueItem.scaleIncrement
-                        blockInteractionRange += gameplayConfig.uniqueItem.blockInteractionRangeIncrement
-                        entityInteractionRange += gameplayConfig.uniqueItem.entityInteractionRangeIncrement
+                        scale += 0.1
+                        blockInteractionRange += 0.5
+                        entityInteractionRange += 0.5
                     }
                     else -> {}
                 }
@@ -251,62 +251,62 @@ class UniqueItemManager {
 
         private fun getBaseAttackSpeed(type: String): Double {
             return -4.0 + when (type) {
-                in ProfessionManager.SWORDS -> gameplayConfig.uniqueItem.baseAttackSpeedSwords
-                in ProfessionManager.PICKAXES -> gameplayConfig.uniqueItem.baseAttackSpeedPickaxes
-                "IRON_AXE" -> gameplayConfig.uniqueItem.baseAttackSpeedIronAxe
-                in listOf("DIAMOND_AXE", "NETHERITE_AXE") -> gameplayConfig.uniqueItem.baseAttackSpeedDiamondNetheriteAxe
-                else -> gameplayConfig.uniqueItem.baseAttackSpeedDefault
+                in ProfessionManager.SWORDS -> 1.6
+                in ProfessionManager.PICKAXES -> 1.2
+                "IRON_AXE" -> 0.9
+                in listOf("DIAMOND_AXE", "NETHERITE_AXE") -> 1.0
+                else -> 4.0
             }
         }
 
         private fun getBaseAttackDamage(type: String): Double {
             return when (type) {
-                "COPPER_SWORD" -> gameplayConfig.uniqueItem.baseAttackDamageCopperSword
-                "IRON_SWORD" -> gameplayConfig.uniqueItem.baseAttackDamageIronSword
-                "DIAMOND_SWORD" -> gameplayConfig.uniqueItem.baseAttackDamageDiamondSword
-                "NETHERITE_SWORD" -> gameplayConfig.uniqueItem.baseAttackDamageNetheriteSword
-                "COPPER_PICKAXE" -> gameplayConfig.uniqueItem.baseAttackDamageCopperPickaxe
-                "IRON_PICKAXE" -> gameplayConfig.uniqueItem.baseAttackDamageIronPickaxe
-                "DIAMOND_PICKAXE" -> gameplayConfig.uniqueItem.baseAttackDamageDiamondPickaxe
-                "NETHERITE_PICKAXE" -> gameplayConfig.uniqueItem.baseAttackDamageNetheritePickaxe
-                "COPPER_AXE" -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
-                "IRON_AXE" -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
-                "DIAMOND_AXE" -> gameplayConfig.uniqueItem.baseAttackDamageCopperIronDiamondAxe
-                "NETHERITE_AXE" -> gameplayConfig.uniqueItem.baseAttackDamageNetheriteAxe
+                "COPPER_SWORD" -> 5.0
+                "IRON_SWORD" -> 6.0
+                "DIAMOND_SWORD" -> 7.0
+                "NETHERITE_SWORD" -> 8.0
+                "COPPER_PICKAXE" -> 3.0
+                "IRON_PICKAXE" -> 4.0
+                "DIAMOND_PICKAXE" -> 5.0
+                "NETHERITE_PICKAXE" -> 6.0
+                "COPPER_AXE" -> 9.0
+                "IRON_AXE" -> 9.0
+                "DIAMOND_AXE" -> 9.0
+                "NETHERITE_AXE" -> 10.0
                 else -> 0.0
             }
         }
 
         private fun getBaseArmor(type: String): Double {
             return when (type) {
-                "LEATHER_HELMET" -> gameplayConfig.uniqueItem.baseArmorLeatherHelmet
-                "LEATHER_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorLeatherChestplate
-                "LEATHER_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorLeatherLeggings
-                "LEATHER_BOOTS" -> gameplayConfig.uniqueItem.baseArmorLeatherBoots
-                "COPPER_HELMET" -> gameplayConfig.uniqueItem.baseArmorCopperHelmet
-                "COPPER_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorCopperChestplate
-                "COPPER_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorCopperLeggings
-                "COPPER_BOOTS" -> gameplayConfig.uniqueItem.baseArmorCopperBoots
-                "IRON_HELMET" -> gameplayConfig.uniqueItem.baseArmorIronHelmet
-                "IRON_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorIronChestplate
-                "IRON_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorIronLeggings
-                "IRON_BOOTS" -> gameplayConfig.uniqueItem.baseArmorIronBoots
-                "DIAMOND_HELMET" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteHelmet
-                "DIAMOND_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteChestplate
-                "DIAMOND_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteLeggings
-                "DIAMOND_BOOTS" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteBoots
-                "NETHERITE_HELMET" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteHelmet
-                "NETHERITE_CHESTPLATE" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteChestplate
-                "NETHERITE_LEGGINGS" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteLeggings
-                "NETHERITE_BOOTS" -> gameplayConfig.uniqueItem.baseArmorDiamondNetheriteBoots
+                "LEATHER_HELMET" -> 1.0
+                "LEATHER_CHESTPLATE" -> 3.0
+                "LEATHER_LEGGINGS" -> 2.0
+                "LEATHER_BOOTS" -> 1.0
+                "COPPER_HELMET" -> 2.0
+                "COPPER_CHESTPLATE" -> 4.0
+                "COPPER_LEGGINGS" -> 3.0
+                "COPPER_BOOTS" -> 1.0
+                "IRON_HELMET" -> 2.0
+                "IRON_CHESTPLATE" -> 6.0
+                "IRON_LEGGINGS" -> 5.0
+                "IRON_BOOTS" -> 2.0
+                "DIAMOND_HELMET" -> 3.0
+                "DIAMOND_CHESTPLATE" -> 8.0
+                "DIAMOND_LEGGINGS" -> 6.0
+                "DIAMOND_BOOTS" -> 3.0
+                "NETHERITE_HELMET" -> 3.0
+                "NETHERITE_CHESTPLATE" -> 8.0
+                "NETHERITE_LEGGINGS" -> 6.0
+                "NETHERITE_BOOTS" -> 3.0
                 else -> 0.0
             }
         }
 
         private fun getBaseArmorToughness(type: String): Double {
             return when (type) {
-                in ProfessionManager.DIAMOND_ARMOR -> gameplayConfig.uniqueItem.baseArmorToughnessDiamond
-                in ProfessionManager.NETHERITE_ARMOR -> gameplayConfig.uniqueItem.baseArmorToughnessNetherite
+                in ProfessionManager.DIAMOND_ARMOR -> 2.0
+                in ProfessionManager.NETHERITE_ARMOR -> 3.0
                 else -> 0.0
             }
         }
@@ -360,15 +360,28 @@ class UniqueItemManager {
         }
     }
 
-    enum class UniqueItemRarity(val color: String, val extraPrice: Int) {
-        NONE("#ffffff", 0),
-        COMMON("#a9a9a9", plugin.professions.getInt("villager-item-producing.extra-rarity-price.COMMON")),
-        UNCOMMON("#00ff00", plugin.professions.getInt("villager-item-producing.extra-rarity-price.UNCOMMON")),
-        RARE("#fae100", plugin.professions.getInt("villager-item-producing.extra-rarity-price.RARE")),
-        EPIC("#00ffff", plugin.professions.getInt("villager-item-producing.extra-rarity-price.EPIC")),
-        LEGENDARY("#fa8100", plugin.professions.getInt("villager-item-producing.extra-rarity-price.LEGENDARY")),
-        MYTHICAL("#ff0000", plugin.professions.getInt("villager-item-producing.extra-rarity-price.MYTHICAL")),
-        DIVINE("#ff50b4", plugin.professions.getInt("villager-item-producing.extra-rarity-price.DIVINE"))
+    enum class UniqueItemRarity(val extraPrice: Int) {
+
+        NONE(0),
+        COMMON(plugin.professions.getInt("villager-item-producing.extra-rarity-price.COMMON")),
+        UNCOMMON(plugin.professions.getInt("villager-item-producing.extra-rarity-price.UNCOMMON")),
+        RARE(plugin.professions.getInt("villager-item-producing.extra-rarity-price.RARE")),
+        EPIC(plugin.professions.getInt("villager-item-producing.extra-rarity-price.EPIC")),
+        LEGENDARY(plugin.professions.getInt("villager-item-producing.extra-rarity-price.LEGENDARY")),
+        MYTHICAL(plugin.professions.getInt("villager-item-producing.extra-rarity-price.MYTHICAL")),
+        DIVINE(plugin.professions.getInt("villager-item-producing.extra-rarity-price.DIVINE"));
+
+        val color: String
+            get() = when (this) {
+                COMMON -> plugin.gameplayManager.config.uniqueItem.rarityColor.common
+                UNCOMMON -> plugin.gameplayManager.config.uniqueItem.rarityColor.uncommon
+                RARE -> plugin.gameplayManager.config.uniqueItem.rarityColor.rare
+                EPIC -> plugin.gameplayManager.config.uniqueItem.rarityColor.epic
+                LEGENDARY -> plugin.gameplayManager.config.uniqueItem.rarityColor.legendary
+                MYTHICAL -> plugin.gameplayManager.config.uniqueItem.rarityColor.mythical
+                DIVINE -> plugin.gameplayManager.config.uniqueItem.rarityColor.divine
+                NONE -> "#ffffff"
+            }
     }
 
 }

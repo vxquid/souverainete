@@ -34,8 +34,8 @@ class GameplayConfiguration {
 
     class DialogueConfig {
 
-        @Comment("Default dialogue format.", "IMMERSIVE, CHAT, BOTH.")
-        var dialogueFormat: DialogueFormat = DialogueFormat.IMMERSIVE
+        @Comment("Default dialogue format.", "IMMERSIVE, CHAT, HOLOGRAM, BOTH.")
+        var dialogueFormat: DialogueFormat = DialogueFormat.BOTH
 
         enum class DialogueFormat {
             IMMERSIVE, CHAT, HOLOGRAM, BOTH
@@ -203,6 +203,16 @@ class GameplayConfiguration {
         var clericBrewingIngredientMaxRandom: Int = 5
     }
 
+    class RarityColor {
+        var common: String = "#a9a9a9"
+        var uncommon: String = "#00ff00"
+        var rare: String = "#fae100"
+        var epic: String = "#00ffff"
+        var legendary: String = "#fa8100"
+        var mythical: String = "#ff0000"
+        var divine: String = "#ff50b4"
+    }
+
     class UniqueItemConfig {
         @Comment("Base chance divisor for determining unique item rarity rolls.")
         var rollsBaseChanceDivisor: Int = 50
@@ -210,131 +220,8 @@ class GameplayConfiguration {
         @Comment("Maximum line length for lore wrapping.")
         var loreLineMaxLength: Int = 60
 
-        @Comment("Increment for attack speed attribute per roll.")
-        var attackSpeedIncrement: Double = 0.3
-
-        @Comment("Increment for attack damage attribute per roll.")
-        var attackDamageIncrement: Double = 1.5
-
-        @Comment("Increment for block break speed attribute per roll.")
-        var blockBreakSpeedIncrement: Double = 0.4
-
-        @Comment("Increment for block interaction range attribute per roll.")
-        var blockInteractionRangeIncrement: Double = 0.5
-
-        @Comment("Increment for entity interaction range attribute per roll.")
-        var entityInteractionRangeIncrement: Double = 0.5
-
-        @Comment("Increment for max health attribute per roll.")
-        var maxHealthIncrement: Double = 2.0
-
-        @Comment("Increment for armor attribute per roll.")
-        var armorIncrement: Double = 1.0
-
-        @Comment("Increment for armor toughness attribute per roll.")
-        var armorToughnessIncrement: Double = 1.0
-
-        @Comment("Increment for scale attribute per roll.")
-        var scaleIncrement: Double = 0.1
-
-        @Comment("Base attack speed for swords.")
-        var baseAttackSpeedSwords: Double = 1.6
-
-        @Comment("Base attack speed for pickaxes.")
-        var baseAttackSpeedPickaxes: Double = 1.2
-
-        @Comment("Base attack speed for iron axes.")
-        var baseAttackSpeedIronAxe: Double = 0.9
-
-        @Comment("Base attack speed for diamond/netherite axes.")
-        var baseAttackSpeedDiamondNetheriteAxe: Double = 1.0
-
-        @Comment("Base attack speed default.")
-        var baseAttackSpeedDefault: Double = 4.0
-
-        @Comment("Base attack damage for copper sword.")
-        var baseAttackDamageCopperSword: Double = 5.0
-
-        @Comment("Base attack damage for iron sword.")
-        var baseAttackDamageIronSword: Double = 6.0
-
-        @Comment("Base attack damage for diamond sword.")
-        var baseAttackDamageDiamondSword: Double = 7.0
-
-        @Comment("Base attack damage for netherite sword.")
-        var baseAttackDamageNetheriteSword: Double = 8.0
-
-        @Comment("Base attack damage for copper pickaxe.")
-        var baseAttackDamageCopperPickaxe: Double = 3.0
-
-        @Comment("Base attack damage for iron pickaxe.")
-        var baseAttackDamageIronPickaxe: Double = 4.0
-
-        @Comment("Base attack damage for diamond pickaxe.")
-        var baseAttackDamageDiamondPickaxe: Double = 5.0
-
-        @Comment("Base attack damage for netherite pickaxe.")
-        var baseAttackDamageNetheritePickaxe: Double = 6.0
-
-        @Comment("Base attack damage for copper/iron/diamond axe.")
-        var baseAttackDamageCopperIronDiamondAxe: Double = 9.0
-
-        @Comment("Base attack damage for netherite axe.")
-        var baseAttackDamageNetheriteAxe: Double = 10.0
-
-        @Comment("Base armor for leather helmet.")
-        var baseArmorLeatherHelmet: Double = 1.0
-
-        @Comment("Base armor for leather chestplate.")
-        var baseArmorLeatherChestplate: Double = 3.0
-
-        @Comment("Base armor for leather leggings.")
-        var baseArmorLeatherLeggings: Double = 2.0
-
-        @Comment("Base armor for leather boots.")
-        var baseArmorLeatherBoots: Double = 1.0
-
-        @Comment("Base armor for copper helmet.")
-        var baseArmorCopperHelmet: Double = 2.0
-
-        @Comment("Base armor for copper chestplate.")
-        var baseArmorCopperChestplate: Double = 4.0
-
-        @Comment("Base armor for copper leggings.")
-        var baseArmorCopperLeggings: Double = 3.0
-
-        @Comment("Base armor for copper boots.")
-        var baseArmorCopperBoots: Double = 1.0
-
-        @Comment("Base armor for iron helmet.")
-        var baseArmorIronHelmet: Double = 2.0
-
-        @Comment("Base armor for iron chestplate.")
-        var baseArmorIronChestplate: Double = 6.0
-
-        @Comment("Base armor for iron leggings.")
-        var baseArmorIronLeggings: Double = 5.0
-
-        @Comment("Base armor for iron boots.")
-        var baseArmorIronBoots: Double = 2.0
-
-        @Comment("Base armor for diamond/netherite helmet.")
-        var baseArmorDiamondNetheriteHelmet: Double = 3.0
-
-        @Comment("Base armor for diamond/netherite chestplate.")
-        var baseArmorDiamondNetheriteChestplate: Double = 8.0
-
-        @Comment("Base armor for diamond/netherite leggings.")
-        var baseArmorDiamondNetheriteLeggings: Double = 6.0
-
-        @Comment("Base armor for diamond/netherite boots.")
-        var baseArmorDiamondNetheriteBoots: Double = 3.0
-
-        @Comment("Base armor toughness for diamond armor.")
-        var baseArmorToughnessDiamond: Double = 2.0
-
-        @Comment("Base armor toughness for netherite armor.")
-        var baseArmorToughnessNetherite: Double = 3.0
+        @Comment("Hex color definitions for different unique item rarity tiers.")
+        var rarityColor = RarityColor()
     }
 
     class PartyConfig {

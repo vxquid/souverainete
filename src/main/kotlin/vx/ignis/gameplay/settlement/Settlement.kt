@@ -10,7 +10,6 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
 
     data class SettlementData(val worldUUID: UUID, var settlementName: String, val center: Location, val creationTime: Long, val reputation: MutableMap<UUID, Int> = mutableMapOf())
 
-    val creationDate = Date(data.creationTime)
     val world        = plugin.server.getWorld(data.worldUUID)!!
     var territory    = BoundingBox.of(data.center, 64.0, 64.0, 64.0)
 

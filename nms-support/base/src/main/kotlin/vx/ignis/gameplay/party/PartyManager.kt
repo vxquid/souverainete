@@ -30,12 +30,10 @@ class PartyManager(
     }
 
     enum class CombatTactic {
-        AUTO,   // ИИ сам решает
-        MELEE,  // Только ближний бой
-        RANGED  // Только дальний бой
+        AUTO,
+        MELEE,
+        RANGED
     }
-
-    // --- Instance Methods (Delegate to Companion Extensions) ---
 
     fun setPartyState(villager: Villager, state: PartyState) {
         villager.partyState = state

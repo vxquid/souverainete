@@ -21,8 +21,6 @@ import kotlin.random.Random
 class EquipmentManager : Listener {
 
     companion object {
-        // Интервал обновления экипировки в тиках (20 тиков = 1 секунда)
-        // 100 тиков = 5 секунд
         private const val UPDATE_INTERVAL_TICKS = 100L
     }
 
