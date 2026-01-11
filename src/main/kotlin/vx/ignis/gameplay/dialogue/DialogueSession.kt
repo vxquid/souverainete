@@ -88,7 +88,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         if (timeout || tooFar || differentWorld || someoneIsDead) {
             this.cancelled = true
         } else {
-            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = player
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = player // TODO, ВАЖНО: Пример того, как можно получить экземпляр гуманоида избегая NMS
         }
 
     }
@@ -249,8 +249,6 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             acc.replace("{${entry.key}}", entry.value)
         }
 
-        // plugin.logger.info(prompt) // FIXME
-
         plugin.server.scheduler.runTaskAsynchronously(plugin) { _ ->
             plugin.providerManager.client.sendPromptWithSchema(prompt, NPCGiftReaction::class)?.let { reaction ->
                 this.handleGiftReaction(player, villager, gift, reaction)
@@ -270,7 +268,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
     }
 
     private enum class Directive {
-        NONE, OPEN_TRADE_MENU, INTERRUPT_CONVERSATION;
+        NONE, OPEN_TRADE_MENU, INTERRUPT_CONVERSATION, PUNCH, KILL
     }
 
     private fun handleGiftReaction(player: Player, entity: Villager, gift: ItemStack, reaction: NPCGiftReaction) {
@@ -378,6 +376,17 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
                         when (directive) {
                             Directive.OPEN_TRADE_MENU -> entity.openTradeMenu(player)
                             Directive.INTERRUPT_CONVERSATION -> this.cancelled = true
+
+                            // Реализация агрессии
+                            Directive.PUNCH -> {
+                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).attack(player, 1)
+                                this.cancelled = true // Разговор после удара обычно заканчивается
+                            }
+                            Directive.KILL -> {
+                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).attack(player)
+                                this.cancelled = true
+                            }
+
                             Directive.NONE -> { /* I have nothing to do. */}
                         }
                     }

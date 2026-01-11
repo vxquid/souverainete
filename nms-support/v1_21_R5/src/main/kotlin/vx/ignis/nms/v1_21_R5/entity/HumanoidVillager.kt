@@ -40,9 +40,9 @@ import vx.ignis.nms.v1_21_R5.entity.ai.LookAndFollowDuringConversation
 import kotlin.reflect.KClass
 
 @Suppress("UNCHECKED_CAST")
-class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, villagerType: ResourceKey<VillagerType>) : Villager(type, level, villagerType), Humanoid {
+class HumanoidVillager(type: EntityType<out Villager>?, val level: Level?, villagerType: ResourceKey<VillagerType>) : Villager(type, level, villagerType), Humanoid {
 
-    constructor(type: EntityType<out Villager?>?, level: Level?) : this(type, level, VillagerType.PLAINS)
+    constructor(type: EntityType<out Villager>?, level: Level?) : this(type, level, VillagerType.PLAINS)
 
     init {
         this.registerAttribute(this, Attributes.ATTACK_DAMAGE, 2.0)
@@ -52,7 +52,7 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         this.setPersistenceRequired()
     }
 
-    override fun makeBrain(dynamic: Dynamic<*>?): Brain<*> {
+    override fun makeBrain(dynamic: Dynamic<*>): Brain<*> {
         val brain = brainProvider().makeBrain(dynamic)
         this.registerBrainGoals(brain)
         return brain
@@ -103,7 +103,7 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         ))
     }
 
-    override fun refreshBrain(level: ServerLevel?) {
+    override fun refreshBrain(level: ServerLevel) {
         val brain = getBrain()
         brain.stopAll(level, this)
         this.brain = brain.copyWithoutBehaviors()
@@ -214,6 +214,14 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         val attackSpeed = item.itemMeta?.attributeModifiers?.get(org.bukkit.attribute.Attribute.ATTACK_SPEED)
         this.attributes.getInstance(Attributes.ATTACK_SPEED)?.baseValue = attackSpeed?.firstOrNull()?.amount ?: 0.25
 
+    }
+
+    override fun attack(target: org.bukkit.entity.LivingEntity) {
+        // I don't give a fuck about supporting old versions.
+    }
+
+    override fun attack(target: org.bukkit.entity.LivingEntity, maxStrikes: Int) {
+        // I don't give a fuck about supporting old versions.
     }
 
     override var talkingPlayer: Player? = null

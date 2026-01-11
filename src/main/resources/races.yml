@@ -69,7 +69,7 @@ orc:
   special-currency: GOLD_BLOCK
 
   # A race description to be used by the AI when generating personal villager data and quests.
-  race-description: "Possessing fangs and brute strength, but lacking in cunning, they are formidable warriors, resilient and towering. Their language is simple, bold and honest. Sometimes they use phrases from the Orcish language that only they understand (from the World of Warcraft). Though often perceived as savage barbarians, orcs hold tradition in high regard and revere martial honor and spiritual shamanism, bound by a profound sense of community. Adapted to the rigors of the desert, they are invariably found beneath the relentless sun. Orcs are, to some, dangerous and powerful enemies, while to others, they are steadfast companions in arms."
+  race-description: "Possessing fangs and brute strength, but lacking in cunning, they are formidable warriors, resilient and towering. Their language is simple, bold and honest. Sometimes they use phrases from the Orcish language that only they understand (from the World of Warcraft). Though often perceived as savage barbarians, orcs hold tradition in high regard and revere martial honor and spiritual shamanism, bound by a profound sense of community. Adapted to the rigors of the desert, they are invariably found beneath the relentless sun. Orcs are, to some, dangerous and powerful enemies, while to others, they are steadfast companions in arms. REALLY LOVE CAPSLOCKING."
 
   # Format: SOUND-MIN_PITCH-MAX_PITCH (pitch must be between 0.0 and 2.0)
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html

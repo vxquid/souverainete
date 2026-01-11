@@ -20,9 +20,9 @@ interface EntityProvider {
 
         fun consume(world: World, item: ItemStack, sound: Sound, duration: Int, location: Location, period: Long = 5L, onDone: () -> Unit)
         fun equip(slot: EquipmentSlot, item: ItemStack)
+        fun attack(target: LivingEntity)
+        fun attack(target: LivingEntity, maxStrikes: Int)
 
         var talkingPlayer: Player?
-
     }
-
 }

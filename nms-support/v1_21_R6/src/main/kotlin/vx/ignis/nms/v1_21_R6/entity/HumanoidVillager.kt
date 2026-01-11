@@ -9,6 +9,7 @@ import net.minecraft.core.component.DataComponents
 import net.minecraft.resources.ResourceKey
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.damagesource.DamageSource
+import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EntityType
 import net.minecraft.world.entity.EquipmentSlot
 import net.minecraft.world.entity.LivingEntity
@@ -37,6 +38,7 @@ import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.Sound
 import org.bukkit.World
+import org.bukkit.craftbukkit.entity.CraftLivingEntity
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
@@ -48,9 +50,12 @@ import vx.ignis.nms.v1_21_R6.entity.ai.*
 import kotlin.reflect.KClass
 
 @Suppress("UNCHECKED_CAST")
-class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, villagerType: ResourceKey<VillagerType>) : Villager(type, level, villagerType), Humanoid, CrossbowAttackMob, RangedAttackMob {
+class HumanoidVillager(type: EntityType<out Villager>?, val level: Level?, villagerType: ResourceKey<VillagerType>) : Villager(type, level, villagerType), Humanoid, CrossbowAttackMob, RangedAttackMob {
 
-    constructor(type: EntityType<out Villager?>?, level: Level?) : this(type, level, VillagerType.PLAINS)
+    constructor(type: EntityType<out Villager>?, level: Level?) : this(type, level, VillagerType.PLAINS)
+
+    // Хранит количество оставшихся ударов. Null означает "бить до смерти".
+    private var attacksLeft: Int? = null
 
     init {
         this.registerAttribute(this, Attributes.ATTACK_DAMAGE, 2.0)
@@ -60,7 +65,51 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         this.setPersistenceRequired()
     }
 
-    override fun makeBrain(dynamic: Dynamic<*>?): Brain<*> {
+    // --- РЕАЛИЗАЦИЯ ИНТЕРФЕЙСА HUMANOID (Атака) ---
+
+    override fun attack(target: org.bukkit.entity.LivingEntity) {
+        this.attack(target, -1)
+    }
+
+    override fun attack(target: org.bukkit.entity.LivingEntity, maxStrikes: Int) {
+        val nmsTarget = (target as CraftLivingEntity).handle
+
+        // Устанавливаем квоту ударов
+        this.attacksLeft = if (maxStrikes > 0) maxStrikes else null
+
+        // Принудительно ставим память
+        this.brain.setMemory(MemoryModuleType.ATTACK_TARGET, nmsTarget)
+
+        // Сбрасываем память о том, что бой закончен, если она была
+        this.brain.eraseMemory(MemoryModuleType.PACIFIED)
+    }
+
+    // Метод проверки квоты ударов. Вызывается после каждой успешной атаки.
+    private fun consumeAttackQuota() {
+        if (attacksLeft != null) {
+            attacksLeft = attacksLeft!! - 1
+            if (attacksLeft!! <= 0) {
+                // Лимит исчерпан — забываем цель
+                this.brain.eraseMemory(MemoryModuleType.ATTACK_TARGET)
+                this.attacksLeft = null
+                this.stopUsingItem() // Опустить оружие
+                this.isAggressive = false
+            }
+        }
+    }
+
+    // Перехват ближнего боя
+    override fun doHurtTarget(serverLevel: ServerLevel, target: Entity): Boolean {
+        val result = super.doHurtTarget(serverLevel, target)
+        if (result) {
+            consumeAttackQuota()
+        }
+        return result
+    }
+
+    // --- КОНЕЦ БЛОКА АТАКИ ---
+
+    override fun makeBrain(dynamic: Dynamic<*>): Brain<*> {
         val brain = brainProvider().makeBrain(dynamic)
         this.registerBrainGoals(brain)
         return brain
@@ -111,7 +160,7 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         ))
     }
 
-    override fun refreshBrain(level: ServerLevel?) {
+    override fun refreshBrain(level: ServerLevel) {
         val brain = getBrain()
         brain.stopAll(level, this)
         this.brain = brain.copyWithoutBehaviors()
@@ -213,17 +262,15 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
             this.setItemSlot(EquipmentSlot.MAINHAND, nmsItem)
             world.playSound(location, sound, 1F, 1F)
             ticks++; if (ticks >= duration) {
-                this.setItemSlot(EquipmentSlot.MAINHAND, net.minecraft.world.item.ItemStack.EMPTY)
-                onDone.invoke()
-                this.isNoAi = false
-                task.cancel()
-            }
+            this.setItemSlot(EquipmentSlot.MAINHAND, net.minecraft.world.item.ItemStack.EMPTY)
+            onDone.invoke()
+            this.isNoAi = false
+            task.cancel()
+        }
         }, 0, period)
     }
 
     override fun equip(slot: org.bukkit.inventory.EquipmentSlot, item: ItemStack) {
-
-        // Slot conversion. We can't skip that. :(
         val nmsSlot = when (slot) {
             org.bukkit.inventory.EquipmentSlot.HAND -> EquipmentSlot.MAINHAND
             org.bukkit.inventory.EquipmentSlot.OFF_HAND -> EquipmentSlot.OFFHAND
@@ -236,12 +283,9 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         }
 
         val nmsItem = CraftItemStack.asNMSCopy(item)
-
         this.setItemSlot(nmsSlot, nmsItem)
-
         val attackSpeed = item.itemMeta?.attributeModifiers?.get(org.bukkit.attribute.Attribute.ATTACK_SPEED)
         this.attributes.getInstance(Attributes.ATTACK_SPEED)?.baseValue = attackSpeed?.firstOrNull()?.amount ?: 0.25
-
     }
 
     override var talkingPlayer: Player? = null
@@ -258,8 +302,6 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         return ImmutableList.copyOf(this.filterNot { it.second?.javaClass == behavior.java }.sortedBy { it.first })
     }
 
-    // Реализация для лука и арбалета
-    // Этот метод вызывается из поведений (Behavior) для стрельбы
     override fun performRangedAttack(target: LivingEntity, velocity: Float) {
         val mainHandStack = this.mainHandItem
         val offHandStack = this.offhandItem
@@ -270,7 +312,6 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
             else -> return
         }
 
-        // 1. ПРИНУДИТЕЛЬНЫЙ РАЗВОРОТ
         val dX = target.x - this.x
         val dZ = target.z - this.z
         val targetYaw = (Math.toDegrees(kotlin.math.atan2(dZ, dX)) - 90.0).toFloat()
@@ -278,9 +319,8 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
         this.yRot = targetYaw
         this.yHeadRot = targetYaw
         this.yBodyRot = targetYaw
-        this.hasImpulse = true
+        this.hasImpulse = true // 1.21.10 specific
 
-        // 2. СОЗДАНИЕ СТРЕЛЫ
         val arrowEntity = net.minecraft.world.entity.projectile.Arrow(
             level(),
             this,
@@ -288,84 +328,63 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
             weaponStack
         )
 
-        // 3. РАСЧЕТ БАЛЛИСТИКИ
         val dist = kotlin.math.sqrt(dX * dX + dZ * dZ)
-
-        // Целимся в грудь (60% высоты), а не в колени. Это надежнее.
         val targetHeightOffset = target.bbHeight * 0.6
         val targetY = target.y + targetHeightOffset
         val dY = targetY - arrowEntity.y
 
         if (weaponStack.`is`(Items.CROSSBOW)) {
-            // --- АРБАЛЕТ ---
             this.playSound(
                 net.minecraft.sounds.SoundEvents.CROSSBOW_SHOOT,
                 1.0f,
                 1.0f / (this.getRandom().nextFloat() * 0.4f + 0.8f)
             )
-
-            // Скорость 3.5 (очень быстро)
-            // Поправка на гравитацию минимальная (0.05), так как стрела летит почти прямо
             arrowEntity.shoot(dX, dY + dist * 0.05, dZ, 3.5f, 0.5f)
-
-            // Разрядка (1.21 Data Components)
             weaponStack.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.EMPTY)
-
             this.onCrossbowAttackPerformed()
 
         } else {
-            // --- ЛУК ---
             this.playSound(
                 net.minecraft.sounds.SoundEvents.SKELETON_SHOOT,
                 1.0f,
                 1.0f / (this.getRandom().nextFloat() * 0.4f + 0.8f)
             )
-
-            // Увеличиваем скорость лука до 2.5 (быстрее стандарта)
-            // Поправка на гравитацию 0.1 (было 0.2).
-            // При скорости 2.5 стрела падает меньше, поэтому задирать прицел нужно меньше.
-            // velocity обычно равна 1.0 при полном натяжении.
             val speed = velocity * 2.5f
-
             arrowEntity.shoot(dX, dY + dist * 0.1, dZ, speed, 1.0f)
         }
 
         this.level().addFreshEntity(arrowEntity)
+
+        // Уменьшаем счетчик ударов при выстреле
+        consumeAttackQuota()
     }
 
     override fun killedEntity(level: ServerLevel, victim: LivingEntity, damageSource: DamageSource): Boolean {
-        // Вызываем ванильную логику (статистика, ачивки и т.д.)
         val result = super.killedEntity(level, victim, damageSource)
-
-        // Превращаем NMS сущности в Bukkit API
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
         val bukkitVictim = victim.bukkitEntity as? org.bukkit.entity.LivingEntity
 
         if (bukkitVillager != null && bukkitVictim != null) {
-
-            // Определяем тип убийства на основе последнего полученного жертвой урона
-            val damageSource = victim.lastDamageSource
-
+            val dSource = victim.lastDamageSource
             val killType = when {
-                // Если урон "косвенный" (Projectile), значит это выстрел
-                damageSource != null && !damageSource.isDirect -> VillagerKillTargetEvent.KillType.RANGED
-
-                // Если урон прямой (от моба к мобу), значит ближний бой
-                damageSource != null && damageSource.isDirect -> VillagerKillTargetEvent.KillType.MELEE
-
+                dSource != null && !dSource.isDirect -> VillagerKillTargetEvent.KillType.RANGED
+                dSource != null && dSource.isDirect -> VillagerKillTargetEvent.KillType.MELEE
                 else -> VillagerKillTargetEvent.KillType.OTHER
             }
-
-            // Создаем и вызываем ивент
             val event = VillagerKillTargetEvent(bukkitVillager, bukkitVictim, killType)
             Bukkit.getPluginManager().callEvent(event)
         }
 
+        // Сбрасываем счетчик, если цель убита
+        this.attacksLeft = null
+
         return result
     }
 
-    // Методы для арбалета (из интерфейса CrossbowAttackMob)
-    override fun setChargingCrossbow(charging: Boolean) {}
+    // Связываем зарядку арбалета с флагом агрессии для визуализации
+    override fun setChargingCrossbow(charging: Boolean) {
+        this.isAggressive = charging
+    }
 
     override fun canFireProjectileWeapon(weapon: net.minecraft.world.item.ProjectileWeaponItem): Boolean {
         return weapon == Items.BOW || weapon == Items.CROSSBOW || super.canFireProjectileWeapon(weapon)
@@ -378,5 +397,4 @@ class HumanoidVillager(type: EntityType<out Villager?>?, val level: Level?, vill
     override fun onCrossbowAttackPerformed() {
         this.noActionTime = 0
     }
-
 }
