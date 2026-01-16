@@ -21,10 +21,8 @@ class ProviderManager {
 
         // Check if the API key is set to the default value
         if (config.apiKey == "YOUR_API_KEY") {
-            // 1. Send console message about AI generation and configuration requirement
             plugin.logger.warning("Ignis can generate content using AI. For full plugin functionality, you must configure provider.yml.")
 
-            // 3. Enter special state: Register a listener to notify OPs on join
             plugin.server.pluginManager.registerEvents(object : Listener {
                 @EventHandler
                 fun onPlayerJoin(event: PlayerJoinEvent) {
@@ -34,7 +32,6 @@ class ProviderManager {
                 }
             }, plugin)
 
-            // 2. Do not disable the plugin. instead, return a Placeholder/Dummy Client.
             return@run DummyClient()
         }
 
@@ -46,7 +43,7 @@ class ProviderManager {
             ProviderType.GROQ -> GroqClient(keyManager = GroqClient.KeyManager(apiKey), config)
             ProviderType.DEEPSEEK -> DeepSeekClient(DeepSeekClient.KeyManager(apiKey), config)
             ProviderType.CHATGPT -> ChatGPTClient(ChatGPTClient.KeyManager(apiKey), config)
+            ProviderType.ANYTHINGLLM -> AnythingLLMClient(AnythingLLMClient.KeyManager(apiKey), config)
         }
     }
-
 }
