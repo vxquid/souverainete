@@ -247,6 +247,17 @@ class RaceManager {
 
     companion object {
         val racesRegistry = hashMapOf<String, Race>()
-        val LivingEntity.race: Race get() = racesRegistry.values.find { it.matching(this) } ?: Race.VILLAGER_RACE
+
+        val LivingEntity.race: Race get() {
+            val config = plugin.gameplayManager.config.humanoid
+
+            // One race mode
+            if (config.oneRaceMode) {
+                val forcedRace = racesRegistry[config.globalRace]
+                if (forcedRace != null) return forcedRace
+            }
+
+            return racesRegistry.values.find { it.matching(this) } ?: Race.VILLAGER_RACE
+        }
     }
 }

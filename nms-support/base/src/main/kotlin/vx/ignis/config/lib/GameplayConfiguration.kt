@@ -49,6 +49,12 @@ class GameplayConfiguration {
 
         @Comment("If you have plugins such as entity-culler or others that interfere with the display of creatures, enable this.")
         var adaptivePacketManipulator: Boolean = false
+
+        @Comment("If enabled, all villagers will be assigned the race defined in 'globalRace', ignoring individual race matching rules.")
+        var oneRaceMode: Boolean = false
+
+        @Comment("The ID of the race to use when oneRaceMode is enabled (default is 'human'). Make sure this race exists in races.yml.")
+        var globalRace: String = "human"
     }
 
     class ReputationConfig {
