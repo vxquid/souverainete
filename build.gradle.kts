@@ -8,13 +8,13 @@ plugins {
   id("com.gradleup.shadow") version "9.2.2"
 }
 
-group = "ignis"
-version = "0.4.2.4"
-description = "Let AI make your server alive with AI-generated NPCs, quests, towns, items and a lot more."
+group = "souverainete"
+version = "0.5.1.1"
+description = "Spiritual successor to Millénaire, reimagined for modern servers. Watch villages evolve into settlements, witness dynamic wars between races, and interfere in global politics."
 
 bukkitPluginYaml {
-  name = "Ignis"
-  main = "vx.ignis.Ignis"
+  name = "souverainete"
+  main = "vx.sv.Souverainete"
   load = BukkitPluginYaml.PluginLoadOrder.STARTUP
   depend = listOf("packetevents")
   softDepend = listOf("MythicMobs")
@@ -61,14 +61,14 @@ tasks {
 
   tasks {
     shadowJar {
-      archiveFileName = "ignis-${version}.jar"
+      archiveFileName = "souverainete-${version}.jar"
+      relocate("co.aikar.commands", "vx.sv.command")
+      relocate("co.aikar.locales", "vx.sv.command.locales")
+      relocate("kotlin", "vx.sv.kotlin")
+      relocate("com.github.retrooper.packetevents", "vx.sv.packetevents.api")
+      relocate("io.github.retrooper.packetevents", "vx.sv.packetevents.impl")
+      relocate("com.cryptomorin.xseries", "vx.sv.utils")
       minimize()
-      relocate("co.aikar.commands", "vx.ignis.command")
-      relocate("co.aikar.locales", "vx.ignis.command.locales")
-      relocate("kotlin", "vx.ignis.kotlin")
-      relocate("com.github.retrooper.packetevents", "vx.ignis.packetevents.api")
-      relocate("io.github.retrooper.packetevents", "vx.ignis.packetevents.impl")
-      relocate("com.cryptomorin.xseries", "vx.ignis.utils")
     }
   }
 

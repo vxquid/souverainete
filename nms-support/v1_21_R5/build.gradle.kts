@@ -2,7 +2,7 @@ plugins {
     id("io.papermc.paperweight.userdev") version "2.0.0-beta.17"
 }
 
-group = "ignis"
+group = "souverainete"
 version = "1"
 
 repositories {
