@@ -32,6 +32,7 @@ class RaceManager {
             val section = races.getConfigurationSection(name) ?: return@forEach
 
             // 1. --- Basic Attributes & Settings ---
+            val leaderTitle = section.getString("leader-title") ?: "Mayor"
             val targetEntityType = section.getString("target-entity-type") ?: return@forEach
             val targetVillagerType = section.getString("target-villager-type")
                 ?.let { Registry.VILLAGER_TYPE.get(NamespacedKey.minecraft(it.lowercase())) }
@@ -151,6 +152,7 @@ class RaceManager {
             // 3. --- Register Race ---
             racesRegistry[name] = Race(
                 name,
+                leaderTitle,
                 XEntityType.valueOf(targetEntityType), targetVillagerType,
                 maleVoices, femaleVoices,
                 maleHurtSound, maleDeathSound, femaleHurtSound, femaleDeathSound,
@@ -181,6 +183,7 @@ class RaceManager {
 
     data class Race(
         val name: String,
+        val leaderTitle: String,
         val targetEntityType: XEntityType,
         val targetVillagerType: Villager.Type,
         val maleVoices: List<PitchedSound>,
@@ -226,7 +229,7 @@ class RaceManager {
             private val voices = listOf(XSound.ENTITY_VILLAGER_YES).map { PitchedSound(it, 1.0, 1.0) }
 
             val VILLAGER_RACE = Race(
-                "villager", XEntityType.VILLAGER, Villager.Type.PLAINS,
+                "villager", "Mayor", XEntityType.VILLAGER, Villager.Type.PLAINS,
                 voices, voices,
                 PitchedSound(XSound.ENTITY_VILLAGER_HURT, 1.0, 1.0),
                 PitchedSound(XSound.ENTITY_VILLAGER_DEATH, 1.0, 1.0),

@@ -18,6 +18,9 @@ dwarf:
   # A race description to be used by the AI when generating personal villager data and quests.
   race-description: "Short statured craftsmen known for their love of alcohol, beards and deep voices. With their naturally strong builds, they prefer to live in cold places, where they are often found. Excellent miners, blacksmiths and drinking companions."
 
+  # This is how the boss of the village will be called in menus and dialogues.
+  leader-title: "King"
+
   # Format: SOUND-MIN_PITCH-MAX_PITCH (pitch must be between 0.0 and 2.0)
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
   sound:
@@ -71,6 +74,9 @@ orc:
   # A race description to be used by the AI when generating personal villager data and quests.
   race-description: "Possessing fangs and brute strength, but lacking in cunning, they are formidable warriors, resilient and towering. Their language is simple, bold and honest. Sometimes they use phrases from the Orcish language that only they understand (from the World of Warcraft). Though often perceived as savage barbarians, orcs hold tradition in high regard and revere martial honor and spiritual shamanism, bound by a profound sense of community. Adapted to the rigors of the desert, they are invariably found beneath the relentless sun. Orcs are, to some, dangerous and powerful enemies, while to others, they are steadfast companions in arms. REALLY LOVE CAPSLOCKING."
 
+  # This is how the boss of the village will be called in menus and dialogues.
+  leader-title: "Warchief"
+
   # Format: SOUND-MIN_PITCH-MAX_PITCH (pitch must be between 0.0 and 2.0)
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
   sound:
@@ -121,6 +127,9 @@ elf:
   # A race description to be used by the AI when generating personal villager data and quests.
   race-description: "Graceful, wise, mysterious long-living beings deeply connected to nature, elves are known for their archery skills, love of forests, and serene demeanor. Sometimes they use phrases from the Elvish language that only they understand (from the World of Warcraft). They are often found in taiga biomes, living in harmony with the woods and its creatures. Elves are skilled in crafts and possess a keen eye for beauty and detail."
 
+  # This is how the boss of the village will be called in menus and dialogues.
+  leader-title: "Elder"
+
   # Format: SOUND-MIN_PITCH-MAX_PITCH (pitch must be between 0.0 and 2.0)
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
   sound:
@@ -170,6 +179,9 @@ human:
 
   # A race description to be used by the AI when generating personal villager data and quests.
   race-description: "Adaptable and versatile, humans are found throughout the world, skilled in many trades and known for their resilience. They are the most common race and form the backbone of many societies. Humans are known for their ingenuity and capacity for both great good and great evil."
+
+  # This is how the boss of the village will be called in menus and dialogues.
+  leader-title: "Mayor"
 
   # Format: SOUND-MIN_PITCH-MAX_PITCH (pitch must be between 0.0 and 2.0)
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
@@ -226,6 +238,9 @@ goblin:
   # A race description to be used by the AI when generating personal villager data and quests.
   race-description: "Small, sneaky and greedy creatures known for their green skin, cunning and love of shiny objects. Goblins are often considered annoying and untrustworthy, but they are also surprisingly resourceful and intelligent. They can be found in savanna biomes, scavenging for loot and causing mischief."
 
+  # This is how the boss of the village will be called in menus and dialogues.
+  leader-title: "Boss"
+
   # Format: SOUND-MIN_PITCH-MAX_PITCH (pitch must be between 0.0 and 2.0)
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
   sound:
@@ -275,6 +290,9 @@ mandrathi:
 
   # A race description to be used by the AI when generating personal villager data and quests.
   race-description: "The Mandrati are a race of intelligent ape-like humanoids inhabiting dense jungles. Their fur-covered bodies and long arms make them skilled climbers, effortlessly navigating tree canopies. Their society is matriarchal, with wise female elders leading tribes according to ancient traditions and a deep connection to nature. Known for their agility, strength, and cunning, the Mandrati inspire both awe and fear in those who trespass into their domain. They possess a unique language of vocalizations and gestures, and their shamans commune with forest spirits. While generally peaceful, they fiercely defend their territory from outsiders. Their language barely resembles human language and so everything they say sounds very primitive and strange. They hardly understand what being polite means, they are beasts after all."
+
+  # This is how the boss of the village will be called in menus and dialogues.
+  leader-title: "Matriarch"
 
   # Format: SOUND-MIN_PITCH-MAX_PITCH (pitch must be between 0.0 and 2.0)
   # https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/Sound.html
@@ -340,6 +358,9 @@ moss:
 
   # A race description to be used by the AI when generating personal villager data and quests.
   race-description: "People of the Moss. They live in symbiosis with the swamp, valuing moisture and decay above gold."
+
+  # This is how the boss of the village will be called in menus and dialogues.
+  leader-title: "Speaker"
 
   spawn-items:
     - "SLIME_BALL-1-3"

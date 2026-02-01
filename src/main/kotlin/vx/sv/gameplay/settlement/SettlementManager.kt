@@ -2,6 +2,7 @@ package vx.sv.gameplay.settlement
 
 import com.google.gson.reflect.TypeToken
 import org.bukkit.Location
+import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.World
 import org.bukkit.block.Bell
@@ -9,6 +10,8 @@ import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.block.Action
+import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.gson
@@ -17,6 +20,7 @@ import vx.sv.ai.base.DummyClient
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.humanoid.race.RaceManager.Race
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
+import vx.sv.gameplay.settlement.gui.SettlementMenus
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.concurrent.CompletableFuture
 
@@ -240,6 +244,38 @@ class SettlementManager : Listener {
         event.chunk.entities.filterIsInstance<Villager>().forEach { villager ->
             villager.settlement?.villagers?.add(villager)
         }
+    }
+
+    @EventHandler
+    fun onBellInteract(event: PlayerInteractEvent) {
+        if (event.action != Action.RIGHT_CLICK_BLOCK) return
+        val block = event.clickedBlock ?: return
+        if (block.type != Material.BELL) return
+
+        val player = event.player
+
+        // 1. Быстрая проверка через PDC. Если игрок не "внутри" поселения — досвидули.
+        val settlementName = player.currentSettlement ?: return
+
+        // 2. Достаем объект поселения по имени
+        // (Твой getByName сейчас перебирает список, но это всё равно быстрее,
+        // чем считать дистанции до каждого города).
+        val settlement = SettlementManager.getByName(settlementName) ?: return
+
+        // 3. ПРОВЕРКА ВАЛИДНОСТИ КОЛОКОЛА
+        // Мы должны убедиться, что кликнутый колокол — это РЕАЛЬНО центр этого поселения.
+        // Иначе игроки будут ставить свои колокола и открывать меню города где попало.
+        val center = settlement.data.center
+
+        // Сравниваем координаты блока.
+        if (center.blockX != block.x || center.blockY != block.y || center.blockZ != block.z) {
+            // Можно добавить сообщение: "Этот колокол не является административным центром."
+            return
+        }
+
+        // 4. Всё совпало — открываем
+        event.isCancelled = true // Не даем колоколу звенеть (опционально)
+        SettlementMenus.openMainMenu(player, settlement)
     }
 
     data class SettlementData(val settlementName: List<String>)

@@ -15,6 +15,52 @@ settlement:
   entering: "You entering a settlement."
   leaving: "You leaving a settlement."
   created: "§eA new settlement has been founded: §6{settlementName}§e."
+  # Settlement related messages.
+  settlement:
+    entering: "You entering a settlement."
+    leaving: "You leaving a settlement."
+    created: "§eA new settlement has been founded: §6{settlementName}§e."
+    menu:
+      common:
+        back: "§cBack"
+      main:
+        # Заголовок теперь просто название поселения
+        title: "§8{name}"
+        stats:
+          name: "§e📜 Information"
+          lore:
+            - "§7Population: §b{pop}"
+            - "§7Beds: §e{beds}"
+            - "§7Size: §a{size}"
+            - "§7Established: §f{date}"
+            - ""
+            - "§7Reputation: {rep}"
+        population:
+          name: "§a👥 Citizens"
+          lore:
+            - "§7Click to view"
+            - "§7resident list."
+        settings:
+          name: "§6⚙ Management"
+          lore:
+            - "§7Rename and settings."
+      population:
+        title: "§8Citizens ({count})"
+        head-lore:
+          - "§7Job: §f{job}"
+          - "§7Health: §c{hp}§7/§c{max_hp}"
+      settings:
+        title: "§8Management"
+        rename:
+          name: "§e✎ Rename Settlement"
+          lore:
+            - "§7Current: §f{name}"
+            - ""
+            - "§eClick to type new name."
+      rename:
+        prompt: "§eWrite new name in chat (or 'cancel'):"
+        cancelled: "§cCancelled."
+        success: "§aSettlement renamed to: §6{name}"
 
 quest:
   finished: "You have finished the quest §6{quest}§7."
@@ -148,3 +194,43 @@ death-messages:
   carry-start: "You are carrying {villagerName}"
   needs-revive-item: "Needs a Golden Apple or Potion to revive!"
   revived: "You revived {villagerName}!"
+
+menu:
+  common:
+    back: "§cBack"
+  main:
+    title: "§8Settlement: {name}"
+    stats:
+      name: "§e📜 Information"
+      lore:
+        - "§7Population: §b{pop}"
+        - "§7Size: §a{size}"
+        - "§7Established: §f{date}"
+        - ""
+        - "§7Reputation: {rep}"
+    population:
+      name: "§a👥 Citizens"
+      lore:
+        - "§7Click to view"
+        - "§7resident list."
+    settings:
+      name: "§6⚙ Management"
+      lore:
+        - "§7Rename and settings."
+  population:
+    title: "§8Citizens ({count})"
+    head-lore:
+      - "§7Job: §f{job}"
+      - "§7Health: §c{hp}§7/§c{max_hp}"
+  settings:
+    title: "§8Management"
+    rename:
+      name: "§e✎ Rename Settlement"
+      lore:
+        - "§7Current: §f{name}"
+        - ""
+        - "§eClick to type new name."
+  rename:
+    prompt: "§eWrite new name in chat (or 'cancel'):"
+    cancelled: "§cCancelled."
+    success: "§aSettlement renamed to: §6{name}"
