@@ -32,6 +32,7 @@ import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
+import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import vx.sv.persistent.VillagerExtend.professionLevelName
 import vx.sv.util.Daytime
@@ -175,6 +176,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "npcProfession"      to villager.profession.key.key,
             "npcProfessionLevel" to villager.professionLevelName,
             "playerReputation"   to playerReputation.toString(),
+            "settlementName"     to (villager.settlement?.data?.settlementName ?: "[NPC is homeless.]"),
             "currentBiome"       to currentBiome,
             "currentTime"        to currentDaytime,
             "currentWeather"     to currentWeather,
@@ -236,6 +238,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "playerReputation"   to playerReputation.toString(),
             "currentBiome"       to currentBiome,
             "currentTime"        to currentDaytime,
+            "settlementName"     to (villager.settlement?.data?.settlementName ?: "[NPC is homeless.]"),
             "currentWeather"     to currentWeather,
             "activeEffects"      to activeEffects,
             "itemType"           to gift.type.toString().lowercase().replace("_", " "),

@@ -9,7 +9,6 @@ settlement-reputation:
   increase: "§9Reputation with {entity} increased by {amount}."
   decrease: "§9Reputation with {entity} decreased by {amount}."
   status-update: "§eYour reputation with {entity} has shifted to {status}."
-  murder-witnessed: "§cYour crime has been witnessed by the settlement! Guards are alerted!"
 
 # Settlement related messages.
 settlement:
@@ -24,7 +23,7 @@ settlement:
     advanced: "Advanced"
     metropolis: "Metropolis"
 
-  # Menu translations (Merged under 'settlement' to match Kotlin code paths)
+  # Menu translations
   menu:
     common:
       back: "§cBack"
