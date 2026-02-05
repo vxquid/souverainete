@@ -32,7 +32,7 @@ class ReputationTracker : Listener {
     // Phrase cooldowns: NPC UUID -> Last shout timestamp
     private val shoutCooldowns = mutableMapOf<UUID, Long>()
 
-    // Personal space radius: NPCs only get annoyed if you are this close
+    // Personal space radius for Unfriendly warnings
     private val personalSpaceRadius = 5.0
 
     init {
@@ -59,7 +59,7 @@ class ReputationTracker : Listener {
                 val playerSettlement = player.currentSettlement
                 val nearby = player.getNearbyEntities(config.aggressionRadius, config.aggressionRadius, config.aggressionRadius)
 
-                // Cleanup timers if player is gone, left the settlement, or moved out of range
+                // Cleanup timers if player is out of range or left the settlement
                 annoyanceTimers.keys.removeIf { it.second == player.uniqueId &&
                         (playerSettlement == null || player.location.distance(plugin.server.getEntity(it.first)?.location ?: player.location) > personalSpaceRadius)
                 }
@@ -67,7 +67,7 @@ class ReputationTracker : Listener {
                 for (entity in nearby) {
                     if (entity !is LivingEntity || (entity !is Villager && entity !is IronGolem)) continue
 
-                    // Reset aggro if player left the settlement area
+                    // Reset aggro and timers if player left the settlement area
                     if (playerSettlement == null || (entity.settlement != null && entity.settlement?.data?.settlementName != playerSettlement)) {
                         resetAggro(entity, player)
                         continue
@@ -78,30 +78,31 @@ class ReputationTracker : Listener {
                     val distance = entity.location.distance(player.location)
 
                     when {
-                        // 1. UNFRIENDLY status: Only get annoyed if player is within personal space (5 blocks)
+                        // 1. UNFRIENDLY status: Only get annoyed if player is within personal space
                         finalStatus == Reputation.UNFRIENDLY -> {
                             if (distance <= personalSpaceRadius && entity.hasLineOfSight(player)) {
                                 val startTime = annoyanceTimers.getOrPut(pair) {
+                                    // Shout warning when timer starts
                                     shoutWithCooldown(entity, entity.race.phrases.warning.randomOrNull())
                                     System.currentTimeMillis()
                                 }
 
                                 val elapsed = System.currentTimeMillis() - startTime
                                 if (elapsed > 20000L) { // 20 seconds elapsed
-                                    triggerAggression(entity, player, warn = false)
+                                    triggerAggression(entity, player, finalStatus)
                                 }
                             }
                         }
 
-                        // 2. HOSTILE and EXILED statuses: Immediate attack within detection radius
+                        // 2. HOSTILE and EXILED statuses: Immediate attack
                         finalStatus.ordinal >= Reputation.HOSTILE.ordinal -> {
                             if (entity.hasLineOfSight(player)) {
-                                triggerAggression(entity, player, warn = true)
+                                triggerAggression(entity, player, finalStatus)
                                 callForHelp(entity, player)
                             }
                         }
 
-                        // 3. Everything else: ignore annoyance
+                        // 3. Neutral or better: remove any annoyance tracking
                         else -> annoyanceTimers.remove(pair)
                     }
                 }
@@ -119,10 +120,10 @@ class ReputationTracker : Listener {
         val penalty = (event.damage * config.damageReputationMultiplier).toInt()
         if (penalty > 0) repManager.addReputation(victim, attacker, -penalty)
 
-        // Counter-attack immediately if damaged by an unfriendly/hostile player
         val finalStatus = getFinalStatus(victim, attacker)
+        // If attacker is already disliked, respond immediately
         if (finalStatus.ordinal >= Reputation.UNFRIENDLY.ordinal) {
-            triggerAggression(victim, attacker, warn = false)
+            triggerAggression(victim, attacker, finalStatus)
         }
     }
 
@@ -131,7 +132,7 @@ class ReputationTracker : Listener {
         val victim = event.entity
         val killer = victim.killer ?: return
 
-        // --- NPC DEATH LOGIC ---
+        // NPC Death penalty logic
         if (victim is Villager || victim is IronGolem) {
             val settlement = victim.settlement ?: return
 
@@ -147,7 +148,7 @@ class ReputationTracker : Listener {
 
             triggerSettlementAlarm(settlement)
 
-            // Alert nearby witnesses
+            // Notify and aggro witnesses
             val witnesses = victim.getNearbyEntities(config.witnessRadius, config.witnessRadius, config.witnessRadius)
                 .filterIsInstance<LivingEntity>()
                 .filter { (it is Villager || it is IronGolem) && !it.isDead && it.settlement == settlement }
@@ -156,11 +157,11 @@ class ReputationTracker : Listener {
                 shoutWithCooldown(it, it.race.phrases.witnessMurder.randomOrNull()?.replace("{victim}", victim.customName ?: victim.name))
             }
 
-            witnesses.forEach { triggerAggression(it, killer, warn = false) }
+            witnesses.forEach { triggerAggression(it, killer, Reputation.HOSTILE) }
             return
         }
 
-        // --- MONSTER/ILLAGER DEATH LOGIC (Reputation Gain) ---
+        // Monster kill reward logic
         val worldSettlements = settlements[victim.world] ?: return
         val activeSettlement = worldSettlements.find { it.territory.contains(victim.location.toVector()) } ?: return
 
@@ -186,10 +187,20 @@ class ReputationTracker : Listener {
     }
 
     // --- AGGRESSION LOGIC ---
-    private fun triggerAggression(npc: LivingEntity, target: Player, warn: Boolean) {
-        if (warn) {
-            shoutWithCooldown(npc, npc.race.phrases.warning.randomOrNull())
+
+    /**
+     * Triggers the NPC attack.
+     * Uses warning phrases for UNFRIENDLY and startFight phrases for HOSTILE/EXILED.
+     */
+    private fun triggerAggression(npc: LivingEntity, target: Player, status: Reputation) {
+        // Determine which phrase pool to use
+        val phrasePool = if (status.ordinal >= Reputation.HOSTILE.ordinal) {
+            npc.race.phrases.startFight
+        } else {
+            npc.race.phrases.warning
         }
+
+        shoutWithCooldown(npc, phrasePool.randomOrNull())
 
         try {
             plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(npc).attack(target)
@@ -199,8 +210,7 @@ class ReputationTracker : Listener {
     }
 
     /**
-     * Resets the entity's target by cycling AI state.
-     * This forces the internal goal selector to drop the current target.
+     * Resets NPC aggro by cycling AI state and clearing timers.
      */
     private fun resetAggro(npc: LivingEntity, target: Player) {
         try {
@@ -217,7 +227,7 @@ class ReputationTracker : Listener {
         caller.getNearbyEntities(15.0, 10.0, 15.0)
             .filterIsInstance<LivingEntity>()
             .filter { (it is Villager || it is IronGolem) && it.settlement == settlement }
-            .forEach { triggerAggression(it, enemy, warn = false) }
+            .forEach { triggerAggression(it, enemy, Reputation.HOSTILE) }
     }
 
     private fun triggerSettlementAlarm(settlement: Settlement) {
@@ -227,18 +237,22 @@ class ReputationTracker : Listener {
         }
     }
 
-    // --- PHRASE COOLDOWN LOGIC ---
+    // --- PHRASE LOGIC ---
+
+    /**
+     * Sends a chat message from the NPC with a 10s cooldown per entity.
+     */
     private fun shoutWithCooldown(entity: LivingEntity, message: String?) {
         if (message == null) return
 
         val now = System.currentTimeMillis()
         val lastShout = shoutCooldowns[entity.uniqueId] ?: 0L
 
-        if (now - lastShout > 10000L) { // 10 second cooldown per individual NPC
+        if (now - lastShout > 10000L) {
             shoutCooldowns[entity.uniqueId] = now
 
             val name = entity.customName ?: entity.race.name
-            val formatted = "§e$name§r: §c$message"
+            val formatted = "§6$name§r: §c$message"
 
             entity.location.getNearbyPlayers(config.shoutRadius).forEach {
                 it.sendMessage(formatted)
