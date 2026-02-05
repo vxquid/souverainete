@@ -14,12 +14,15 @@ import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.event.entity.EntityTargetLivingEntityEvent
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
+import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
+import vx.sv.gameplay.personality.PersonalityManager.Gender
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager.Companion.currentSettlement
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
+import kotlin.random.Random
 
 class ReputationTracker : Listener {
 
@@ -82,8 +85,8 @@ class ReputationTracker : Listener {
                         finalStatus == Reputation.UNFRIENDLY -> {
                             if (distance <= personalSpaceRadius && entity.hasLineOfSight(player)) {
                                 val startTime = annoyanceTimers.getOrPut(pair) {
-                                    // Shout warning when timer starts
-                                    shoutWithCooldown(entity, entity.race.phrases.warning.randomOrNull())
+                                    // Shout warning when timer starts (Aggressive tone)
+                                    shoutWithCooldown(entity, entity.race.phrases.warning.randomOrNull(), isAggressive = true)
                                     System.currentTimeMillis()
                                 }
 
@@ -153,8 +156,11 @@ class ReputationTracker : Listener {
                 .filterIsInstance<LivingEntity>()
                 .filter { (it is Villager || it is IronGolem) && !it.isDead && it.settlement == settlement }
 
-            witnesses.randomOrNull()?.let {
-                shoutWithCooldown(it, it.race.phrases.witnessMurder.randomOrNull()?.replace("{victim}", victim.customName ?: victim.name))
+            // Pick one random witness to shout
+            witnesses.randomOrNull()?.let { screamer ->
+                val phrase = screamer.race.phrases.witnessMurder.randomOrNull()?.replace("{victim}", victim.customName ?: victim.name)
+                // FORCE SHOUT: Ignore cooldown for murder events to ensure flavor text appears
+                shoutWithCooldown(screamer, phrase, isAggressive = true, ignoreCooldown = true)
             }
 
             witnesses.forEach { triggerAggression(it, killer, Reputation.HOSTILE) }
@@ -190,22 +196,41 @@ class ReputationTracker : Listener {
 
     /**
      * Triggers the NPC attack.
-     * Uses warning phrases for UNFRIENDLY and startFight phrases for HOSTILE/EXILED.
+     * For UNFRIENDLY: Performs a single strike to scare the player.
+     * For HOSTILE/EXILED: Engages in full combat until target is dead.
      */
     private fun triggerAggression(npc: LivingEntity, target: Player, status: Reputation) {
+        val isFullCombat = status.ordinal >= Reputation.HOSTILE.ordinal
+
         // Determine which phrase pool to use
-        val phrasePool = if (status.ordinal >= Reputation.HOSTILE.ordinal) {
+        val phrasePool = if (isFullCombat) {
             npc.race.phrases.startFight
         } else {
             npc.race.phrases.warning
         }
 
-        shoutWithCooldown(npc, phrasePool.randomOrNull())
+        // Play aggressive shout with voice
+        shoutWithCooldown(npc, phrasePool.randomOrNull(), isAggressive = true)
 
         try {
-            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(npc).attack(target)
+            val humanoid = plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(npc)
+
+            if (isFullCombat) {
+                // War mode: attack until target is dead
+                humanoid.attack(target)
+            } else {
+                // Annoyance mode: just one punch/strike to say "get out"
+                humanoid.attack(target, 1)
+
+                // Also clear the annoyance timer so the 20-second cycle can restart
+                // if the player stays in personal space after being punched
+                annoyanceTimers.remove(npc.uniqueId to target.uniqueId)
+            }
         } catch (_: Exception) {
-            if (npc is IronGolem) npc.target = target
+            // Fallback for non-humanoid entities like Golems
+            if (npc is IronGolem) {
+                npc.target = target
+            }
         }
     }
 
@@ -241,21 +266,48 @@ class ReputationTracker : Listener {
 
     /**
      * Sends a chat message from the NPC with a 10s cooldown per entity.
+     * Plays a race-specific voice sound with pitch modification.
+     *
+     * @param isAggressive If true, pitch is lowered to sound more threatening.
+     * @param ignoreCooldown If true, bypasses the 10s timer (used for critical events like murder).
      */
-    private fun shoutWithCooldown(entity: LivingEntity, message: String?) {
+    private fun shoutWithCooldown(entity: LivingEntity, message: String?, isAggressive: Boolean = false, ignoreCooldown: Boolean = false) {
         if (message == null) return
 
         val now = System.currentTimeMillis()
         val lastShout = shoutCooldowns[entity.uniqueId] ?: 0L
 
-        if (now - lastShout > 10000L) {
+        if (ignoreCooldown || now - lastShout > 10000L) {
             shoutCooldowns[entity.uniqueId] = now
 
+            // 1. Send Chat Message
             val name = entity.customName ?: entity.race.name
-            val formatted = "§6$name§r: §c$message"
+            val formatted = "§6$name§7: §c$message"
 
             entity.location.getNearbyPlayers(config.shoutRadius).forEach {
                 it.sendMessage(formatted)
+            }
+
+            // 2. Play Voice Sound
+            val race = entity.race
+            val voices = if (entity.gender == Gender.MALE) race.maleVoices else race.femaleVoices
+
+            if (voices.isNotEmpty()) {
+                val voice = voices.random()
+                val sound = voice.sound.get() ?: Sound.INTENTIONALLY_EMPTY
+                // Calculate random pitch within range
+                var pitch = Random.nextDouble(voice.min, voice.max).toFloat()
+
+                // Lower pitch for aggressive shouts (makes them sound angry)
+                if (isAggressive) {
+                    pitch *= 0.85f
+                }
+
+                try {
+                    entity.world.playSound(entity.location, sound, 1.0f, pitch)
+                } catch (_: Exception) {
+                    // Fallback if sound is invalid
+                }
             }
         }
     }
