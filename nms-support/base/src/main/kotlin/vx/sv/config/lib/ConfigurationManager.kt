@@ -107,12 +107,12 @@ object ConfigurationManager {
             field.isAccessible = true
             val value = field.get(instance)
             val kebabKey = toKebabCase(field.name)
-            if (isSimpleType(field.type)) {
+
+            if (isSimpleType(field.type) || field.type == List::class.java || Map::class.java.isAssignableFrom(field.type)) {
                 map[kebabKey] = if (field.type.isEnum) value?.toString() else value
-            } else if (field.type == List::class.java || field.type == Map::class.java) {
-                map[kebabKey] = value
             } else {
-                map[kebabKey] = toMap(value!!)
+                // Рекурсия только для кастомных классов
+                map[kebabKey] = value?.let { toMap(it) }
             }
         }
         return map
@@ -149,11 +149,10 @@ object ConfigurationManager {
             writer.append("$indent$prefixed\n")
         }
 
-        val fields = getFields(config::class.java) // Убрали .sortedBy { it.name } — теперь порядок как в объявлении полей
+        val fields = getFields(config::class.java)
         fields.forEachIndexed { index, field ->
             if (field.isAnnotationPresent(Ignore::class.java)) return@forEachIndexed
 
-            // Добавляем field-level comments
             field.getAnnotation(Comment::class.java)?.value?.forEach { comment ->
                 val prefixed = if (!comment.trim().startsWith('#')) "# $comment" else comment
                 writer.append("$indent$prefixed\n")
@@ -162,23 +161,36 @@ object ConfigurationManager {
             val originalKey = field.name
             val kebabKey = toKebabCase(originalKey)
             val value = data[kebabKey]
+
+            // Если значения нет в данных, берем дефолтное из конфига
+            field.isAccessible = true
+            val actualValue = value ?: field.get(config)
+
             writer.append("$indent$kebabKey: ")
 
-            if (value is Map<*, *>) {
+            if (actualValue is Map<*, *>) {
+                // ПРОВЕРКА: Это коллекция Map или вложенный объект?
+                if (Map::class.java.isAssignableFrom(field.type)) {
+                    // Это обычная карта (данные), просто дампим её содержимое
+                    writer.append("\n")
+                    actualValue.forEach { (k, v) ->
+                        writer.append("$indent  $k: ${yaml.dump(v).trim()}\n")
+                    }
+                } else {
+                    // Это вложенный класс конфигурации
+                    writer.append("\n")
+                    val nestedInstance = field.get(config)!!
+                    dumpWithComments(actualValue as Map<String, Any?>, writer, nestedInstance, indentLevel + 1)
+                }
+            } else if (actualValue is List<*>) {
                 writer.append("\n")
-                field.isAccessible = true
-                val nested = field.get(config)!!
-                dumpWithComments(value as Map<String, Any?>, writer, nested, indentLevel + 1)
-            } else if (value is List<*>) {
-                writer.append("\n")
-                value.forEach { item ->
+                actualValue.forEach { item ->
                     writer.append("$indent  - ${yaml.dump(item).trim()}\n")
                 }
             } else {
-                writer.append(yaml.dump(value).trim() + "\n")
+                writer.append(yaml.dump(actualValue).trim() + "\n")
             }
 
-            // Добавляем пустую строку между глобальными ключами (только на верхнем уровне)
             if (indentLevel == 0 && index < fields.size - 1) {
                 writer.append("\n")
             }

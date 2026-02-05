@@ -1,5 +1,6 @@
 package vx.sv.gameplay.quest
 
+import com.cryptomorin.xseries.XMaterial
 import net.kyori.adventure.key.Key
 import org.bukkit.*
 import org.bukkit.entity.Entity
@@ -36,6 +37,7 @@ import vx.sv.gameplay.quest.pragma.strategy.*
 import vx.sv.gameplay.quest.pragma.strategy.TreasureHuntQuestItemStrategy.Companion.treasureItems
 import vx.sv.gameplay.reputation.ReputationManager.Companion.reputationOf
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
+import vx.sv.gameplay.trade.ScoreCalculator.getBasicScore
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
 import vx.sv.persistent.LivingEntityExtend.hasEdibleItem
 import vx.sv.persistent.LivingEntityExtend.hunger
@@ -371,9 +373,9 @@ class QuestManager : Listener {
                 "The following is the information about the NPC: name is {npcName}, current biome is {currentBiome}, NPC personality definition is [{npcPersonality}], race is {npcRace} and race description: [{raceDescription}], profession is {npcProfession}, npc profession mastery level is {npcProfessionLevel}, npc gender is {npcGender}. {questInfo}"
 
         val questItem = questType.strategy.get(questGiver)
-        val currency  = plugin.gameplayManager.itemDictionary.getItem(questGiver.race.normalCurrency.name)
+        val currency  = questGiver.race.normalCurrency.get() ?: throw NullPointerException("Can't get race normal currency: ${questGiver.race.name}.")
         val amount    = questItem.item.amount
-        val score     = if (questItem.score < currency.score) currency.score * 10 else questItem.score
+        val score     = (if (questItem.score < currency.getBasicScore()) currency.getBasicScore() * 10 else questItem.score).toLong()
 
         private val placeholders  = mutableMapOf<String, String>().also { it ->
             it["npcPersonality"]  = "${questGiver.getPersonality()}"
@@ -396,7 +398,7 @@ class QuestManager : Listener {
                 else -> { /* :) */ }
             }
 
-            it["rewardItem"]      = currency.item.type.name.lowercase().replace("_", " ")
+            it["rewardItem"]      = currency.name.lowercase().replace("_", " ")
             it["questItem"]       = questItem.key.lowercase().replace("_", " ")
             it["questItemAmount"] = amount.toString()
             it["questInfo"]       = questInfo.replaceMap(it) // Must be last!
@@ -426,17 +428,18 @@ class QuestManager : Listener {
 
         fun calculateReward(currency: String): ItemStack {
 
-            val currency = plugin.gameplayManager.itemDictionary.getItem(currency)
-            var amount = score / currency.score
+            val material     = XMaterial.valueOf(currency).get() ?: throw NullPointerException("Can't find material with name $currency.")
+            val currencyItem = ItemStack(material)
+            var amount       = score / material.getBasicScore()
 
             if (amount < 64)
-                return currency.item.apply { this.amount = if (amount <= 0) 1 else amount.toInt() }
+                return currencyItem.apply { this.amount = if (amount <= 0) 1 else amount.toInt() }
 
             val items = mutableListOf<ItemStack>()
 
             while (amount > 0) {
                 amount.coerceIn(1, 64).toInt().let { i ->
-                    items.add(currency.item.apply { this.amount = i }); amount -= i;
+                    items.add(currencyItem.apply { this.amount = i }); amount -= i;
                 }
             }
 

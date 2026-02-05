@@ -5,7 +5,7 @@ import org.bukkit.Material
 import org.bukkit.entity.LivingEntity
 import org.bukkit.inventory.ItemStack
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.gameplay.dictionary.CustomItem
+import vx.sv.gameplay.quest.QuestItemStack
 import vx.sv.gameplay.quest.pragma.QuestItemStrategy
 import vx.sv.gameplay.trade.ScoreCalculator.calculateScore
 import vx.sv.persistent.LivingEntityExtend.subInventory
@@ -13,11 +13,11 @@ import kotlin.random.Random
 
 class TreasureHuntQuestItemStrategy : QuestItemStrategy() {
 
-    override fun get(questGiver: LivingEntity): CustomItem {
+    override fun get(questGiver: LivingEntity): QuestItemStack {
         val (material, range) = treasureItems.filter { !questGiver.subInventory.contains(it.first) }.random()
         val amount = (range.first + Random.nextInt(range.second)).apply { if (this != 1 && this % 2 != 0) this.inc() }
         val item = ItemStack(material, amount)
-        return CustomItem(item.type.name, item.calculateScore().toLong(), item)
+        return QuestItemStack(item.type.name, item.calculateScore().toLong(), item)
     }
 
     companion object {

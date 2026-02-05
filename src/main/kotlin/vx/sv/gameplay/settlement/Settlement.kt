@@ -8,7 +8,7 @@ import java.util.*
 
 class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> = mutableSetOf()) {
 
-    data class SettlementData(val worldUUID: UUID, var settlementName: String, val center: Location, val creationTime: Long, val reputation: MutableMap<UUID, Int> = mutableMapOf())
+    data class SettlementData(val id: UUID, val worldUUID: UUID, var settlementName: String, val center: Location, val creationTime: Long, val reputation: MutableMap<UUID, Int> = mutableMapOf())
 
     val world        = plugin.server.getWorld(data.worldUUID)!!
     var territory    = BoundingBox.of(data.center, 64.0, 64.0, 64.0)

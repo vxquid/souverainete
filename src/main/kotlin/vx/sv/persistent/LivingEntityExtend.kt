@@ -18,8 +18,9 @@ import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Gender
 import vx.sv.gameplay.quest.QuestManager.Quest
 import vx.sv.gameplay.settlement.Settlement
-import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.util.InventorySerializer
+import java.util.*
 import kotlin.jvm.optionals.getOrNull
 import kotlin.random.Random
 
@@ -166,7 +167,31 @@ object LivingEntityExtend {
         set(value) { persistentDataContainer.set(hungerKey, PersistentDataType.DOUBLE, value.coerceIn(0.0, plugin.gameplayManager.config.hunger.max)) }
 
     var LivingEntity.settlement: Settlement?
-        get() = persistentDataContainer.get(settlementKey, PersistentDataType.STRING)?.let { name -> settlements[world]?.find { it.data.settlementName == name } }
-        set(value) { value?.let { persistentDataContainer.set(settlementKey, PersistentDataType.STRING, it.data.settlementName) } }
+        get() {
+            val storedData = persistentDataContainer.get(settlementKey, PersistentDataType.STRING) ?: return null
 
+            // 1. Try to parse as UUID (New system)
+            val uuid = try { UUID.fromString(storedData) } catch (_: Exception) { null }
+            if (uuid != null) {
+                return SettlementManager.getById(uuid)
+            }
+
+            // 2. Fallback: Search by name (Legacy system)
+            val legacySettlement = SettlementManager.getByName(storedData)
+
+            // 3. Optional Migration: Update PDC to UUID format for faster future lookups
+            if (legacySettlement != null) {
+                this.settlement = legacySettlement
+            }
+
+            return legacySettlement
+        }
+        set(value) {
+            if (value != null) {
+                // We always save the ID now
+                persistentDataContainer.set(settlementKey, PersistentDataType.STRING, value.data.id.toString())
+            } else {
+                persistentDataContainer.remove(settlementKey)
+            }
+        }
 }

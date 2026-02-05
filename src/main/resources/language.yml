@@ -42,8 +42,7 @@ settlement:
       population:
         name: "§a👥 Citizens"
         lore:
-          - "§7Click to view"
-          - "§7resident list."
+          - "§7Click to view resident list."
       settings:
         name: "§6⚙ Management"
         lore:

@@ -6,7 +6,7 @@ import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.gameplay.dictionary.CustomItem
+import vx.sv.gameplay.quest.QuestItemStack
 import vx.sv.gameplay.quest.pragma.QuestItemStrategy
 import vx.sv.gameplay.trade.ScoreCalculator.calculateScore
 import java.util.logging.Level
@@ -19,7 +19,7 @@ import kotlin.random.Random
  */
 class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
 
-    override fun get(questGiver: LivingEntity): CustomItem {
+    override fun get(questGiver: LivingEntity): QuestItemStack {
         require(questGiver is Villager) {
             "Quest giver must be a Villager!"
         }
@@ -41,7 +41,7 @@ class ProfessionItemGatheringQuestItemStrategy : QuestItemStrategy() {
         val selectedItem = selectRandomItemInRange(prioritizedItems, minWealth, maxWealth)
             ?: selectFallbackItem(prioritizedItems, minWealth, maxWealth, profession)
 
-        return CustomItem(selectedItem.material.name, selectedItem.price.toLong(), ItemStack(selectedItem.material, selectedItem.amount))
+        return QuestItemStack(selectedItem.material.name, selectedItem.price.toLong(), ItemStack(selectedItem.material, selectedItem.amount))
     }
 
     private fun selectRandomItemInRange(

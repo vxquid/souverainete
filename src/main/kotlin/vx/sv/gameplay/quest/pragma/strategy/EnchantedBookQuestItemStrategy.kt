@@ -9,15 +9,15 @@ import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.EnchantmentStorageMeta
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.gameplay.dictionary.CustomItem
+import vx.sv.gameplay.quest.QuestItemStack
 import vx.sv.gameplay.quest.pragma.QuestItemStrategy
 import vx.sv.persistent.LivingEntityExtend.subInventory
 
 class EnchantedBookQuestItemStrategy : QuestItemStrategy() {
 
-    override fun get(questGiver: LivingEntity): CustomItem {
+    override fun get(questGiver: LivingEntity): QuestItemStack {
         val item = this.randomEnchantedBook(questGiver as? Villager ?: throw IllegalStateException("EnchantedBookQuest is a villager quest!"))
-        return CustomItem(item.type.name, 8500, item)
+        return QuestItemStack(item.type.name, 8500, item)
     }
 
     fun randomEnchantedBook(questGiver: Villager): ItemStack {

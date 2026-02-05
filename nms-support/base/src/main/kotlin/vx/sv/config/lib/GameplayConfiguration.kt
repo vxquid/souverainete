@@ -114,7 +114,7 @@ class GameplayConfiguration {
         var exaltedRequired: Int = 2500
 
         @Comment("Reputation gain for killing specific monsters within settlement territory.")
-        val monsterKillReputation: Map<String, Int> = mapOf(
+        val monsterKillReputation: Map<String, Int> = hashMapOf(
             "ZOMBIE" to 2,
             "SKELETON" to 2,
             "CREEPER" to 5,

@@ -167,7 +167,6 @@ class InteractionHandler : Listener {
     // ============================================================================================
     // MENUS
     // ============================================================================================
-
     private fun showDialogueMenu(player: Player, villager: Villager) {
         val builder = Builder(villager, player)
 

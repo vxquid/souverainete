@@ -12,7 +12,6 @@ import vx.sv.config.lib.GameplayConfiguration
 import vx.sv.gameplay.death.DeathManager
 import vx.sv.gameplay.dialogue.DialogueManager
 import vx.sv.gameplay.dialogue.menu.InteractionHandler
-import vx.sv.gameplay.dictionary.CustomItemDictionary
 import vx.sv.gameplay.humanoid.HumanoidManager
 import vx.sv.gameplay.humanoid.HungerManager
 import vx.sv.gameplay.party.PartyManager
@@ -40,7 +39,6 @@ class GameplayManager(val firstWorld: World) : Listener {
         plugin.server.pluginManager.registerEvents(this, plugin)
     }
 
-    val itemDictionary     = CustomItemDictionary()
     val personalityManager = PersonalityManager()
     val reputationManager  = ReputationManager()
     val reputationTracker  = ReputationTracker()

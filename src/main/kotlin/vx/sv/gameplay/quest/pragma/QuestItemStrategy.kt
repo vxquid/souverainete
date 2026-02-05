@@ -1,10 +1,8 @@
 package vx.sv.gameplay.quest.pragma
 
 import org.bukkit.entity.LivingEntity
-import vx.sv.Souverainete.Companion.plugin
-import vx.sv.gameplay.dictionary.CustomItem
+import vx.sv.gameplay.quest.QuestItemStack
 
 abstract class QuestItemStrategy {
-    val dictionary = plugin.gameplayManager.itemDictionary
-    abstract fun get(questGiver: LivingEntity): CustomItem
+    abstract fun get(questGiver: LivingEntity): QuestItemStack
 }

@@ -63,45 +63,50 @@ class NametagDisplayManager : Listener {
         val config = plugin.gameplayManager.config
         if (npc !is Villager) return
 
+        // 1. SETTLEMENT LINE (New)
+        val npcSettlement = npc.settlement
+        val settlementLine = if (npcSettlement != null) {
+            "§6«${npcSettlement.data.settlementName}»\n"
+        } else ""
+
+        // 2. BASIC INFO (Name, Profession, Level)
         val name = npc.customName ?: "Unknown"
         val level = npc.villagerLevel
         val professionKey = npc.profession.key.key.lowercase()
-        val profession = (plugin.language.getString("villager-professions.$professionKey") ?: "ERR").replace("_", " ").capitalizeWords()
+        val profession = (plugin.language.getString("villager-professions.$professionKey") ?: "ERR")
+            .replace("_", " ").capitalizeWords()
+
+        val line1 = config.nametag.nameProfessionLevelTemplate.format(name, profession, level)
+
+        // 3. REPUTATION & HEALTH
+        val reputationManager = plugin.gameplayManager.reputationManager
+        val personalRep = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
+        val settlementRep = npcSettlement?.data?.reputation?.get(player.uniqueId) ?: 0
+        val finalRepScore = personalRep + settlementRep
+        val repStatus = reputationManager.getReputationStatusFromScore(finalRepScore)
+
         val health = npc.health
         val maxHealth = npc.getAttribute(XAttribute.MAX_HEALTH.get()!!)?.value ?: 20.0
 
-        // --- CALCULATE FINAL REPUTATION ---
-        val reputationManager = plugin.gameplayManager.reputationManager
+        val line2 = config.nametag.reputationTemplate.format(finalRepScore, repStatus.getLocalizedName()) +
+                " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
 
-        // Sum personal PDC score and settlement score
-        val personalRep = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
-        val settlementRep = npc.settlement?.data?.reputation?.get(player.uniqueId) ?: 0
-        val finalRepScore = personalRep + settlementRep
+        // Construct base text starting with settlement
+        var text = "$settlementLine$line1\n$line2"
 
-        // Get localized status based on the final sum
-        val repStatus = reputationManager.getReputationStatusFromScore(finalRepScore)
-
-        val line1 = config.nametag.nameProfessionLevelTemplate.format(name, profession, level)
-        val line2 = config.nametag.reputationTemplate.format(finalRepScore, repStatus.getLocalizedName()) + " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
-
-        var text = "$line1\n$line2"
-
-        // Check hunger and add third line if hungry or starving
+        // 4. HUNGER LINE
         val hungerValue = npc.hunger
         val hungerMax = config.hunger.max
-        val hungerEatThreshold = config.hunger.eatThreshold
-        val hungerStarvationThreshold = config.hunger.starvationThreshold
-        if (hungerValue <= hungerEatThreshold) {
-            val statusKey = if (hungerValue <= hungerStarvationThreshold) "starving" else "hungry"
+        if (hungerValue <= config.hunger.eatThreshold) {
+            val statusKey = if (hungerValue <= config.hunger.starvationThreshold) "starving" else "hungry"
             val status = plugin.language.getString("hunger-status.$statusKey")!!
             val line3 = config.nametag.hungerTemplate.format(status, hungerValue, hungerMax)
             text += "\n$line3"
         }
 
-        // --- PARTY STATUS LINE ---
+        // 5. PARTY STATUS LINE
         val partyManager = plugin.gameplayManager.partyManager
         val leaderUUID = partyManager.getLeaderUUID(npc)
-
         if (leaderUUID != null) {
             val leaderName = Bukkit.getPlayer(leaderUUID)?.name
                 ?: Bukkit.getOfflinePlayer(leaderUUID).name
@@ -109,7 +114,6 @@ class NametagDisplayManager : Listener {
 
             val partyTemplate = plugin.language.getString("party.member") ?: "§b{playerName} Party Member"
             val line4 = partyTemplate.replace("{playerName}", leaderName)
-
             text += "\n$line4"
         }
 

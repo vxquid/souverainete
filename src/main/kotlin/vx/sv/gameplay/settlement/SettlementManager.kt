@@ -24,6 +24,7 @@ import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
 import vx.sv.persistent.LivingEntityExtend.settlement
+import java.util.*
 import java.util.concurrent.CompletableFuture
 
 class SettlementManager : Listener {
@@ -147,6 +148,7 @@ class SettlementManager : Listener {
 
                 CompletableFuture.runAsync {
                     val newData = Settlement.SettlementData(
+                        UUID.randomUUID(),
                         world.uid,
                         config.defaultName,
                         settlementCenter,
@@ -335,10 +337,24 @@ class SettlementManager : Listener {
         val settlementsWorldKey = NamespacedKey(plugin, "SettlementList")
         val currentSettlementKey = NamespacedKey(plugin, "CurrentSettlement")
 
+        /**
+         * Find settlement by its unique UUID. Primary method.
+         */
+        fun getById(id: UUID): Settlement? {
+            return settlements.values.flatten().find { it.data.id == id }
+        }
+
+        /**
+         * Find settlement by its name. Used as a fallback for legacy data
+         * and possibly for command-based searches.
+         */
         fun getByName(name: String): Settlement? {
             return settlements.values.flatten().find { it.data.settlementName == name }
         }
 
+        /**
+         * Action Bar info: Current settlement name the player is standing in.
+         */
         var Player.currentSettlement: String?
             get() = this.persistentDataContainer.get(currentSettlementKey, PersistentDataType.STRING)
             set(value) {
@@ -346,4 +362,5 @@ class SettlementManager : Listener {
                 else this.persistentDataContainer.remove(currentSettlementKey)
             }
     }
+
 }
