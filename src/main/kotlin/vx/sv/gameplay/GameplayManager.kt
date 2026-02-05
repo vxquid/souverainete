@@ -11,7 +11,7 @@ import vx.sv.config.lib.ConfigurationManager
 import vx.sv.config.lib.GameplayConfiguration
 import vx.sv.gameplay.death.DeathManager
 import vx.sv.gameplay.dialogue.DialogueManager
-import vx.sv.gameplay.dialogue.menu.InteractionManager
+import vx.sv.gameplay.dialogue.menu.InteractionHandler
 import vx.sv.gameplay.dictionary.CustomItemDictionary
 import vx.sv.gameplay.humanoid.HumanoidManager
 import vx.sv.gameplay.humanoid.HungerManager
@@ -20,6 +20,7 @@ import vx.sv.gameplay.personality.PersonalityManager
 import vx.sv.gameplay.profession.ProfessionManager
 import vx.sv.gameplay.quest.QuestManager
 import vx.sv.gameplay.reputation.ReputationManager
+import vx.sv.gameplay.reputation.ReputationTracker
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.gameplay.trade.TradeManager
@@ -42,9 +43,10 @@ class GameplayManager(val firstWorld: World) : Listener {
     val itemDictionary     = CustomItemDictionary()
     val personalityManager = PersonalityManager()
     val reputationManager  = ReputationManager()
+    val reputationTracker  = ReputationTracker()
     val dialogueManager    = DialogueManager()
     val questManager       = QuestManager()
-    val interactionManager = InteractionManager()
+    val interactionManager = InteractionHandler()
     val tradeManager       = TradeManager()
     val humanoidManager    = HumanoidManager()
     val professionManager  = ProfessionManager()

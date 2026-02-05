@@ -1,4 +1,4 @@
-# This file is part of the Ignis configuration. Edit, delete, or add new personality types, adhering to the simple format used.
+# This file is part of the Souverainete configuration. Edit, delete, or add new personality types, adhering to the simple format used.
 # Personalities will be randomly selected for each NPC, influencing their communication style (which will be simulated by AI).
 
 optimistic:

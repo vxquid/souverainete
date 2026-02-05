@@ -379,7 +379,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
 
                             // Реализация агрессии
                             Directive.PUNCH -> {
-                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).attack(player, 1)
+                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).attack(player, 1) // 1 = maxStrikes, call it "punch quota"
                                 this.cancelled = true // Разговор после удара обычно заканчивается
                             }
                             Directive.KILL -> {

@@ -17,6 +17,7 @@ import org.joml.AxisAngle4f
 import org.joml.Vector3f
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.persistent.LivingEntityExtend.hunger
+import vx.sv.persistent.LivingEntityExtend.settlement
 
 class NametagDisplayManager : Listener {
 
@@ -69,12 +70,19 @@ class NametagDisplayManager : Listener {
         val health = npc.health
         val maxHealth = npc.getAttribute(XAttribute.MAX_HEALTH.get()!!)?.value ?: 20.0
 
+        // --- CALCULATE FINAL REPUTATION ---
         val reputationManager = plugin.gameplayManager.reputationManager
-        val repValue = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
-        val repStatus = reputationManager.getPlayerReputationStatus(npc, player)
+
+        // Sum personal PDC score and settlement score
+        val personalRep = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
+        val settlementRep = npc.settlement?.data?.reputation?.get(player.uniqueId) ?: 0
+        val finalRepScore = personalRep + settlementRep
+
+        // Get localized status based on the final sum
+        val repStatus = reputationManager.getReputationStatusFromScore(finalRepScore)
 
         val line1 = config.nametag.nameProfessionLevelTemplate.format(name, profession, level)
-        val line2 = config.nametag.reputationTemplate.format(repValue, repStatus.getLocalizedName()) + " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
+        val line2 = config.nametag.reputationTemplate.format(finalRepScore, repStatus.getLocalizedName()) + " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
 
         var text = "$line1\n$line2"
 
@@ -99,18 +107,18 @@ class NametagDisplayManager : Listener {
                 ?: Bukkit.getOfflinePlayer(leaderUUID).name
                 ?: "Unknown"
 
-            // Берем строку из конфига языка (например: "&bНапарник {playerName}")
             val partyTemplate = plugin.language.getString("party.member") ?: "§b{playerName} Party Member"
             val line4 = partyTemplate.replace("{playerName}", leaderName)
 
-            // Добавляем новую линию
             text += "\n$line4"
         }
-        // -------------------------
 
         display.text = text
     }
 
+    /**
+     * Periodically updates displays for players and cleans up invalid ones.
+     */
     private fun startViewerUpdater() {
         val config = plugin.gameplayManager.config
         val viewDistance = config.nametag.viewDistance
@@ -145,7 +153,7 @@ class NametagDisplayManager : Listener {
                     }
                 }
 
-                // Cleanup
+                // Cleanup displays for disconnected players or entities out of range
                 val toRemove = mutableListOf<Pair<LivingEntity, Player>>()
                 displays.forEach { (pair, display) ->
                     val (npc, p) = pair
@@ -204,5 +212,5 @@ class NametagDisplayManager : Listener {
         }
     }
 
-    private fun String.capitalizeWords(): String = split(" ").joinToString(" ") { it.capitalize() }
+    private fun String.capitalizeWords(): String = split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
 }

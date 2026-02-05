@@ -92,7 +92,7 @@ class Souverainete : JavaPlugin(), Listener {
             @Suppress("DEPRECATION") val currentVersion = description.version
             val comparison = UpdateChecker.compareVersions(currentVersion, remoteVersion)
             if (comparison >= 0) {
-                logger.info("You are running the latest release of Ignis ($currentVersion).")
+                logger.info("You are running the latest release of Souverainete ($currentVersion).")
                 updateAvailable = false
             } else {
                 logger.info("New version ($remoteVersion) is available. Please, consider updating.")
@@ -131,7 +131,7 @@ class Souverainete : JavaPlugin(), Listener {
         if (event.player.hasPermission("sv.update")) {
             if (latestVersion != null) {
                 if (updateAvailable) {
-                    val updateMsg = language.getString("update.new-version-available", "§cA new version of §6Ignis §cis available: §e{newVersion}§c! Please update.")
+                    val updateMsg = language.getString("update.new-version-available", "§cA new version of §6Souverainete §cis available: §e{newVersion}§c! Please update.")
                         ?.replace("{newVersion}", latestVersion!!)
                     event.player.sendFormattedMessage(updateMsg ?: "New version available: $latestVersion")
                 }

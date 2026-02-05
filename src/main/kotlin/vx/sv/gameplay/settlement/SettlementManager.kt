@@ -1,6 +1,7 @@
 package vx.sv.gameplay.settlement
 
 import com.google.gson.reflect.TypeToken
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
@@ -20,6 +21,7 @@ import vx.sv.ai.base.DummyClient
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.humanoid.race.RaceManager.Race
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
+import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.concurrent.CompletableFuture
@@ -27,6 +29,7 @@ import java.util.concurrent.CompletableFuture
 class SettlementManager : Listener {
 
     private val config = plugin.gameplayManager.config.settlement
+    private val repConfig = plugin.gameplayManager.config.reputation
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
@@ -57,22 +60,65 @@ class SettlementManager : Listener {
     private fun handlePlayerMovement(player: Player, world: World, enterMsg: String, leaveMsg: String) {
         val playerLocation = player.location.toVector()
         val currentWorldSettlements = settlements[world] ?: return
+
+        // Находим поселение, в территории которого находится игрок
         val activeSettlement = currentWorldSettlements.find { it.territory.contains(playerLocation) }
         val lastSettlementName = player.currentSettlement
 
         if (activeSettlement != null) {
             val name = activeSettlement.data.settlementName
+
+            // 1. Логика Titile (Вход в регион) - срабатывает один раз при входе
             if (lastSettlementName == null && name != config.defaultName) {
                 player.sendTitle("${config.titleColor}$name", enterMsg, config.titleFadeIn, config.titleStay, config.titleFadeOut)
                 player.currentSettlement = name
             }
+
+            // 2. Логика Action Bar (Статус репутации) - обновляется каждый тик проверки (раз в 2 сек)
+            sendReputationActionBar(player, activeSettlement)
         }
 
+        // Логика выхода из региона
         if (activeSettlement == null && lastSettlementName != null) {
             val leavingName = currentWorldSettlements.find { it.data.settlementName == lastSettlementName }?.data?.settlementName
                 ?: lastSettlementName
             player.sendTitle("${config.titleColor}$leavingName", leaveMsg, config.titleFadeIn, config.titleStay, config.titleFadeOut)
             player.currentSettlement = null
+        }
+    }
+
+    private fun sendReputationActionBar(player: Player, settlement: Settlement) {
+        val score = settlement.data.reputation[player.uniqueId] ?: 0
+        val status = getReputationStatus(score)
+        val statusName = status.getLocalizedName()
+
+        // Подбираем цвет в зависимости от отношений
+        val colorCode = when (status) {
+            Reputation.EXILED, Reputation.HOSTILE -> "§c"      // Красный
+            Reputation.UNFRIENDLY -> "§6"                      // Золотой/Оранжевый
+            Reputation.NEUTRAL -> "§f"                         // Белый
+            Reputation.FRIENDLY, Reputation.HONORED -> "§a"    // Зеленый
+            Reputation.REVERED, Reputation.EXALTED -> "§b"     // Голубой
+        }
+
+        // Формируем строку: "Название: Статус (Очки)"
+        // Например: "Outpost: Hostile (-600)"
+        val message = "§7${settlement.data.settlementName}: $colorCode$statusName ($score)"
+
+        player.sendActionBar(LegacyComponentSerializer.legacySection().deserialize(message))
+    }
+
+    // Дублируем логику порогов, так как ReputationManager требует Entity, а у нас тут сырой Int
+    private fun getReputationStatus(score: Int): Reputation {
+        return when {
+            score >= repConfig.exaltedRequired -> Reputation.EXALTED
+            score >= repConfig.reveredRequired -> Reputation.REVERED
+            score >= repConfig.honoredRequired -> Reputation.HONORED
+            score >= repConfig.friendlyRequired -> Reputation.FRIENDLY
+            score >= repConfig.neutralRequired -> Reputation.NEUTRAL
+            score >= repConfig.unfriendlyRequired -> Reputation.UNFRIENDLY
+            score >= repConfig.hostileRequired -> Reputation.HOSTILE
+            else -> Reputation.EXILED
         }
     }
 
@@ -155,13 +201,11 @@ class SettlementManager : Listener {
     fun generateSettlementName(settlement: Settlement) {
         val client = plugin.providerManager.client
 
-        // LOGIC FOR DUMMY CLIENT (OR FALLBACK)
         if (client is DummyClient) {
             pickRaceName(settlement)
             return
         }
 
-        // LOGIC FOR AI CLIENT
         CompletableFuture.runAsync {
             try {
                 val generator = SettlementNameGenerator(settlement)
@@ -185,11 +229,9 @@ class SettlementManager : Listener {
         val dominantRace = getDominantRace(settlement)
         val possibleNames = dominantRace.settlementNames
 
-        // Filter out names already used in this world
         val usedNames = settlements[settlement.world]?.map { it.data.settlementName } ?: emptyList()
         val availableNames = possibleNames.filter { !usedNames.contains(it) }
 
-        // Pick one, or append a number if we ran out of unique names
         val finalName = availableNames.randomOrNull()
             ?: "${possibleNames.randomOrNull() ?: config.defaultName} ${usedNames.size + 1}"
 
@@ -253,28 +295,15 @@ class SettlementManager : Listener {
         if (block.type != Material.BELL) return
 
         val player = event.player
-
-        // 1. Быстрая проверка через PDC. Если игрок не "внутри" поселения — досвидули.
         val settlementName = player.currentSettlement ?: return
+        val settlement = getByName(settlementName) ?: return
 
-        // 2. Достаем объект поселения по имени
-        // (Твой getByName сейчас перебирает список, но это всё равно быстрее,
-        // чем считать дистанции до каждого города).
-        val settlement = SettlementManager.getByName(settlementName) ?: return
-
-        // 3. ПРОВЕРКА ВАЛИДНОСТИ КОЛОКОЛА
-        // Мы должны убедиться, что кликнутый колокол — это РЕАЛЬНО центр этого поселения.
-        // Иначе игроки будут ставить свои колокола и открывать меню города где попало.
         val center = settlement.data.center
-
-        // Сравниваем координаты блока.
         if (center.blockX != block.x || center.blockY != block.y || center.blockZ != block.z) {
-            // Можно добавить сообщение: "Этот колокол не является административным центром."
             return
         }
 
-        // 4. Всё совпало — открываем
-        event.isCancelled = true // Не даем колоколу звенеть (опционально)
+        event.isCancelled = true
         SettlementMenus.openMainMenu(player, settlement)
     }
 

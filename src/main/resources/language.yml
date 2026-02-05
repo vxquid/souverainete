@@ -1,7 +1,7 @@
 # Language file.
-# There is no need to translate this file manually. Automatic on-the-fly translation by AI will be used. But you can disable it in config.yml.
+# Automatic on-the-fly translation by AI will be used unless disabled in config.yml.
 
-# If the player has turned off immersive dialogs with the "/q dialogue format CHAT" command, they will see messages from villagers in the chat.
+# If the player has turned off immersive dialogs with the "/q dialogue format CHAT" command.
 villager-message-chat-format: "§6{villagerName}§7: §r{message}"
 
 # Reputation change messages.
@@ -9,58 +9,62 @@ settlement-reputation:
   increase: "§9Reputation with {entity} increased by {amount}."
   decrease: "§9Reputation with {entity} decreased by {amount}."
   status-update: "§eYour reputation with {entity} has shifted to {status}."
+  murder-witnessed: "§cYour crime has been witnessed by the settlement! Guards are alerted!"
 
 # Settlement related messages.
 settlement:
   entering: "You entering a settlement."
   leaving: "You leaving a settlement."
   created: "§eA new settlement has been founded: §6{settlementName}§e."
-  # Settlement related messages.
-  settlement:
-    entering: "You entering a settlement."
-    leaving: "You leaving a settlement."
-    created: "§eA new settlement has been founded: §6{settlementName}§e."
-    menu:
-      common:
-        back: "§cBack"
-      main:
-        # Заголовок теперь просто название поселения
-        title: "§8{name}"
-        stats:
-          name: "§e📜 Information"
-          lore:
-            - "§7Population: §b{pop}"
-            - "§7Beds: §e{beds}"
-            - "§7Size: §a{size}"
-            - "§7Established: §f{date}"
-            - ""
-            - "§7Reputation: {rep}"
-        population:
-          name: "§a👥 Citizens"
-          lore:
-            - "§7Click to view"
-            - "§7resident list."
-        settings:
-          name: "§6⚙ Management"
-          lore:
-            - "§7Rename and settings."
+
+  size:
+    underdeveloped: "Underdeveloped"
+    emerging: "Emerging"
+    established: "Established"
+    advanced: "Advanced"
+    metropolis: "Metropolis"
+
+  # Menu translations (Merged under 'settlement' to match Kotlin code paths)
+  menu:
+    common:
+      back: "§cBack"
+    main:
+      title: "§8{name}"
+      stats:
+        name: "§e📜 Information"
+        lore:
+          - "§7Population: §b{pop}"
+          - "§7Beds: §e{beds}"
+          - "§7Size: §a{size}"
+          - "§7Established: §f{date}"
+          - ""
+          - "§7Reputation: {rep}"
       population:
-        title: "§8Citizens ({count})"
-        head-lore:
-          - "§7Job: §f{job}"
-          - "§7Health: §c{hp}§7/§c{max_hp}"
+        name: "§a👥 Citizens"
+        lore:
+          - "§7Click to view"
+          - "§7resident list."
       settings:
-        title: "§8Management"
-        rename:
-          name: "§e✎ Rename Settlement"
-          lore:
-            - "§7Current: §f{name}"
-            - ""
-            - "§eClick to type new name."
+        name: "§6⚙ Management"
+        lore:
+          - "§7Rename and settings."
+    population:
+      title: "§8Citizens ({count})"
+      head-lore:
+        - "§7Job: §f{job}"
+        - "§7Health: §c{hp}§7/§c{max_hp}"
+    settings:
+      title: "§8Management"
       rename:
-        prompt: "§eWrite new name in chat (or 'cancel'):"
-        cancelled: "§cCancelled."
-        success: "§aSettlement renamed to: §6{name}"
+        name: "§e✎ Rename Settlement"
+        lore:
+          - "§7Current: §f{name}"
+          - ""
+          - "§eClick to type new name."
+    rename:
+      prompt: "§eWrite new name in chat (or 'cancel'):"
+      cancelled: "§cCancelled."
+      success: "§aSettlement renamed to: §6{name}"
 
 quest:
   finished: "You have finished the quest §6{quest}§7."
@@ -100,9 +104,7 @@ reputation:
     revered: "Revered"
     exalted: "Exalted"
 
-# Villager profession names (used in info displays and tooltips).
-# Keys match Villager.Profession enum keys (e.g., 'armorer' from minecraft:armorer).
-# Translate these for localization.
+# Villager profession names.
 villager-professions:
   armorer: "Armorer"
   butcher: "Butcher"
@@ -120,17 +122,15 @@ villager-professions:
   weaponsmith: "Weaponsmith"
   none: "Jobless"
 
-# Hunger status names (used in info displays).
+# Hunger status names.
 hunger-status:
   hungry: "🍗 Hungry"
   starving: "☠ Starving"
 
-# Messages that are visible after using commands.
+# Command output messages.
 command-message:
-
   dialogue-format-changed: "Dialogue format has been set to §6{dialogueFormat}"
   player-fame-changed: "§e{playerName}§7's fame has been changed to §3{newFame}"
-
   verbose:
     activated: "§aVerbose mode activated."
     deactivated: "§cVerbose mode deactivated."
@@ -143,10 +143,10 @@ info-messages:
     target-entity: "Target Entity: §e{entityType}"
     drop-chance: "Drop Chance: §b{chance}%"
   npc-conversation:
-    started: "You started a conversation with §6{npcName}§7. All chat messages will now be addressed to this NPC. Write something in the chat and wait for a reply. To exit the dialog mode, right-click on the NPC again."
+    started: "You started a conversation with §6{npcName}§7. Chat messages are now directed to this NPC. Right-click NPC again to exit."
     ended: "Your conversation with §6{npcName} §7is over."
     cooldown: "Hey, not so fast! There should be a little time between actions."
-    waiting-for-gift: "The next item you drop from your inventory will be gifted to §6{npcName}§7."
+    waiting-for-gift: "The next item you drop will be gifted to §6{npcName}§7."
     ai-overloaded: "§aAI is overloaded, response generation can take a bit of time..."
   quest-command:
     not-found: "You don't have a quest named §6{quest}§7."
@@ -159,15 +159,14 @@ info-messages:
     failed: "You have failed §4{questsFailed} §7quests."
     xp-earned: "You have earned §e{xpEarned}xp §7by completing quests."
 
-# Interaction menu buttons.
+# Interaction menu buttons (GUI).
 interaction-menu:
-
   quests-button: "Quests"
   trade-button: "Trade"
   actions-button: "Actions"
   talk-button: "Chat"
   gift-button: "Gift"
-  interrupt-button: "Interrupt Conversation"
+  interrupt-button: "Stop Chatting"
   return-button: "Return"
   accept-button: "Accept"
   decline-button: "Decline"
@@ -176,7 +175,7 @@ interaction-menu:
   party-control-button: "§bManage Companion"
   party-kick-button: "§4Dismiss"
 
-# Error messages. THAT WAS AN ERROR.
+# Error messages.
 command-error-message:
   player-not-found: "§cError! Player not found: §e{playerName} §c(online only)."
   status-not-found: "§cError! Non-existent reputation status: §с{status}."
@@ -187,50 +186,10 @@ update:
   new-version-available: "§7A new version is available: §6{newVersion}§7. Please consider updating."
   check-failed: "§7Failed to check for updates: {errorMessage}."
 
-# Party member death messages.
+# Death messages.
 death-messages:
   permanent-death: "§c{villagerName} has succumbed to their wounds and perished."
   returned-home: "§e{villagerName} §7sustained critical injuries and was evacuated back to §6{settlementName}§7."
   carry-start: "You are carrying {villagerName}"
   needs-revive-item: "Needs a Golden Apple or Potion to revive!"
   revived: "You revived {villagerName}!"
-
-menu:
-  common:
-    back: "§cBack"
-  main:
-    title: "§8Settlement: {name}"
-    stats:
-      name: "§e📜 Information"
-      lore:
-        - "§7Population: §b{pop}"
-        - "§7Size: §a{size}"
-        - "§7Established: §f{date}"
-        - ""
-        - "§7Reputation: {rep}"
-    population:
-      name: "§a👥 Citizens"
-      lore:
-        - "§7Click to view"
-        - "§7resident list."
-    settings:
-      name: "§6⚙ Management"
-      lore:
-        - "§7Rename and settings."
-  population:
-    title: "§8Citizens ({count})"
-    head-lore:
-      - "§7Job: §f{job}"
-      - "§7Health: §c{hp}§7/§c{max_hp}"
-  settings:
-    title: "§8Management"
-    rename:
-      name: "§e✎ Rename Settlement"
-      lore:
-        - "§7Current: §f{name}"
-        - ""
-        - "§eClick to type new name."
-  rename:
-    prompt: "§eWrite new name in chat (or 'cancel'):"
-    cancelled: "§cCancelled."
-    success: "§aSettlement renamed to: §6{name}"

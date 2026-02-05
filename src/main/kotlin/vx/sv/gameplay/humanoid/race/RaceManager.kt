@@ -122,7 +122,9 @@ class RaceManager {
                 imprisoned = getPhrases("imprisonedOrStuckPhrases"),
                 startFight = getPhrases("startFightPhrases"),
                 meleeKill = getPhrases("meleeKillPhrases"),
-                rangedKill = getPhrases("rangedKillPhrases")
+                rangedKill = getPhrases("rangedKillPhrases"),
+                warning = getPhrases("warningPhrases"),
+                witnessMurder = getPhrases("witnessMurderPhrases")
             )
 
             // C) Skins
@@ -178,7 +180,9 @@ class RaceManager {
         val imprisoned: List<String>,
         val startFight: List<String>,
         val meleeKill: List<String>,
-        val rangedKill: List<String>
+        val rangedKill: List<String>,
+        val warning: List<String>,
+        val witnessMurder: List<String>
     )
 
     data class Race(
@@ -238,7 +242,7 @@ class RaceManager {
                 mutableListOf(), mapOf(), mutableMapOf(), mutableMapOf(),
                 "Villager", XMaterial.EMERALD, XMaterial.EMERALD_BLOCK,
                 listOf("John"), listOf("Jane"), listOf("Doe"),
-                RacePhrases(listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf()),
+                RacePhrases(listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf(), listOf()),
                 listOf("Village", "Town", "Hamlet", "Outpost", "Settlement")
             )
         }

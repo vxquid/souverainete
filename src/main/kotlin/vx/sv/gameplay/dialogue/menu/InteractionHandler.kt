@@ -39,7 +39,7 @@ import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
 
-class InteractionManager : Listener {
+class InteractionHandler : Listener {
 
     private val partyManager by lazy {
         plugin.gameplayManager.partyManager

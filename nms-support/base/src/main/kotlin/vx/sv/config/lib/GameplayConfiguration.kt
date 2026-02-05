@@ -37,7 +37,7 @@ class GameplayConfiguration {
     }
 
     class WorldsConfig {
-        @Comment("Specify the names of the worlds where you want Ignis to work.")
+        @Comment("Specify the names of the worlds where you want Souverainete to work.")
         var allowedWorlds: List<String> = listOf("world", "world_nether", "world_the_end")
     }
 
@@ -73,6 +73,22 @@ class GameplayConfiguration {
         @Comment("Sound played on reputation status update.")
         var statusUpdateSound: String = "ui.hud.bubble_pop"
 
+        // --- Tracker Settings ---
+        @Comment("Reputation loss per 1 point of damage dealt to an NPC.")
+        var damageReputationMultiplier: Double = 2.0
+
+        @Comment("Reputation loss with the entire settlement when a member is killed.")
+        var killSettlementPenalty: Int = 500
+
+        @Comment("Radius in blocks to check for witnesses upon murder.")
+        var witnessRadius: Double = 48.0
+
+        @Comment("Radius in blocks for hostile NPCs to detect and aggro on the player.")
+        var aggressionRadius: Double = 15.0
+
+        @Comment("Radius in blocks where NPC shouts (warnings/witness cries) can be heard.")
+        var shoutRadius: Double = 20.0
+
         @Comment("Required reputation for EXILED status.")
         var exiledRequired: Int = -1000
 
@@ -96,6 +112,22 @@ class GameplayConfiguration {
 
         @Comment("Required reputation for EXALTED status.")
         var exaltedRequired: Int = 2500
+
+        @Comment("Reputation gain for killing specific monsters within settlement territory.")
+        val monsterKillReputation: Map<String, Int> = mapOf(
+            "ZOMBIE" to 2,
+            "SKELETON" to 2,
+            "CREEPER" to 5,
+            "SPIDER" to 2,
+            "ZOMBIE_VILLAGER" to 10,
+            "HUSK" to 3,
+            "PILLAGER" to 10,
+            "VINDICATOR" to 20,
+            "EVOKER" to 30,
+            "RAVAGER" to 50,
+            "WITCH" to 10,
+            "ILLUSIONER" to 30
+        )
 
     }
 

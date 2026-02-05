@@ -127,6 +127,20 @@ class ReputationManager {
         }
     }
 
+    fun getReputationStatusFromScore(score: Int): Reputation {
+        val config = plugin.gameplayManager.config.reputation
+        return when {
+            score >= config.exaltedRequired -> Reputation.EXALTED
+            score >= config.reveredRequired -> Reputation.REVERED
+            score >= config.honoredRequired -> Reputation.HONORED
+            score >= config.friendlyRequired -> Reputation.FRIENDLY
+            score >= config.neutralRequired -> Reputation.NEUTRAL
+            score >= config.unfriendlyRequired -> Reputation.UNFRIENDLY
+            score >= config.hostileRequired -> Reputation.HOSTILE
+            else -> Reputation.EXILED
+        }
+    }
+
     companion object {
 
         val REP_KEY = NamespacedKey(plugin, "ReputationData")

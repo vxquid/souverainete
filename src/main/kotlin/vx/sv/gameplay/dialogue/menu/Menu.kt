@@ -7,8 +7,8 @@ import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
 import org.joml.Vector3f
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.gameplay.dialogue.menu.InteractionManager.Companion.defaultButtonColor
-import vx.sv.gameplay.dialogue.menu.InteractionManager.Companion.openedMenuList
+import vx.sv.gameplay.dialogue.menu.InteractionHandler.Companion.defaultButtonColor
+import vx.sv.gameplay.dialogue.menu.InteractionHandler.Companion.openedMenuList
 import vx.sv.util.RainbowColorTicker.rainbowColor
 
 class Menu(
