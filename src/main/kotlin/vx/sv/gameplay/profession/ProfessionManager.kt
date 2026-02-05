@@ -28,18 +28,24 @@ class ProfessionManager : Listener {
     private val gameplayConfig = plugin.gameplayManager.config
 
     init {
-        plugin.server.pluginManager.registerEvents(this, plugin)
-        plugin.server.scheduler.runTaskTimer(plugin, Runnable { produceProfessionItem() }, 0, gameplayConfig.profession.workIntervalTicks)
 
-        // Scheduler for processing unique item queue to avoid overwhelming AI requests
-        plugin.server.scheduler.runTaskTimer(plugin, Runnable {
-            uniqueItemProduceQueue.keys.randomOrNull()?.let { villager ->
-                uniqueItemProduceQueue[villager]?.let { uniqueItem ->
-                    UniqueItemManager.generateUniqueItemDescription(villager, uniqueItem)
-                    uniqueItemProduceQueue.remove(villager)
+        /* If the plugin is in vanilla trading mode, there's no need to change profession behavior (because vanilla ones are used). */
+        if (!gameplayConfig.general.vanillaTrading) {
+
+            plugin.server.pluginManager.registerEvents(this, plugin)
+            plugin.server.scheduler.runTaskTimer(plugin, Runnable { produceProfessionItem() }, 0, gameplayConfig.profession.workIntervalTicks)
+
+            // Scheduler for processing unique item queue to avoid overwhelming AI requests
+            plugin.server.scheduler.runTaskTimer(plugin, Runnable {
+                uniqueItemProduceQueue.keys.randomOrNull()?.let { villager ->
+                    uniqueItemProduceQueue[villager]?.let { uniqueItem ->
+                        UniqueItemManager.generateUniqueItemDescription(villager, uniqueItem)
+                        uniqueItemProduceQueue.remove(villager)
+                    }
                 }
-            }
-        }, 0, gameplayConfig.profession.uniqueProcessingIntervalTicks)
+            }, 0, gameplayConfig.profession.uniqueProcessingIntervalTicks)
+        }
+
     }
 
     private val uniqueItemProduceQueue = mutableMapOf<Villager, ItemStack>()

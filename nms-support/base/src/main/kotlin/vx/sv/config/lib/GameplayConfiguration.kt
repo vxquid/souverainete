@@ -23,8 +23,17 @@ class GameplayConfiguration {
     val party      = PartyConfig()
 
     class GeneralConfig {
+
         @Comment("Message prefix.")
         val messagePrefix: String = "§x§F§F§0§0§7§2ɪ§x§B§F§1§1§9§5ɢ§x§8§0§2§3§B§9ɴ§x§4§0§3§4§D§Cɪ§x§0§0§4§5§F§Fꜱ §8|§7"
+
+        @Comment(
+            "If enabled, the plugin will not modify vanilla trades (original mechanics), only adding quest items on top.",
+            "This also affects profession overhaul: villagers won't craft items for sale, including items with AI-generated descriptions.",
+            "Enabling this means that all content coming from professions.yml will be disabled. Think twice."
+        )
+        val vanillaTrading: Boolean = false
+
     }
 
     class WorldsConfig {

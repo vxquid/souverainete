@@ -21,7 +21,7 @@ class ProviderManager {
 
         // Check if the API key is set to the default value
         if (config.apiKey == "YOUR_API_KEY") {
-            plugin.logger.warning("Ignis can generate content using AI. For full plugin functionality, you must configure provider.yml.")
+            plugin.logger.warning("Souverainete can generate content using AI. For full plugin functionality, you must configure provider.yml.")
 
             plugin.server.pluginManager.registerEvents(object : Listener {
                 @EventHandler

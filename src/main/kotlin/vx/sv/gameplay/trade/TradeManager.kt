@@ -35,6 +35,15 @@ class TradeManager : Listener {
             val firstTrade  = event.inventory.getItem(0) ?: return
 
             if (rewardItem.type != Material.AIR) {
+                // If vanilla trading is enabled, we must ensure we only trigger plugin logic
+                // for Quest items, otherwise we might mess up inventory for standard vanilla trades.
+                if (plugin.gameplayManager.config.general.vanillaTrading) {
+                    val isQuest = villager.quests().any {
+                        it.questItem.getItemStack().isSimilar(firstTrade)
+                    }
+                    if (!isQuest) return
+                }
+
                 val recipe = villager.recipes.find { it.result.isSimilar(rewardItem) && it.ingredients[0].isSimilar(firstTrade) } ?: throw NullPointerException("Null recipe on successful trade.")
 
                 // Отправляем на следующем тике, чтобы прошёл трейд.
@@ -92,14 +101,21 @@ class TradeManager : Listener {
             val currency = race.normalCurrency
             val specialCurrency = race.specialCurrency
 
-            // Clean basic merchant recipes.
-            recipes = mutableListOf<MerchantRecipe>()
+            val vanillaTrading = plugin.gameplayManager.config.general.vanillaTrading
+
+            // If vanilla trading is OFF, we clear recipes. If ON, we keep them but might filter duplicates later.
+            if (!vanillaTrading) {
+                recipes = mutableListOf<MerchantRecipe>()
+            }
+
             val playerQuests = player.quests()
 
             // Update quests and make them first in the trade GUI.
             val questTrades = mutableListOf<MerchantRecipe>()
-            if (quests().isNotEmpty()) {
-                quests().forEach { quest ->
+            val activeQuests = quests()
+
+            if (activeQuests.isNotEmpty()) {
+                activeQuests.forEach { quest ->
 
                     // Only accepted quests can be finished.
                     if (playerQuests.find { it.id == quest.id } != null) {
@@ -110,6 +126,29 @@ class TradeManager : Listener {
 
                 }
             }
+
+            // --- VANILLA MODE LOGIC ---
+            if (vanillaTrading) {
+                // We keep vanilla trades, but we need to ensure we don't duplicate quest trades
+                // if the menu is opened multiple times.
+
+                // Filter current recipes to keep ONLY vanilla ones (remove previous quest entries)
+                val currentVanillaRecipes = this.recipes.filter { recipe ->
+                    // Assume it's a plugin quest if the ingredient matches any active quest item
+                    activeQuests.none { q -> q.questItem.getItemStack().isSimilar(recipe.ingredients.firstOrNull()) }
+                }
+
+                this.recipes = (questTrades + currentVanillaRecipes).toMutableList()
+
+                if (open) {
+                    player.openMerchant(this, true)
+                    playerTradingInventories[player] = this
+                }
+
+                // Return true to indicate menu opened/ready, skipping custom economy logic below
+                return true
+            }
+            // --------------------------
 
             val tradeProfessionItemsOnly = plugin.professions.getBoolean("villager-item-producing.trade-profession-items-only")
             val itemsToTrade = if (tradeProfessionItemsOnly) producedItems else subInventory.filterNotNull()

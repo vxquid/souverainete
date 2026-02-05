@@ -17,7 +17,7 @@ class DictionaryCommand : BaseCommand() {
     }
 
     @Subcommand("add")
-    @CommandPermission("acai.customitem.add")
+    @CommandPermission("sv.customitem.add")
     @Description("Add a new custom item to the dictionary")
     @Syntax("<key> <min> <max> <score> <material>")
     fun onAddItem(sender: CommandSender, key: String, score: Long, @Optional material: String?) {
@@ -51,7 +51,7 @@ class DictionaryCommand : BaseCommand() {
     }
 
     @Subcommand("remove")
-    @CommandPermission("acai.customitem.remove")
+    @CommandPermission("sv.customitem.remove")
     @Description("Remove a custom item from the dictionary")
     @Syntax("<key>")
     @CommandCompletion("@customitems")
@@ -64,7 +64,7 @@ class DictionaryCommand : BaseCommand() {
     }
 
     @Subcommand("list")
-    @CommandPermission("acai.customitem.list")
+    @CommandPermission("sv.customitem.list")
     @Description("List all custom items in the dictionary")
     fun onListItems(sender: CommandSender) {
         val items = plugin.gameplayManager.itemDictionary.getItemList()
@@ -76,7 +76,7 @@ class DictionaryCommand : BaseCommand() {
     }
 
     @Subcommand("give")
-    @CommandPermission("acai.customitem.give")
+    @CommandPermission("sv.customitem.give")
     @Description("Give a custom item to a player")
     @Syntax("<player> <key>")
     @CommandCompletion("@players @customitems")
