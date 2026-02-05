@@ -63,13 +63,13 @@ class NametagDisplayManager : Listener {
         val config = plugin.gameplayManager.config
         if (npc !is Villager) return
 
-        // 1. SETTLEMENT LINE (New)
+        // 1. SETTLEMENT LINE
         val npcSettlement = npc.settlement
         val settlementLine = if (npcSettlement != null) {
             "§6«${npcSettlement.data.settlementName}»\n"
         } else ""
 
-        // 2. BASIC INFO (Name, Profession, Level)
+        // 2. BASIC INFO
         val name = npc.customName ?: "Unknown"
         val level = npc.villagerLevel
         val professionKey = npc.profession.key.key.lowercase()
@@ -78,7 +78,7 @@ class NametagDisplayManager : Listener {
 
         val line1 = config.nametag.nameProfessionLevelTemplate.format(name, profession, level)
 
-        // 3. REPUTATION & HEALTH
+        // 3. REPUTATION & HEALTH (using Final Rep)
         val reputationManager = plugin.gameplayManager.reputationManager
         val personalRep = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
         val settlementRep = npcSettlement?.data?.reputation?.get(player.uniqueId) ?: 0
@@ -91,16 +91,14 @@ class NametagDisplayManager : Listener {
         val line2 = config.nametag.reputationTemplate.format(finalRepScore, repStatus.getLocalizedName()) +
                 " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
 
-        // Construct base text starting with settlement
         var text = "$settlementLine$line1\n$line2"
 
         // 4. HUNGER LINE
         val hungerValue = npc.hunger
-        val hungerMax = config.hunger.max
         if (hungerValue <= config.hunger.eatThreshold) {
             val statusKey = if (hungerValue <= config.hunger.starvationThreshold) "starving" else "hungry"
             val status = plugin.language.getString("hunger-status.$statusKey")!!
-            val line3 = config.nametag.hungerTemplate.format(status, hungerValue, hungerMax)
+            val line3 = config.nametag.hungerTemplate.format(status, hungerValue, config.hunger.max)
             text += "\n$line3"
         }
 
@@ -108,14 +106,21 @@ class NametagDisplayManager : Listener {
         val partyManager = plugin.gameplayManager.partyManager
         val leaderUUID = partyManager.getLeaderUUID(npc)
         if (leaderUUID != null) {
-            val leaderName = Bukkit.getPlayer(leaderUUID)?.name
-                ?: Bukkit.getOfflinePlayer(leaderUUID).name
-                ?: "Unknown"
-
+            val leaderName = Bukkit.getPlayer(leaderUUID)?.name ?: Bukkit.getOfflinePlayer(leaderUUID).name ?: "Unknown"
             val partyTemplate = plugin.language.getString("party.member") ?: "§b{playerName} Party Member"
-            val line4 = partyTemplate.replace("{playerName}", leaderName)
-            text += "\n$line4"
+            text += "\n${partyTemplate.replace("{playerName}", leaderName)}"
         }
+
+        // --- 6. NPC STATE LINE (Annoyed/Aggressive) ---
+        // Берем инстанс трекера из GameplayManager
+        val tracker = plugin.gameplayManager.reputationTracker
+        val state = tracker.getNPCState(npc, player)
+
+        if (state != null) {
+            val stateDisplayName = plugin.language.getString(state.translationKey) ?: state.name
+            text += "\n${state.color}$stateDisplayName"
+        }
+        // ----------------------------------------------
 
         display.text = text
     }

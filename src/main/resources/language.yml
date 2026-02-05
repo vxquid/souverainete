@@ -125,6 +125,10 @@ hunger-status:
   hungry: "🍗 Hungry"
   starving: "☠ Starving"
 
+npc-state:
+  annoyed: "⚠ Annoyed"
+  aggressive: "☠ Aggressive"
+
 # Command output messages.
 command-message:
   dialogue-format-changed: "Dialogue format has been set to §6{dialogueFormat}"

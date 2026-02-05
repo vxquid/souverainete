@@ -43,6 +43,30 @@ class ReputationTracker : Listener {
         startAggressionTicker()
     }
 
+    enum class NPCState(val translationKey: String, val color: String) {
+        ANNOYED("npc-state.annoyed", "§e"),
+        AGGRESSIVE("npc-state.aggressive", "§c")
+    }
+
+    /**
+     * Determines the visual state of the NPC for a specific player.
+     */
+    fun getNPCState(npc: LivingEntity, player: Player): NPCState? {
+        val finalStatus = getFinalStatus(npc, player)
+
+        // Full combat (Hostile/Exiled)
+        if (finalStatus.ordinal >= Reputation.HOSTILE.ordinal) {
+            return NPCState.AGGRESSIVE
+        }
+
+        // Warning phase (Unfriendly + Player within 5 blocks and timer active)
+        if (finalStatus == Reputation.UNFRIENDLY && annoyanceTimers.containsKey(npc.uniqueId to player.uniqueId)) {
+            return NPCState.ANNOYED
+        }
+
+        return null
+    }
+
     private fun getFinalScore(entity: LivingEntity, player: Player): Int {
         val personalScore = repManager.getReputationMap(entity)[player.uniqueId] ?: 0
         val settlementScore = entity.settlement?.data?.reputation?.get(player.uniqueId) ?: 0
