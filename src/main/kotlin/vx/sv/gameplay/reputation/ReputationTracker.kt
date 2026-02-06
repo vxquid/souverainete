@@ -157,54 +157,59 @@ class ReputationTracker : Listener {
     @EventHandler
     fun onEntityDeath(event: EntityDeathEvent) {
         val victim = event.entity
-        val killer = victim.killer ?: return
+        val killerEntity = victim.killer
 
-        // NPC Death penalty logic
+        // --- NPC DEATH LOGIC ---
         if (victim is Villager || victim is IronGolem) {
+            // Fix: Clear internal timers immediately when the NPC dies
+            annoyanceTimers.keys.removeIf { it.first == victim.uniqueId }
+            shoutCooldowns.remove(victim.uniqueId)
+
+            if (killerEntity == null) return
             val settlement = victim.settlement ?: return
 
-            val currentSettlementRep = settlement.data.reputation.getOrDefault(killer.uniqueId, 0)
-            settlement.data.reputation[killer.uniqueId] = currentSettlementRep - config.killSettlementPenalty
+            val currentSettlementRep = settlement.data.reputation.getOrDefault(killerEntity.uniqueId, 0)
+            settlement.data.reputation[killerEntity.uniqueId] = currentSettlementRep - config.killSettlementPenalty
 
             if (config.chatNotification) {
                 val msg = plugin.language.getString("settlement-reputation.decrease")!!
                     .replace("{entity}", settlement.data.settlementName)
                     .replace("{amount}", config.killSettlementPenalty.toString())
-                killer.sendMessage(msg)
+                killerEntity.sendMessage(msg)
             }
 
             triggerSettlementAlarm(settlement)
 
-            // Notify and aggro witnesses
             val witnesses = victim.getNearbyEntities(config.witnessRadius, config.witnessRadius, config.witnessRadius)
                 .filterIsInstance<LivingEntity>()
                 .filter { (it is Villager || it is IronGolem) && !it.isDead && it.settlement == settlement }
 
-            // Pick one random witness to shout
             witnesses.randomOrNull()?.let { screamer ->
                 val phrase = screamer.race.phrases.witnessMurder.randomOrNull()?.replace("{victim}", victim.customName ?: victim.name)
-                // FORCE SHOUT: Ignore cooldown for murder events to ensure flavor text appears
                 shoutWithCooldown(screamer, phrase, isAggressive = true, ignoreCooldown = true)
             }
 
-            witnesses.forEach { triggerAggression(it, killer, Reputation.HOSTILE) }
+            witnesses.forEach { triggerAggression(it, killerEntity, Reputation.HOSTILE) }
             return
         }
 
-        // Monster kill reward logic
+        // --- MONSTER/ILLAGER DEATH LOGIC (Reputation Gain) ---
+        // Fix: Only players should receive reputation to prevent data bloating
+        if (killerEntity == null) return
+
         val worldSettlements = settlements[victim.world] ?: return
         val activeSettlement = worldSettlements.find { it.territory.contains(victim.location.toVector()) } ?: return
 
         val repGain = config.monsterKillReputation[victim.type.name] ?: 0
         if (repGain > 0) {
-            val currentRep = activeSettlement.data.reputation.getOrDefault(killer.uniqueId, 0)
-            activeSettlement.data.reputation[killer.uniqueId] = currentRep + repGain
+            val currentRep = activeSettlement.data.reputation.getOrDefault(killerEntity.uniqueId, 0)
+            activeSettlement.data.reputation[killerEntity.uniqueId] = currentRep + repGain
 
             if (config.chatNotification) {
                 val msg = plugin.language.getString("settlement-reputation.increase")!!
                     .replace("{entity}", activeSettlement.data.settlementName)
                     .replace("{amount}", repGain.toString())
-                killer.sendMessage(msg)
+                killerEntity.sendMessage(msg)
             }
         }
     }
