@@ -9,8 +9,8 @@ plugins {
 }
 
 group = "souverainete"
-version = "0.5.1.2"
-description = "Spiritual successor to Millénaire, reimagined for modern servers. Watch villages evolve into settlements, witness dynamic wars between races, and interfere in global politics."
+version = "0.5.2.1"
+description = "The definitive overhaul of villager intelligence and society."
 
 bukkitPluginYaml {
   name = "souverainete"
