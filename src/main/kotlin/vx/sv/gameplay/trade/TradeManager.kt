@@ -13,7 +13,7 @@ import org.bukkit.inventory.MerchantRecipe
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.event.MerchantTradeEvent
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
-import vx.sv.gameplay.reputation.ReputationManager.Companion.reputationOf
+import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
 import vx.sv.gameplay.trade.ScoreCalculator.calculateScore
 import vx.sv.gameplay.trade.ScoreCalculator.getBasicScore
 import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
@@ -154,7 +154,7 @@ class TradeManager : Listener {
             val itemsToTrade = if (tradeProfessionItemsOnly) producedItems else subInventory.filterNotNull()
 
             val settlement = settlement
-            val multiplier = if (settlement != null ) this.reputationOf(player).priceMultiplier.toFloat() else 1F
+            val multiplier = if (settlement != null ) this.opinionOn(player).priceMultiplier.toFloat() else 1F
 
             // Going through every produced item.
             itemsToTrade.forEach { item ->

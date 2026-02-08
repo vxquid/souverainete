@@ -116,7 +116,7 @@ villager-professions:
   mason: "Mason"
   nitwit: "Nitwit"
   shepherd: "Shepherd"
-  tool_smith: "Toolsmith"
+  toolsmith: "Toolsmith"
   weaponsmith: "Weaponsmith"
   none: "Jobless"
 
@@ -173,7 +173,7 @@ interaction-menu:
   accept-button: "Accept"
   decline-button: "Decline"
   close-button: "Close"
-  party-invite-button: "Follow Me"
+  party-invite-button: "Invite To Group"
   party-control-button: "§bManage Companion"
   party-kick-button: "§4Dismiss"
 

@@ -16,7 +16,7 @@ import vx.sv.gameplay.dialogue.DialogueSession.Companion.getActiveDialogueSessio
 import vx.sv.gameplay.event.PlayerAcceptQuestEvent
 import vx.sv.gameplay.party.PartyManager.CombatTactic
 import vx.sv.gameplay.party.PartyManager.PartyState
-import vx.sv.gameplay.reputation.ReputationManager.Companion.reputationOf
+import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
@@ -73,7 +73,7 @@ class GeyserSupportProvider {
             val quest = villager.quests().find { it.name == buttonName } ?: return@validResultHandler
 
             val questDescriptionRaw = villager.let { npc ->
-                when (npc.reputationOf(player)) {
+                when (npc.opinionOn(player)) {
                     Reputation.EXALTED -> quest.data.reputationBasedQuestDescriptions.getOrNull(0)
                     Reputation.REVERED -> quest.data.reputationBasedQuestDescriptions.getOrNull(1)
                     Reputation.HONORED -> quest.data.reputationBasedQuestDescriptions.getOrNull(2)
@@ -136,7 +136,7 @@ class GeyserSupportProvider {
 
         // Party Logic Buttons
         val isPartyMember = partyManager.isMember(player, villager)
-        val canInvite = !partyManager.hasParty(villager) && villager.reputationOf(player).ordinal <= 3
+        val canInvite = !partyManager.hasParty(villager) && villager.opinionOn(player).ordinal <= 3
 
         if (isPartyMember) {
             mainFormBuilder.button(partyManageText)

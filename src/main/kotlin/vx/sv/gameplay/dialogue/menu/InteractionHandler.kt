@@ -34,7 +34,7 @@ import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.party.PartyManager.CombatTactic
 import vx.sv.gameplay.party.PartyManager.PartyState
 import vx.sv.gameplay.quest.QuestManager.Quest
-import vx.sv.gameplay.reputation.ReputationManager.Companion.reputationOf
+import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
@@ -213,7 +213,7 @@ class InteractionHandler : Listener {
             builder.button(manageText, isRainbow = true) {
                 this.showPartyMenu(player, villager)
             }
-        } else if (!partyManager.hasParty(villager) && villager.reputationOf(player).ordinal <= 3) {
+        } else if (!partyManager.hasParty(villager) && villager.opinionOn(player).ordinal <= 3) {
             val inviteText = plugin.language.getString("interaction-menu.party-invite-button") ?: "Follow Me"
             builder.button(inviteText) { menu ->
                 if (partyManager.addMember(player, villager)) {
@@ -360,7 +360,7 @@ class InteractionHandler : Listener {
             val useRainbow = false
             builder.button(quest.name, isRainbow = useRainbow) {
                 val description = (villager.let { npc ->
-                    return@let when (npc.reputationOf(player)) {
+                    return@let when (npc.opinionOn(player)) {
                         Reputation.EXALTED -> quest.data.reputationBasedQuestDescriptions.getOrNull(0)
                         Reputation.REVERED -> quest.data.reputationBasedQuestDescriptions.getOrNull(1)
                         Reputation.HONORED -> quest.data.reputationBasedQuestDescriptions.getOrNull(2)

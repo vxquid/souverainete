@@ -5,6 +5,7 @@ import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import kotlin.math.abs
 
@@ -110,8 +111,9 @@ class ReputationManager {
 
     }
 
+    /* Counts personal AND town reputation together. */
     fun getPlayerReputationStatus(entity: LivingEntity, player: Player): Reputation {
-        val reputation = getReputationMap(entity)[player.uniqueId] ?: 0
+        val reputation = (getReputationMap(entity)[player.uniqueId] ?: 0) + (entity.settlement?.data?.reputation?.get(player.uniqueId) ?: 0)
         val config = plugin.gameplayManager.config
 
         return when {
@@ -145,7 +147,7 @@ class ReputationManager {
 
         val REP_KEY = NamespacedKey(plugin, "ReputationData")
 
-        fun LivingEntity.reputationOf(player: Player): Reputation {
+        fun LivingEntity.opinionOn(player: Player): Reputation {
             return plugin.gameplayManager.reputationManager.getPlayerReputationStatus(this, player)
         }
 

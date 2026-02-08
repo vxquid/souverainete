@@ -30,7 +30,7 @@ import java.util.*
 import kotlin.random.Random
 
 /**
- * Manages the generation and processing of unique items for villagers.
+ * Manages the generation and processing of unique items with AI-generated lore.
  */
 class UniqueItemManager {
 
@@ -41,7 +41,7 @@ class UniqueItemManager {
         private val rarityKey = NamespacedKey(plugin, "Rarity")
 
         /**
-         * Generates a unique item description using AI provider.
+         * Triggers AI generation for item name and lore.
          */
         fun generateUniqueItemDescription(villager: Villager, item: ItemStack) {
             val generator = UniqueItemDescriptionGenerator(villager, item)
@@ -55,80 +55,113 @@ class UniqueItemManager {
         data class UniqueItemDescription(val itemDescription: String, val itemNames: List<String>)
 
         /**
-         * Generator for unique item prompts.
+         * Internal generator to build a sophisticated prompt for the AI.
          */
         private class UniqueItemDescriptionGenerator(villager: Villager, item: ItemStack) {
-            private val uniqueItemInfo = "Generate a unique description for the item based on the provided details."
 
-            private val uniqueItemPrompt = "Answer only in JSON format, without unnecessary text, make sure it will be JSON parseable. Generate a unique item description using the following JSON scheme: " +
-                    "`itemDescription` — a detailed and immersive description of the item (one to three sentences), " +
-                    "`itemNames` — string array, six short but creative item names, must differ from each other; six name must be cool single word. " +
-                    "The writing style must be strictly tailored in the following order: global setting, race (race description), character definition, current biome, profession (profession level), gender. " +
-                    "The following is the information about the NPC: name is {npcName}, current biome is {currentBiome}, NPC personality definition is [{npcPersonality}], race is {npcRace} and race description: [{raceDescription}], profession is {npcProfession}, npc profession mastery level is {npcProfessionLevel}, npc gender is {npcGender}. {uniqueItemInfo} " +
-                    "Item details: item type is {itemType}, extra item attributes are {extraItemAttributes}, item rarity is {itemRarity}, settlement name is {settlementName}, settlement level is {settlementLevel}, setting is {setting}, naming style is {namingStyle}."
+            private val uniqueItemPrompt = """
+                # ROLE
+                You are a world-class RPG writer and myth-builder. Your task is to write a "believable" and "immersive" description for a unique item crafted by an NPC.
+
+                # FORBIDDEN
+                - DO NOT list stats or technical data (e.g., "minecraft:desert", "female", "level 2").
+                - DO NOT use the NPC's race description as a copy-paste.
+                - DO NOT write "This is a sword" or other obvious statements.
+                - Avoid meta-commentary.
+
+                # CONTEXT
+                - Setting: {setting} ({namingStyle} style)
+                - Creator: {npcName}, a {npcGender} {npcRace} {npcProfession} ({npcProfessionLevel})
+                - Creator's Personality: {npcPersonality}
+                - Location: {currentBiome} biome, settlement of {settlementName}
+                - Item Type: {itemType} ({itemRarity} quality)
+                - Enchanted Properties: {extraItemAttributes}
+
+                # GUIDELINES FOR DESCRIPTION
+                Write 1 to 3 atmospheric sentences. Focus on the "feel", "history", or "craftsmanship" of the item. 
+                - Use the creator's race and personality to influence the tone (e.g., an Orc's work is brutal/heavy, an Elf's is elegant/ethereal).
+                - Mention how the {currentBiome} environment influenced the materials used.
+                - If the item has "{extraItemAttributes}", subtly hint at these powers in the lore without naming the stats.
+
+                # GUIDELINES FOR NAMES
+                Provide 6 creative names:
+                - 1-2: Grounded and descriptive.
+                - 3-4: Poetic or legendary.
+                - 5: A single "cool" punchy word.
+                - 6: A name deeply tied to the {npcRace} heritage or {settlementName} history.
+
+                # JSON FORMAT
+                Output ONLY valid JSON.
+                {
+                  "itemDescription": "Immersive lore text here...",
+                  "itemNames": ["Name 1", "Name 2", "Name 3", "Name 4", "Name 5", "Name 6"]
+                }
+            """.trimIndent()
 
             private val placeholders = mapOf(
                 "npcPersonality" to villager.getPersonality().toString(),
-                "npcName" to (villager.customName ?: "unknown"),
-                "npcGender" to villager.gender.toString(),
+                "npcName" to (villager.customName ?: "an unknown artisan"),
+                "npcGender" to villager.gender.toString().lowercase(),
                 "npcRace" to villager.race.name,
                 "raceDescription" to villager.race.description,
-                "currentBiome" to villager.location.block.biome.key.toString(),
-                "npcProfession" to villager.profession.toString(),
+                "currentBiome" to villager.location.block.biome.key.key.replace("_", " "),
+                "npcProfession" to villager.profession.toString().lowercase(),
                 "npcProfessionLevel" to villager.professionLevelName,
-                "itemType" to item.type.toString(),
-                "extraItemAttributes" to item.getUniqueItemAttributes(),
-                "itemRarity" to (if (item.isUniqueItem()) item.getUniqueItemRarity().toString().lowercase() else UniqueItemRarity.COMMON.toString().lowercase()),
-                "settlementName" to (villager.settlement?.data?.settlementName ?: "no settlement"),
-                "settlementLevel" to villager.settlement?.size().toString(),
+                "itemType" to item.type.toString().replace("_", " ").lowercase(),
+                "extraItemAttributes" to (item.getUniqueItemAttributes().ifEmpty { "exceptional balance" }),
+                "itemRarity" to (if (item.isUniqueItem()) item.getUniqueItemRarity().toString() else "COMMON"),
+                "settlementName" to (villager.settlement?.data?.settlementName ?: "the wild lands"),
+                "settlementLevel" to (villager.settlement?.size()?.toString() ?: "1"),
                 "setting" to plugin.providerManager.config.setting,
-                "namingStyle" to plugin.providerManager.config.namingStyle,
-                "uniqueItemInfo" to uniqueItemInfo
+                "namingStyle" to plugin.providerManager.config.namingStyle
             )
 
             val prompt = uniqueItemPrompt.replaceMap(placeholders)
         }
 
         /**
-         * Finalizes the unique item by applying name, lore, and adding to inventory.
+         * Applies the generated name and lore to the item.
          */
         private fun finalizeUniqueItem(villager: Villager, item: ItemStack, data: UniqueItemDescription) {
             val meta = item.itemMeta ?: return
             val rarity = item.getUniqueItemRarity()
 
+            // Set random name from the list with rarity color
             meta.setItemName((rarity.color + data.itemNames.random()).color())
 
+            // Format lore with word-wrapping
             val lore = buildLore(data.itemDescription)
             meta.lore = lore
             item.itemMeta = meta
 
+            // Put into villager's inventory for trade
             villager.addItemToQuillInventory(item)
         }
 
         /**
-         * Builds lore lines from description, wrapping at configured length.
+         * Wraps text into multiple lore lines based on config.
          */
         private fun buildLore(description: String): MutableList<String> {
             val words = description.split(" ")
             val lore = mutableListOf<String>()
-            var line = "§7"
+            var line = "§7§o" // Use gray-italic for lore
 
             words.forEach { word ->
                 if (line.length + word.length + 1 > gameplayConfig.uniqueItem.loreLineMaxLength) {
                     lore.add(line.trim())
-                    line = "§7"
+                    line = "§7§o"
                 }
                 line += "$word "
             }
 
-            if (line != "§7") {
+            if (line != "§7§o") {
                 lore.add(line.trim())
             }
             return lore
         }
 
         /**
-         * Creates a unique item with random attributes and rarity.
+         * Core logic to create a unique item with rolled attributes.
          */
         fun createUniqueItem(villager: Villager, itemStack: ItemStack): ItemStack {
             var rolls = 0
@@ -165,7 +198,7 @@ class UniqueItemManager {
 
             val addedAttributes = mutableListOf<String>()
             repeat(rolls) {
-                val attribute = attributes.random()
+                val attribute = attributes.randomOrNull() ?: return@repeat
                 val attrName = attribute.get()!!.key.key.replace("generic.", "").replace("player.", "").replace("_", " ").lowercase()
                 addedAttributes.add(attrName)
 
@@ -186,6 +219,7 @@ class UniqueItemManager {
                 }
             }
 
+            // Apply modifiers
             XAttribute.ATTACK_SPEED.get()?.let { addAttributeModifier(meta, it, attackSpeed, slot, if (attackSpeed != getBaseAttackSpeed(itemStack.type.toString())) AttributeModifier.Operation.ADD_NUMBER else null) }
             XAttribute.ATTACK_DAMAGE.get()?.let { addAttributeModifier(meta, it, attackDamage, slot) }
             XAttribute.BLOCK_BREAK_SPEED.get()?.let { addAttributeModifier(meta, it, blockBreakSpeed, slot, if (blockBreakSpeed > 1.0) AttributeModifier.Operation.ADD_NUMBER else null) }
@@ -199,6 +233,7 @@ class UniqueItemManager {
             meta.persistentDataContainer.set(attributeKey, PersistentDataType.STRING, addedAttributes.joinToString(", "))
             meta.persistentDataContainer.set(rarityKey, PersistentDataType.STRING, rarity.toString())
 
+            // Apply cosmetic trims for armor
             if (meta is ArmorMeta) {
                 randomTrimPattern(villager)?.let { pattern ->
                     meta.trim = ArmorTrim(randomTrimMaterial(), pattern)
@@ -209,9 +244,6 @@ class UniqueItemManager {
             return itemStack
         }
 
-        /**
-         * Adds an attribute modifier if the operation is not null.
-         */
         private fun addAttributeModifier(meta: ItemMeta, attribute: Attribute, amount: Double, slot: EquipmentSlotGroup, operation: AttributeModifier.Operation? = AttributeModifier.Operation.ADD_NUMBER) {
             if (operation != null && amount != 0.0) {
                 meta.addAttributeModifier(
@@ -361,7 +393,6 @@ class UniqueItemManager {
     }
 
     enum class UniqueItemRarity(val extraPrice: Int) {
-
         NONE(0),
         COMMON(plugin.professions.getInt("villager-item-producing.extra-rarity-price.COMMON")),
         UNCOMMON(plugin.professions.getInt("villager-item-producing.extra-rarity-price.UNCOMMON")),
@@ -383,5 +414,4 @@ class UniqueItemManager {
                 NONE -> "#ffffff"
             }
     }
-
 }

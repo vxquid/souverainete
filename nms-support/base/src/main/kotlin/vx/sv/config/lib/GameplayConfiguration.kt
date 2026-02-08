@@ -25,7 +25,7 @@ class GameplayConfiguration {
     class GeneralConfig {
 
         @Comment("Message prefix.")
-        val messagePrefix: String = "§x§B§F§A§2§7§Eꜱ§x§C§4§A§9§8§9ᴏ§x§C§8§B§0§9§4ᴜ§x§C§D§B§6§9§Fᴠ§x§D§1§B§D§A§Aᴇ§x§D§6§C§4§B§5ʀ§x§D§B§C§A§B§Fᴀ§x§E§0§D§1§C§Aɪ§x§E§4§D§7§D§5ɴ§x§E§9§D§E§E§0ᴇ§x§E§D§E§5§E§Bᴛ§x§F§2§E§A§D§3ᴇ §8|§7"
+        val messagePrefix: String = "§6♣ §8| §7"
 
         @Comment(
             "If enabled, the plugin will not modify vanilla trades (original mechanics), only adding quest items on top.",

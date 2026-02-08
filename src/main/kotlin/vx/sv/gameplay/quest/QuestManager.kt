@@ -35,7 +35,7 @@ import vx.sv.gameplay.quest.QuestManager.Quest.QuestItem
 import vx.sv.gameplay.quest.pragma.QuestItemStrategy
 import vx.sv.gameplay.quest.pragma.strategy.*
 import vx.sv.gameplay.quest.pragma.strategy.TreasureHuntQuestItemStrategy.Companion.treasureItems
-import vx.sv.gameplay.reputation.ReputationManager.Companion.reputationOf
+import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.trade.ScoreCalculator.getBasicScore
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
@@ -218,7 +218,7 @@ class QuestManager : Listener {
 
     /* Определяем текст после завершения квеста на основании репутации игрока. */
     private fun determineFinishingDialogue(player: Player, entity: LivingEntity, quest: Quest) : String {
-        return when (entity.reputationOf(player)) {
+        return when (entity.opinionOn(player)) {
             Reputation.EXALTED    -> quest.data.reputationBasedQuestFinishingDialogues[0]
             Reputation.REVERED    -> quest.data.reputationBasedQuestFinishingDialogues[1]
             Reputation.HONORED    -> quest.data.reputationBasedQuestFinishingDialogues[2]
