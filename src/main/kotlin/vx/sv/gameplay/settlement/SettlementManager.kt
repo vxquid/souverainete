@@ -203,14 +203,19 @@ class SettlementManager : Listener {
     fun generateSettlementName(settlement: Settlement) {
         val client = plugin.providerManager.client
 
+        // 1. Вычисляем доминирующую расу заранее
+        val dominantRace = getDominantRace(settlement)
+
         if (client is DummyClient) {
-            pickRaceName(settlement)
+            pickRaceName(settlement) // Тут логика осталась прежней (фоллбэк)
             return
         }
 
         CompletableFuture.runAsync {
             try {
-                val generator = SettlementNameGenerator(settlement)
+                // 2. Передаем расу в генератор
+                val generator = SettlementNameGenerator(settlement, dominantRace)
+
                 val response = client.sendPromptWithSchema(generator.prompt, SettlementData::class)
                     ?: throw IllegalStateException("Empty response from AI")
 
@@ -297,13 +302,15 @@ class SettlementManager : Listener {
         if (block.type != Material.BELL) return
 
         val player = event.player
-        val settlementName = player.currentSettlement ?: return
-        val settlement = getByName(settlementName) ?: return
+        val world = block.world
+        val blockVector = block.location.toVector()
 
-        val center = settlement.data.center
-        if (center.blockX != block.x || center.blockY != block.y || center.blockZ != block.z) {
-            return
-        }
+        // Получаем список поселений в этом мире
+        val worldSettlements = settlements[world] ?: return
+
+        // Ищем поселение, в территории которого находится нажатый колокол.
+        // Это позволяет использовать любой колокол внутри региона, а не только центральный.
+        val settlement = worldSettlements.find { it.territory.contains(blockVector) } ?: return
 
         event.isCancelled = true
         SettlementMenus.openMainMenu(player, settlement)
@@ -311,12 +318,18 @@ class SettlementManager : Listener {
 
     data class SettlementData(val settlementName: List<String>)
 
-    class SettlementNameGenerator(settlement: Settlement) {
+    class SettlementNameGenerator(settlement: Settlement, race: Race) {
         private val basePrompt = """
             Answer only in JSON. Generate 5 creative settlement names.
             Schema: {"settlementName": ["Name1", "Name2", ...]}
-            Biome: {currentBiome}, Setting: {setting}, Style: {namingStyle}.
-            Avoid: {existingNames}.
+            
+            Context:
+            - Dominant Race: {dominantRace} (CRITICAL: The names must strictly reflect the language, culture, and lore of this race).
+            - Biome: {currentBiome}
+            - Setting: {setting}
+            - Naming Style: {namingStyle}
+            
+            Avoid existing names: {existingNames}.
         """.trimIndent()
 
         private val existingNames = settlements[settlement.world]
@@ -325,6 +338,7 @@ class SettlementManager : Listener {
         private val biomeName = settlement.world.getBiome(settlement.data.center).key.key.replace("_", " ").lowercase()
 
         val prompt = basePrompt.replaceMap(mapOf(
+            "dominantRace" to race.name, // Передаем имя расы (напр. "DWARF", "ELF", "HUMAN")
             "currentBiome" to biomeName,
             "setting" to plugin.providerManager.config.setting,
             "namingStyle" to plugin.providerManager.config.namingStyle,
