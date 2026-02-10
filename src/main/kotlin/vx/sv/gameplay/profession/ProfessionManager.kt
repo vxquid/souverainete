@@ -204,7 +204,7 @@ class ProfessionManager : Listener {
         // Check for unique item generation
         if (cachedProfessionsConfig.getStringList("villager-item-producing.mastery-affected-items").contains(item.type.toString())) {
             val uniqueChance = professionLevel * cachedProfessionsConfig.getInt("villager-item-producing.unique-item-chance")
-            if (Random.Default.nextInt(100) <= uniqueChance) {
+            if (Random.nextInt(100) <= uniqueChance) {
                 val uniqueItem = UniqueItemManager.createUniqueItem(villager, item)
                 uniqueItemProduceQueue[villager] = uniqueItem
                 return

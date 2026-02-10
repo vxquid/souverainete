@@ -5,7 +5,6 @@ import io.papermc.paper.registry.RegistryAccess
 import io.papermc.paper.registry.RegistryKey
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
-import org.bukkit.attribute.Attribute
 import org.bukkit.attribute.AttributeModifier
 import org.bukkit.entity.Villager
 import org.bukkit.inventory.EquipmentSlotGroup
@@ -13,7 +12,6 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.ArmorMeta
 import org.bukkit.inventory.meta.ItemMeta
 import org.bukkit.inventory.meta.trim.ArmorTrim
-import org.bukkit.inventory.meta.trim.TrimMaterial
 import org.bukkit.inventory.meta.trim.TrimPattern
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
@@ -30,178 +28,126 @@ import java.util.*
 import kotlin.random.Random
 
 /**
- * Manages the generation and processing of unique items with AI-generated lore.
+ * Manages the generation, processing, and attribute modification of unique items.
+ * Refactored using Builder pattern and component separation.
  */
 class UniqueItemManager {
 
     companion object {
         private val cachedProfessionsConfig = plugin.professions
         private val gameplayConfig = plugin.gameplayManager.config
-        private val attributeKey = NamespacedKey(plugin, "Attribute")
-        private val rarityKey = NamespacedKey(plugin, "Rarity")
+
+        // Keys for PersistentDataContainer
+        val attributeKey = NamespacedKey(plugin, "Attribute")
+        val rarityKey = NamespacedKey(plugin, "Rarity")
+
+        /**
+         * Entry point to create a unique item with stats and put it in villager's inventory (or handle it).
+         * Returns the created ItemStack.
+         */
+        fun createUniqueItem(villager: Villager, itemStack: ItemStack): ItemStack {
+            return UniqueItemBuilder(itemStack)
+                .calculateRarity(villager)
+                .resetAndApplyBaseStats()
+                .rollAndApplyBonusAttributes()
+                .applyCosmetics(villager)
+                .build()
+        }
 
         /**
          * Triggers AI generation for item name and lore.
          */
         fun generateUniqueItemDescription(villager: Villager, item: ItemStack) {
-            val generator = UniqueItemDescriptionGenerator(villager, item)
-            plugin.providerManager.client.sendPromptWithSchema(generator.prompt, UniqueItemDescription::class)?.let { data ->
-                plugin.server.scheduler.runTask(plugin, Runnable {
-                    finalizeUniqueItem(villager, item, data)
-                })
-            } ?: plugin.logger.warning("Failed to generate unique item description for ${villager.customName}")
+            AiDescriptionService.generate(villager, item)
         }
 
-        data class UniqueItemDescription(val itemDescription: String, val itemNames: List<String>)
+        // --- Extension Functions for External Access ---
+
+        fun ItemStack.isUniqueItem(): Boolean {
+            return itemMeta?.persistentDataContainer?.has(rarityKey) == true
+        }
+
+        fun ItemStack.getUniqueItemRarity(): UniqueItemRarity {
+            return itemMeta?.persistentDataContainer?.get(rarityKey, PersistentDataType.STRING)?.let {
+                runCatching { UniqueItemRarity.valueOf(it) }.getOrNull()
+            } ?: UniqueItemRarity.NONE
+        }
+
+        fun ItemStack.getUniqueItemAttributes(): String {
+            return itemMeta?.persistentDataContainer?.get(attributeKey, PersistentDataType.STRING) ?: ""
+        }
+    }
+
+    /**
+     * Builder class responsible for constructing the Unique Item step-by-step.
+     */
+    class UniqueItemBuilder(originalItem: ItemStack) {
+        private val itemStack: ItemStack = originalItem.clone()
+        private val meta: ItemMeta = itemStack.itemMeta ?: throw IllegalStateException("Item must have Meta")
+        private val typeName: String = itemStack.type.toString()
+
+        private var rarity: UniqueItemRarity = UniqueItemRarity.COMMON
+        private var rolls: Int = 0
+
+        // Mutable stats tracking
+        private var attackSpeed: Double = BaseStatsProvider.getBaseAttackSpeed(typeName)
+        private var attackDamage: Double = BaseStatsProvider.getBaseAttackDamage(typeName)
+        private var armor: Double = BaseStatsProvider.getBaseArmor(typeName)
+        private var armorToughness: Double = BaseStatsProvider.getBaseArmorToughness(typeName)
+        private var blockBreakSpeed: Double = 1.0
+        private var blockInteractionRange: Double = 0.0
+        private var entityInteractionRange: Double = 0.0
+        private var maxHealth: Double = 0.0
+        private var scale: Double = 0.0
+
+        private val addedAttributeNames = mutableListOf<String>()
 
         /**
-         * Internal generator to build a sophisticated prompt for the AI.
+         * Step 1: Calculate Rarity based on Villager stats and RNG.
          */
-        private class UniqueItemDescriptionGenerator(villager: Villager, item: ItemStack) {
+        fun calculateRarity(villager: Villager): UniqueItemBuilder {
+            val result = RarityCalculator.calculate(villager)
+            this.rarity = result.first
+            this.rolls = result.second
 
-            private val uniqueItemPrompt = """
-                # ROLE
-                You are a world-class RPG writer and myth-builder. Your task is to write a "believable" and "immersive" description for a unique item crafted by an NPC.
-
-                # FORBIDDEN
-                - DO NOT list stats or technical data (e.g., "minecraft:desert", "female", "level 2").
-                - DO NOT use the NPC's race description as a copy-paste.
-                - DO NOT write "This is a sword" or other obvious statements.
-                - Avoid meta-commentary.
-
-                # CONTEXT
-                - Setting: {setting} ({namingStyle} style)
-                - Creator: {npcName}, a {npcGender} {npcRace} {npcProfession} ({npcProfessionLevel})
-                - Creator's Personality: {npcPersonality}
-                - Location: {currentBiome} biome, settlement of {settlementName}
-                - Item Type: {itemType} ({itemRarity} quality)
-                - Enchanted Properties: {extraItemAttributes}
-
-                # GUIDELINES FOR DESCRIPTION
-                Write 1 to 3 atmospheric sentences. Focus on the "feel", "history", or "craftsmanship" of the item. 
-                - Use the creator's race and personality to influence the tone (e.g., an Orc's work is brutal/heavy, an Elf's is elegant/ethereal).
-                - Mention how the {currentBiome} environment influenced the materials used.
-                - If the item has "{extraItemAttributes}", subtly hint at these powers in the lore without naming the stats.
-
-                # GUIDELINES FOR NAMES
-                Provide 6 creative names:
-                - 1-2: Grounded and descriptive.
-                - 3-4: Poetic or legendary.
-                - 5: A single "cool" punchy word.
-                - 6: A name deeply tied to the {npcRace} heritage or {settlementName} history.
-
-                # JSON FORMAT
-                Output ONLY valid JSON.
-                {
-                  "itemDescription": "Immersive lore text here...",
-                  "itemNames": ["Name 1", "Name 2", "Name 3", "Name 4", "Name 5", "Name 6"]
-                }
-            """.trimIndent()
-
-            private val placeholders = mapOf(
-                "npcPersonality" to villager.getPersonality().toString(),
-                "npcName" to (villager.customName ?: "an unknown artisan"),
-                "npcGender" to villager.gender.toString().lowercase(),
-                "npcRace" to villager.race.name,
-                "raceDescription" to villager.race.description,
-                "currentBiome" to villager.location.block.biome.key.key.replace("_", " "),
-                "npcProfession" to villager.profession.toString().lowercase(),
-                "npcProfessionLevel" to villager.professionLevelName,
-                "itemType" to item.type.toString().replace("_", " ").lowercase(),
-                "extraItemAttributes" to (item.getUniqueItemAttributes().ifEmpty { "exceptional balance" }),
-                "itemRarity" to (if (item.isUniqueItem()) item.getUniqueItemRarity().toString() else "COMMON"),
-                "settlementName" to (villager.settlement?.data?.settlementName ?: "the wild lands"),
-                "settlementLevel" to (villager.settlement?.size()?.toString() ?: "1"),
-                "setting" to plugin.providerManager.config.setting,
-                "namingStyle" to plugin.providerManager.config.namingStyle
-            )
-
-            val prompt = uniqueItemPrompt.replaceMap(placeholders)
+            // Tag rarity immediately
+            meta.persistentDataContainer.set(rarityKey, PersistentDataType.STRING, rarity.toString())
+            return this
         }
 
         /**
-         * Applies the generated name and lore to the item.
+         * Step 2: Clear existing modifiers and prepare base stats.
          */
-        private fun finalizeUniqueItem(villager: Villager, item: ItemStack, data: UniqueItemDescription) {
-            val meta = item.itemMeta ?: return
-            val rarity = item.getUniqueItemRarity()
+        fun resetAndApplyBaseStats(): UniqueItemBuilder {
+            val allowedAttributes = AttributeConfigProvider.getAllowedAttributes(typeName)
+            val attributesToCheck = XAttribute.getValues().filter { allowedAttributes.contains(it.name().uppercase()) }
 
-            // Set random name from the list with rarity color
-            meta.setItemName((rarity.color + data.itemNames.random()).color())
-
-            // Format lore with word-wrapping
-            val lore = buildLore(data.itemDescription)
-            meta.lore = lore
-            item.itemMeta = meta
-
-            // Put into villager's inventory for trade
-            villager.addItemToQuillInventory(item)
-        }
-
-        /**
-         * Wraps text into multiple lore lines based on config.
-         */
-        private fun buildLore(description: String): MutableList<String> {
-            val words = description.split(" ")
-            val lore = mutableListOf<String>()
-            var line = "§7§o" // Use gray-italic for lore
-
-            words.forEach { word ->
-                if (line.length + word.length + 1 > gameplayConfig.uniqueItem.loreLineMaxLength) {
-                    lore.add(line.trim())
-                    line = "§7§o"
-                }
-                line += "$word "
+            // Clear existing
+            attributesToCheck.forEach { xAttr ->
+                xAttr.get()?.let { meta.removeAttributeModifier(it) }
             }
-
-            if (line != "§7§o") {
-                lore.add(line.trim())
-            }
-            return lore
+            return this
         }
 
         /**
-         * Core logic to create a unique item with rolled attributes.
+         * Step 3: Roll RNG for bonus attributes and accumulate stats.
          */
-        fun createUniqueItem(villager: Villager, itemStack: ItemStack): ItemStack {
-            var rolls = 0
-            do {
-                rolls++
-            } while (Random.nextInt(100) <= gameplayConfig.uniqueItem.rollsBaseChanceDivisor / rolls + villager.villagerLevel)
+        fun rollAndApplyBonusAttributes(): UniqueItemBuilder {
+            val allowedAttributes = AttributeConfigProvider.getAllowedAttributes(typeName)
+            val availableXAttributes = XAttribute.getValues().filter { allowedAttributes.contains(it.name().uppercase()) }
 
-            val rarity = when (rolls) {
-                1 -> UniqueItemRarity.COMMON
-                2 -> UniqueItemRarity.UNCOMMON
-                3 -> UniqueItemRarity.RARE
-                4 -> UniqueItemRarity.EPIC
-                5 -> UniqueItemRarity.LEGENDARY
-                6 -> UniqueItemRarity.MYTHICAL
-                else -> UniqueItemRarity.DIVINE
-            }
-
-            val attributeNames = getAllowedAttributes(itemStack.type.toString())
-            val slot = getEquipmentSlot(itemStack.type.toString())
-            val meta = itemStack.itemMeta ?: return itemStack
-
-            val attributes = XAttribute.getValues().filter { attributeNames.contains(it.name().uppercase()) }
-            attributes.forEach { it.get()?.let { p0 -> meta.removeAttributeModifier(p0) } }
-
-            var attackSpeed = getBaseAttackSpeed(itemStack.type.toString())
-            var attackDamage = getBaseAttackDamage(itemStack.type.toString())
-            var armor = getBaseArmor(itemStack.type.toString())
-            var armorToughness = getBaseArmorToughness(itemStack.type.toString())
-            var blockBreakSpeed = 1.0
-            var blockInteractionRange = 0.0
-            var entityInteractionRange = 0.0
-            var maxHealth = 0.0
-            var scale = 0.0
-
-            val addedAttributes = mutableListOf<String>()
             repeat(rolls) {
-                val attribute = attributes.randomOrNull() ?: return@repeat
-                val attrName = attribute.get()!!.key.key.replace("generic.", "").replace("player.", "").replace("_", " ").lowercase()
-                addedAttributes.add(attrName)
+                val attribute = availableXAttributes.randomOrNull() ?: return@repeat
 
+                // Store pretty name for Lore/AI
+                val prettyName = attribute.get()!!.key.key
+                    .replace("generic.", "")
+                    .replace("player.", "")
+                    .replace("_", " ")
+                    .lowercase()
+                addedAttributeNames.add(prettyName)
+
+                // Accumulate bonuses
                 when (attribute) {
                     XAttribute.ATTACK_SPEED -> attackSpeed += 0.3
                     XAttribute.ATTACK_DAMAGE -> attackDamage += 1.5
@@ -218,70 +164,95 @@ class UniqueItemManager {
                     else -> {}
                 }
             }
+            return this
+        }
 
-            // Apply modifiers
-            XAttribute.ATTACK_SPEED.get()?.let { addAttributeModifier(meta, it, attackSpeed, slot, if (attackSpeed != getBaseAttackSpeed(itemStack.type.toString())) AttributeModifier.Operation.ADD_NUMBER else null) }
-            XAttribute.ATTACK_DAMAGE.get()?.let { addAttributeModifier(meta, it, attackDamage, slot) }
-            XAttribute.BLOCK_BREAK_SPEED.get()?.let { addAttributeModifier(meta, it, blockBreakSpeed, slot, if (blockBreakSpeed > 1.0) AttributeModifier.Operation.ADD_NUMBER else null) }
-            XAttribute.BLOCK_INTERACTION_RANGE.get()?.let { addAttributeModifier(meta, it, blockInteractionRange, slot, if (blockInteractionRange > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
-            XAttribute.ENTITY_INTERACTION_RANGE.get()?.let { addAttributeModifier(meta, it, entityInteractionRange, slot, if (entityInteractionRange > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
-            XAttribute.MAX_HEALTH.get()?.let { addAttributeModifier(meta, it, maxHealth, slot, if (maxHealth > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
-            XAttribute.ARMOR.get()?.let { addAttributeModifier(meta, it, armor, slot) }
-            XAttribute.ARMOR_TOUGHNESS.get()?.let { addAttributeModifier(meta, it, armorToughness, slot, if (armorToughness > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
-            XAttribute.SCALE.get()?.let { addAttributeModifier(meta, it, scale, slot, if (scale > 0.0) AttributeModifier.Operation.ADD_NUMBER else null) }
-
-            meta.persistentDataContainer.set(attributeKey, PersistentDataType.STRING, addedAttributes.joinToString(", "))
-            meta.persistentDataContainer.set(rarityKey, PersistentDataType.STRING, rarity.toString())
-
-            // Apply cosmetic trims for armor
+        /**
+         * Step 4: Apply visual changes (Armor Trims).
+         */
+        fun applyCosmetics(villager: Villager): UniqueItemBuilder {
             if (meta is ArmorMeta) {
-                randomTrimPattern(villager)?.let { pattern ->
-                    meta.trim = ArmorTrim(randomTrimMaterial(), pattern)
+                TrimApplier.applyRandomTrim(meta, villager)
+            }
+            return this
+        }
+
+        /**
+         * Finalize: Write attributes to ItemMeta and return ItemStack.
+         */
+        fun build(): ItemStack {
+            val slot = EquipmentSlotProvider.getSlot(typeName)
+
+            // Helper to add modifier if value changed/valid
+            fun apply(xAttr: XAttribute, value: Double, baseValue: Double = 0.0, op: AttributeModifier.Operation = AttributeModifier.Operation.ADD_NUMBER) {
+                val attr = xAttr.get() ?: return
+                // Add if value is distinct from base OR (if ADD_NUMBER and > 0)
+                // Logic strictly follows original: checks base mismatch or positive value depending on attribute
+                val shouldAdd = if (xAttr == XAttribute.ATTACK_SPEED) value != baseValue else value > 0.0
+
+                // Attack Damage and Armor are special cases in original code: they are always added if they exist in base stats logic
+                val isBaseStat = (xAttr == XAttribute.ATTACK_DAMAGE || xAttr == XAttribute.ARMOR) && value > 0.0
+
+                if (shouldAdd || isBaseStat) {
+                    val finalOp = if(xAttr == XAttribute.ATTACK_SPEED && value != baseValue) AttributeModifier.Operation.ADD_NUMBER else op
+
+                    meta.addAttributeModifier(
+                        attr,
+                        AttributeModifier(
+                            NamespacedKey(plugin, UUID.randomUUID().toString()),
+                            value,
+                            finalOp,
+                            slot
+                        )
+                    )
                 }
             }
+
+            // Apply all accumulated stats
+            apply(XAttribute.ATTACK_SPEED, attackSpeed, BaseStatsProvider.getBaseAttackSpeed(typeName))
+            apply(XAttribute.ATTACK_DAMAGE, attackDamage)
+            apply(XAttribute.BLOCK_BREAK_SPEED, blockBreakSpeed, 1.0)
+            apply(XAttribute.BLOCK_INTERACTION_RANGE, blockInteractionRange)
+            apply(XAttribute.ENTITY_INTERACTION_RANGE, entityInteractionRange)
+            apply(XAttribute.MAX_HEALTH, maxHealth)
+            apply(XAttribute.ARMOR, armor)
+            apply(XAttribute.ARMOR_TOUGHNESS, armorToughness)
+            apply(XAttribute.SCALE, scale)
+
+            // Save attribute names for AI prompt
+            meta.persistentDataContainer.set(attributeKey, PersistentDataType.STRING, addedAttributeNames.joinToString(", "))
 
             itemStack.itemMeta = meta
             return itemStack
         }
+    }
 
-        private fun addAttributeModifier(meta: ItemMeta, attribute: Attribute, amount: Double, slot: EquipmentSlotGroup, operation: AttributeModifier.Operation? = AttributeModifier.Operation.ADD_NUMBER) {
-            if (operation != null && amount != 0.0) {
-                meta.addAttributeModifier(
-                    attribute,
-                    AttributeModifier(
-                        NamespacedKey(plugin, UUID.randomUUID().toString()),
-                        amount,
-                        operation,
-                        slot
-                    )
-                )
+    // --- Internal Logic Modules ---
+
+    private object RarityCalculator {
+        fun calculate(villager: Villager): Pair<UniqueItemRarity, Int> {
+            var rolls = 0
+            val baseDivisor = gameplayConfig.uniqueItem.rollsBaseChanceDivisor
+
+            do {
+                rolls++
+            } while (Random.nextInt(100) <= baseDivisor / rolls + villager.villagerLevel)
+
+            val rarity = when (rolls) {
+                1 -> UniqueItemRarity.COMMON
+                2 -> UniqueItemRarity.UNCOMMON
+                3 -> UniqueItemRarity.RARE
+                4 -> UniqueItemRarity.EPIC
+                5 -> UniqueItemRarity.LEGENDARY
+                6 -> UniqueItemRarity.MYTHICAL
+                else -> UniqueItemRarity.DIVINE
             }
+            return rarity to rolls
         }
+    }
 
-        private fun getAllowedAttributes(type: String): List<String> {
-            return when (type) {
-                in ProfessionManager.SWORDS -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.swords")
-                in ProfessionManager.PICKAXES -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.pickaxes")
-                in ProfessionManager.AXES -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.axes")
-                in ProfessionManager.HELMETS -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.helmets")
-                in ProfessionManager.CHESTPLATES -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.chestplates")
-                in ProfessionManager.LEGGINGS -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.leggings")
-                in ProfessionManager.BOOTS -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.boots")
-                else -> cachedProfessionsConfig.getStringList("villager-item-producing.allowed-attributes.fishing-rod")
-            }
-        }
-
-        private fun getEquipmentSlot(type: String): EquipmentSlotGroup {
-            return when (type) {
-                in ProfessionManager.HELMETS -> EquipmentSlotGroup.HEAD
-                in ProfessionManager.CHESTPLATES -> EquipmentSlotGroup.CHEST
-                in ProfessionManager.LEGGINGS -> EquipmentSlotGroup.LEGS
-                in ProfessionManager.BOOTS -> EquipmentSlotGroup.FEET
-                else -> EquipmentSlotGroup.MAINHAND
-            }
-        }
-
-        private fun getBaseAttackSpeed(type: String): Double {
+    private object BaseStatsProvider {
+        fun getBaseAttackSpeed(type: String): Double {
             return -4.0 + when (type) {
                 in ProfessionManager.SWORDS -> 1.6
                 in ProfessionManager.PICKAXES -> 1.2
@@ -291,7 +262,7 @@ class UniqueItemManager {
             }
         }
 
-        private fun getBaseAttackDamage(type: String): Double {
+        fun getBaseAttackDamage(type: String): Double {
             return when (type) {
                 "COPPER_SWORD" -> 5.0
                 "IRON_SWORD" -> 6.0
@@ -301,52 +272,63 @@ class UniqueItemManager {
                 "IRON_PICKAXE" -> 4.0
                 "DIAMOND_PICKAXE" -> 5.0
                 "NETHERITE_PICKAXE" -> 6.0
-                "COPPER_AXE" -> 9.0
-                "IRON_AXE" -> 9.0
-                "DIAMOND_AXE" -> 9.0
+                "COPPER_AXE", "IRON_AXE", "DIAMOND_AXE" -> 9.0
                 "NETHERITE_AXE" -> 10.0
                 else -> 0.0
             }
         }
 
-        private fun getBaseArmor(type: String): Double {
+        fun getBaseArmor(type: String): Double {
             return when (type) {
-                "LEATHER_HELMET" -> 1.0
-                "LEATHER_CHESTPLATE" -> 3.0
-                "LEATHER_LEGGINGS" -> 2.0
-                "LEATHER_BOOTS" -> 1.0
-                "COPPER_HELMET" -> 2.0
+                "LEATHER_HELMET", "LEATHER_BOOTS", "COPPER_BOOTS" -> 1.0
+                "LEATHER_CHESTPLATE", "COPPER_LEGGINGS", "NETHERITE_HELMET", "NETHERITE_BOOTS", "DIAMOND_HELMET", "DIAMOND_BOOTS" -> 3.0
+                "LEATHER_LEGGINGS", "COPPER_HELMET", "IRON_HELMET", "IRON_BOOTS" -> 2.0
                 "COPPER_CHESTPLATE" -> 4.0
-                "COPPER_LEGGINGS" -> 3.0
-                "COPPER_BOOTS" -> 1.0
-                "IRON_HELMET" -> 2.0
-                "IRON_CHESTPLATE" -> 6.0
+                "IRON_CHESTPLATE", "DIAMOND_LEGGINGS", "NETHERITE_LEGGINGS" -> 6.0
                 "IRON_LEGGINGS" -> 5.0
-                "IRON_BOOTS" -> 2.0
-                "DIAMOND_HELMET" -> 3.0
-                "DIAMOND_CHESTPLATE" -> 8.0
-                "DIAMOND_LEGGINGS" -> 6.0
-                "DIAMOND_BOOTS" -> 3.0
-                "NETHERITE_HELMET" -> 3.0
-                "NETHERITE_CHESTPLATE" -> 8.0
-                "NETHERITE_LEGGINGS" -> 6.0
-                "NETHERITE_BOOTS" -> 3.0
+                "DIAMOND_CHESTPLATE", "NETHERITE_CHESTPLATE" -> 8.0
                 else -> 0.0
             }
         }
 
-        private fun getBaseArmorToughness(type: String): Double {
+        fun getBaseArmorToughness(type: String): Double {
             return when (type) {
                 in ProfessionManager.DIAMOND_ARMOR -> 2.0
                 in ProfessionManager.NETHERITE_ARMOR -> 3.0
                 else -> 0.0
             }
         }
+    }
 
-        private fun randomTrimMaterial(): TrimMaterial {
-            return RegistryAccess.registryAccess().getRegistry(RegistryKey.TRIM_MATERIAL).toList().random()
+    private object AttributeConfigProvider {
+        fun getAllowedAttributes(type: String): List<String> {
+            val path = "villager-item-producing.allowed-attributes"
+            return when (type) {
+                in ProfessionManager.SWORDS -> cachedProfessionsConfig.getStringList("$path.swords")
+                in ProfessionManager.PICKAXES -> cachedProfessionsConfig.getStringList("$path.pickaxes")
+                in ProfessionManager.AXES -> cachedProfessionsConfig.getStringList("$path.axes")
+                in ProfessionManager.HELMETS -> cachedProfessionsConfig.getStringList("$path.helmets")
+                in ProfessionManager.CHESTPLATES -> cachedProfessionsConfig.getStringList("$path.chestplates")
+                in ProfessionManager.LEGGINGS -> cachedProfessionsConfig.getStringList("$path.leggings")
+                in ProfessionManager.BOOTS -> cachedProfessionsConfig.getStringList("$path.boots")
+                else -> cachedProfessionsConfig.getStringList("$path.fishing-rod")
+            }
         }
+    }
 
+    private object EquipmentSlotProvider {
+        fun getSlot(type: String): EquipmentSlotGroup {
+            return when (type) {
+                in ProfessionManager.HELMETS -> EquipmentSlotGroup.HEAD
+                in ProfessionManager.CHESTPLATES -> EquipmentSlotGroup.CHEST
+                in ProfessionManager.LEGGINGS -> EquipmentSlotGroup.LEGS
+                in ProfessionManager.BOOTS -> EquipmentSlotGroup.FEET
+                else -> EquipmentSlotGroup.MAINHAND
+            }
+        }
+    }
+
+    private object TrimApplier {
         private val trimTemplates = mapOf(
             Material.RAISER_ARMOR_TRIM_SMITHING_TEMPLATE to TrimPattern.RAISER,
             Material.COAST_ARMOR_TRIM_SMITHING_TEMPLATE to TrimPattern.COAST,
@@ -367,7 +349,13 @@ class UniqueItemManager {
             Material.SNOUT_ARMOR_TRIM_SMITHING_TEMPLATE to TrimPattern.SNOUT
         )
 
-        private fun randomTrimPattern(villager: Villager): TrimPattern? {
+        fun applyRandomTrim(meta: ArmorMeta, villager: Villager) {
+            val pattern = getPattern(villager) ?: return
+            val material = RegistryAccess.registryAccess().getRegistry(RegistryKey.TRIM_MATERIAL).toList().random()
+            meta.trim = ArmorTrim(material, pattern)
+        }
+
+        private fun getPattern(villager: Villager): TrimPattern? {
             return if (cachedProfessionsConfig.getBoolean("villager-item-producing.forced-armor-trims")) {
                 RegistryAccess.registryAccess().getRegistry(RegistryKey.TRIM_PATTERN).toList().random()
             } else {
@@ -376,21 +364,116 @@ class UniqueItemManager {
                     .randomOrNull()?.let { trimTemplates[it.type] }
             }
         }
+    }
 
-        fun ItemStack.isUniqueItem(): Boolean {
-            return itemMeta?.persistentDataContainer?.has(rarityKey) == true
+    // --- AI Description Logic ---
+    private object AiDescriptionService {
+        data class UniqueItemDescription(val itemDescription: String, val itemNames: List<String>)
+
+        fun generate(villager: Villager, item: ItemStack) {
+            val prompt = buildPrompt(villager, item)
+
+            plugin.providerManager.client.sendPromptWithSchema(prompt, UniqueItemDescription::class)?.let { data ->
+                plugin.server.scheduler.runTask(plugin, Runnable {
+                    applyDescription(villager, item, data)
+                })
+            } ?: plugin.logger.warning("Failed to generate unique item description for ${villager.customName}")
         }
 
-        fun ItemStack.getUniqueItemRarity(): UniqueItemRarity {
-            return itemMeta?.persistentDataContainer?.get(rarityKey, PersistentDataType.STRING)?.let {
-                UniqueItemRarity.valueOf(it)
-            } ?: UniqueItemRarity.NONE
+        private fun applyDescription(villager: Villager, item: ItemStack, data: UniqueItemDescription) {
+            val meta = item.itemMeta ?: return
+            val rarity = item.getUniqueItemRarity()
+
+            // Set Name
+            meta.setItemName((rarity.color + data.itemNames.random()).color())
+
+            // Set Lore
+            meta.lore = formatLore(data.itemDescription)
+            item.itemMeta = meta
+
+            // Give to villager
+            villager.addItemToQuillInventory(item)
         }
 
-        fun ItemStack.getUniqueItemAttributes(): String {
-            return itemMeta?.persistentDataContainer?.get(attributeKey, PersistentDataType.STRING) ?: ""
+        private fun formatLore(description: String): MutableList<String> {
+            val maxLength = gameplayConfig.uniqueItem.loreLineMaxLength
+            val words = description.split(" ")
+            val lore = mutableListOf<String>()
+            var line = "§7§o"
+
+            words.forEach { word ->
+                if (line.length + word.length + 1 > maxLength) {
+                    lore.add(line.trim())
+                    line = "§7§o"
+                }
+                line += "$word "
+            }
+            if (line != "§7§o") lore.add(line.trim())
+            return lore
+        }
+
+        private fun buildPrompt(villager: Villager, item: ItemStack): String {
+            val uniqueItemPrompt = """
+                # ROLE
+                You are a world-class RPG writer and myth-builder. Your task is to write a "believable" and "immersive" description for a unique item crafted by an NPC.
+
+                # FORBIDDEN
+                - DO NOT list stats or technical data (e.g., "minecraft:desert", "female", "level 2").
+                - DO NOT use the NPC's race description as a copy-paste.
+                - DO NOT write "This is a sword" or other obvious statements.
+                - Avoid meta-commentary.
+
+                # CONTEXT
+                - Setting: {setting} ({namingStyle} style)
+                - Creator: {npcName}, a {npcGender} {npcRace} {npcProfession} ({npcProfessionLevel})
+                - Creator's Personality: {npcPersonality}
+                - Location: {currentBiome} biome, settlement of {settlementName}
+                - Item Type: {itemType} ({itemRarity} quality)
+                - Enchanted Properties: {extraItemAttributes}
+
+                # GUIDELINES FOR DESCRIPTION
+                Write 1 to 2 atmospheric sentences. Focus on the "feel", "history", or "craftsmanship" of the item. 
+                - Use the creator's race and personality to influence the tone (e.g., an Orc's work is brutal/heavy, an Elf's is elegant/ethereal).
+                - Mention how the {currentBiome} environment influenced the materials used.
+                - If the item has "{extraItemAttributes}", subtly hint at these powers in the lore without naming the stats.
+
+                # GUIDELINES FOR NAMES
+                Provide 6 creative names:
+                - 1-2: Grounded and descriptive.
+                - 3-4: Poetic or legendary.
+                - 5: A single "cool" punchy word.
+                - 6: A name deeply tied to the {npcRace} heritage or {settlementName} history.
+
+                # JSON FORMAT
+                Output ONLY valid JSON.
+                {
+                  "itemDescription": "Immersive lore text here...",
+                  "itemNames": ["Name 1", "Name 2", "Name 3", "Name 4", "Name 5", "Name 6"]
+                }
+            """.trimIndent()
+
+            val placeholders = mapOf(
+                "npcPersonality" to villager.getPersonality().toString(),
+                "npcName" to (villager.customName ?: "an unknown artisan"),
+                "npcGender" to villager.gender.toString().lowercase(),
+                "npcRace" to villager.race.name,
+                "raceDescription" to villager.race.description,
+                "currentBiome" to villager.location.block.biome.key.key.replace("_", " "),
+                "npcProfession" to villager.profession.toString().lowercase(),
+                "npcProfessionLevel" to villager.professionLevelName,
+                "itemType" to item.type.toString().replace("_", " ").lowercase(),
+                "extraItemAttributes" to (item.getUniqueItemAttributes().ifEmpty { "exceptional balance" }),
+                "itemRarity" to (if (item.isUniqueItem()) item.getUniqueItemRarity().toString() else "COMMON"),
+                "settlementName" to (villager.settlement?.data?.settlementName ?: "the wild lands"),
+                "settlementLevel" to (villager.settlement?.size()?.toString() ?: "1"),
+                "setting" to plugin.providerManager.config.setting,
+                "namingStyle" to plugin.providerManager.config.namingStyle
+            )
+            return uniqueItemPrompt.replaceMap(placeholders)
         }
     }
+
+    // --- Enums ---
 
     enum class UniqueItemRarity(val extraPrice: Int) {
         NONE(0),
