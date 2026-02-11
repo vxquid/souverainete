@@ -35,33 +35,29 @@ class TranslateCommand : BaseCommand(), Listener {
     private val setupSessions = mutableMapOf<UUID, Session>()
 
     init {
-        // Register this class as a listener to intercept chat for setup wizard
         plugin.server.pluginManager.registerEvents(this, plugin)
-
-        // Auto-completions for provider types in /s provider
         plugin.commandManager.commandCompletions.registerCompletion("providers") {
             ProviderType.entries.map { it.name }
         }
     }
 
-    // --- Hardcoded Setup Messages ---
     private companion object {
         const val SETUP_PREFIX = "§6[AI Setup] "
         const val STEP_PREFIX = "§e[Step {n}/4] "
 
         const val MSG_START = "$SETUP_PREFIX§7Select your provider: §e/s provider <type>"
-        const val MSG_LIST = "§7Available: §fGROQ, GEMINI, OPENROUTER, DEEPSEEK, CHATGPT, ANYTHINGLLM"
+        const val MSG_LIST = "§7Available: §fGROQ (recommended), GEMINI, OPENROUTER, DEEPSEEK, CHATGPT, ANYTHINGLLM"
         const val MSG_INVALID = "§cInvalid provider type!"
         const val MSG_CANCELLED = "§c[AI Setup] Setup cancelled."
 
         const val STEP_1_PROMPT = "${STEP_PREFIX}§fPaste your §6API Key §fin chat. §7(It will be hidden)."
-        const val STEP_2_PROMPT = "${STEP_PREFIX}§fType the §6Language §ffor generation (e.g., English, Russian, Elvish):"
+        const val STEP_2_PROMPT = "${STEP_PREFIX}§fType the §6Language §ffor generation (e.g., English, Russian, Japanese, Elvish, Gibberish, Anything):"
         const val STEP_3_PROMPT = "${STEP_PREFIX}§fType the §6Thematic Setting §f(e.g., Medieval Fantasy, Sci-Fi):"
         const val STEP_4_PROMPT = "${STEP_PREFIX}§fType the §6Naming Style §f(e.g., Fantasy Names, Nordic):"
 
         const val MSG_LOCALIZING = "$SETUP_PREFIX§7Setup complete! Localizing §elanguage.yml §7to §b{lang}§7. Please wait..."
-        const val MSG_SUCCESS = "§a[AI Setup] Configuration complete and language localized! Provider: §6{provider}."
-        const val MSG_SUGGESTION = "$SETUP_PREFIX§7It's also recommended to translate the plugin content using §e/s translate§7."
+        const val MSG_SUCCESS = "§a[AI Setup] Configuration complete! Provider: §6{provider} §a| Model: §e{model}"
+        const val MSG_SUGGESTION = "$SETUP_PREFIX§7It's recommended to translate the plugin content using §e/s translate§7."
     }
 
     @Subcommand("setup")
@@ -80,18 +76,24 @@ class TranslateCommand : BaseCommand(), Listener {
             return
         }
 
-        val url = when (providerType) {
-            ProviderType.GEMINI -> "https://aistudio.google.com/app/apikey"
-            ProviderType.GROQ -> "https://console.groq.com/keys"
-            ProviderType.OPENROUTER -> "https://openrouter.ai/keys"
-            ProviderType.DEEPSEEK -> "https://platform.deepseek.com/api_keys"
-            ProviderType.CHATGPT -> "https://platform.openai.com/api-keys"
-            ProviderType.ANYTHINGLLM -> "Workspace API settings"
+        // Configuration and URL mapping
+        val (url, defaultModel) = when (providerType) {
+            ProviderType.GEMINI -> "https://aistudio.google.com/app/apikey" to "google/gemini-2.5-flash-lite"
+            ProviderType.GROQ -> "https://console.groq.com/keys" to "openai/gpt-oss-120b"
+            ProviderType.OPENROUTER -> "https://openrouter.ai/keys" to "deepseek/deepseek-r1-0528:free"
+            ProviderType.DEEPSEEK -> "https://platform.deepseek.com/api_keys" to "deepseek-chat"
+            ProviderType.CHATGPT -> "https://platform.openai.com/api-keys" to "gpt-4o-mini"
+            ProviderType.ANYTHINGLLM -> "Workspace API settings" to "gpt-3.5-turbo"
         }
+
+        // Automatically set the recommended model for the provider
+        plugin.providerManager.config.model = defaultModel
+        plugin.providerManager.config.providerType = providerType
 
         setupSessions[player.uniqueId] = Session(providerType, SetupStep.KEY)
 
         player.sendFormattedMessage("$SETUP_PREFIX§7Selected §e${providerType.name}§7. URL: §b$url")
+        player.sendFormattedMessage("$SETUP_PREFIX§7Recommended model §a$defaultModel §7has been automatically selected.")
         player.sendFormattedMessage(STEP_1_PROMPT.replace("{n}", "1"))
     }
 
@@ -114,7 +116,7 @@ class TranslateCommand : BaseCommand(), Listener {
         when (session.step) {
             SetupStep.KEY -> {
                 config.apiKey = input
-                config.providerType = session.type
+                // providerType is already set in onSelectProvider
                 session.step = SetupStep.LANGUAGE
                 player.sendFormattedMessage(STEP_2_PROMPT.replace("{n}", "2"))
             }
@@ -130,6 +132,8 @@ class TranslateCommand : BaseCommand(), Listener {
             }
             SetupStep.NAMING -> {
                 config.namingStyle = input
+
+                // Final save including the new model and API key
                 ConfigurationManager.save(plugin, config)
                 setupSessions.remove(player.uniqueId)
 
@@ -148,7 +152,9 @@ class TranslateCommand : BaseCommand(), Listener {
                         plugin.language = plugin.translationManager.getTranslated(languageFile)
 
                         plugin.server.scheduler.runTask(plugin, Runnable {
-                            player.sendFormattedMessage(MSG_SUCCESS.replace("{provider}", config.providerType.name))
+                            player.sendFormattedMessage(MSG_SUCCESS
+                                .replace("{provider}", config.providerType.name)
+                                .replace("{model}", config.model))
                             player.sendFormattedMessage(MSG_SUGGESTION)
                         })
                     })
