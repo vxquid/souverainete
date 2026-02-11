@@ -34,7 +34,7 @@ class ProviderManager : Listener {
         val apiKey = listOf(config.apiKey)
 
         // Return a DummyClient if the key is default or empty
-        if (config.apiKey == "YOUR_API_KEY" || config.apiKey.isBlank()) {
+        if (config.apiKey == "YOUR_API_KEY" || config.apiKey == "DISABLED" || config.apiKey.isBlank()) {
             return DummyClient()
         }
 
@@ -53,7 +53,7 @@ class ProviderManager : Listener {
     @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
         if (event.player.isOp && (config.apiKey == "YOUR_API_KEY" || config.apiKey.isBlank())) {
-            event.player.sendFormattedMessage("§cAI is not configured! Run §6/s setup §cto begin.")
+            event.player.sendFormattedMessage("§cSouveraineté is not configured! Run §6/s setup §cto configure AI or §6/s disable ai §cto run plugin in determenistic mode.")
         }
     }
 }
