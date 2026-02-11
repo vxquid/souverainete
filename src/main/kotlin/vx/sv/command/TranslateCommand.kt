@@ -65,6 +65,14 @@ class TranslateCommand : BaseCommand(), Listener {
         const val MSG_DISABLED_INFO_1 = "§7- Generative translation: §cOFF"
         const val MSG_DISABLED_INFO_2 = "§7- Dynamic Quests: §cOFF"
         const val MSG_DISABLED_INFO_3 = "§7- Content will be loaded strictly from local configuration files."
+
+        // Сообщения с просьбой о поддержке
+        const val MSG_DONATE_DIVIDER = "§8§m--------------------------------------------------"
+        const val MSG_DONATE_1 = "§7I have been developing §6Souveraineté §7solo for over §e1.5 years§7,"
+        const val MSG_DONATE_2 = "§7pouring hundreds of hours into creating this experience."
+        const val MSG_DONATE_3 = "§7If you enjoy the plugin, please consider §abuying the full version"
+        const val MSG_DONATE_4 = "§7or supporting the development via Ko-fi:"
+        const val MSG_DONATE_LINK = "§b➤ https://ko-fi.com/vxquid"
     }
 
     @Subcommand("setup")
@@ -86,18 +94,20 @@ class TranslateCommand : BaseCommand(), Listener {
         val config = plugin.providerManager.config
 
         // Устанавливаем маркер отключения в API Key
-        // Это предотвратит появление уведомлений о необходимости настройки при старте
         config.apiKey = "DISABLED"
 
         // Сохраняем конфигурацию
         ConfigurationManager.save(plugin, config)
 
-        // Информируем игрока
+        // Информируем игрока о режиме
         player.sendFormattedMessage(MSG_DISABLED_HEADER)
         player.sendFormattedMessage(MSG_DISABLED_MODE)
         player.sendFormattedMessage(MSG_DISABLED_INFO_1)
         player.sendFormattedMessage(MSG_DISABLED_INFO_2)
         player.sendFormattedMessage(MSG_DISABLED_INFO_3)
+
+        // Просьба о поддержке
+        sendSupportMessage(player)
     }
     // ---------------------------------------
 
@@ -150,7 +160,6 @@ class TranslateCommand : BaseCommand(), Listener {
         when (session.step) {
             SetupStep.KEY -> {
                 config.apiKey = input
-                // providerType is already set in onSelectProvider
                 session.step = SetupStep.LANGUAGE
                 player.sendFormattedMessage(STEP_2_PROMPT.replace("{n}", "2"))
             }
@@ -167,7 +176,7 @@ class TranslateCommand : BaseCommand(), Listener {
             SetupStep.NAMING -> {
                 config.namingStyle = input
 
-                // Final save including the new model and API key
+                // Final save
                 ConfigurationManager.save(plugin, config)
                 setupSessions.remove(player.uniqueId)
 
@@ -190,6 +199,9 @@ class TranslateCommand : BaseCommand(), Listener {
                                 .replace("{provider}", config.providerType.name)
                                 .replace("{model}", config.model))
                             player.sendFormattedMessage(MSG_SUGGESTION)
+
+                            // Сообщение о поддержке после успешной настройки
+                            sendSupportMessage(player)
                         })
                     })
                 })
@@ -197,7 +209,19 @@ class TranslateCommand : BaseCommand(), Listener {
         }
     }
 
-    // --- Bulk Translation Logic (stays localized because it's for established setups) ---
+    // Вспомогательная функция для вывода сообщения о донате
+    private fun sendSupportMessage(player: Player) {
+        player.sendFormattedMessage(" ")
+        player.sendFormattedMessage(MSG_DONATE_DIVIDER)
+        player.sendFormattedMessage(MSG_DONATE_1)
+        player.sendFormattedMessage(MSG_DONATE_2)
+        player.sendFormattedMessage(MSG_DONATE_3)
+        player.sendFormattedMessage(MSG_DONATE_4)
+        player.sendFormattedMessage(MSG_DONATE_LINK)
+        player.sendFormattedMessage(MSG_DONATE_DIVIDER)
+    }
+
+    // --- Bulk Translation Logic ---
 
     @Subcommand("translate")
     @CommandPermission("sv.admin.translate")
