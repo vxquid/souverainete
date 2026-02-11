@@ -12,56 +12,76 @@ class TranslationManager(
     private val client: AIClient,
     private val targetLanguage: String
 ) {
+    private val cacheDir = plugin.dataFolder.resolve("cache").apply { mkdirs() }
 
-    private val cacheDir = plugin.dataFolder.resolve("cache/translations").apply { mkdirs() }
+    enum class TranslationResult { SUCCESS, SKIPPED, QUOTA_LIMIT, ERROR }
 
     fun getTranslated(originalFile: File): YamlConfiguration {
-        // Step 1: Ensure the latest language.yml from JAR is saved/updated in data folder
         val resourceText = plugin.getResource("language.yml")?.let { InputStreamReader(it).readText() } ?: ""
         val resourceHash = computeHash(resourceText)
 
         if (originalFile.exists()) {
-            val savedText = originalFile.readText()
-            val savedHash = computeHash(savedText)
-            if (savedHash != resourceHash) {
-                plugin.logger.info("Updating language.yml from JAR (hash mismatch detected).")
-                plugin.saveResource("language.yml", true) // Overwrite if exists
-            }
-        } else {
-            plugin.logger.info("Saving default language.yml from JAR.")
-            plugin.saveResource("language.yml", false)
-        }
+            if (computeHash(originalFile.readText()) != resourceHash) plugin.saveResource("language.yml", true)
+        } else plugin.saveResource("language.yml", false)
 
-        // Now load the original config (updated if necessary)
-        val originalConfig = YamlConfiguration.loadConfiguration(originalFile)
-        val originalText = originalFile.readText()
-        val originalHash = computeHash(originalText)
-
-        val cacheFile = cacheDir.resolve("language_${targetLanguage}.yml")
-        val hashFile = cacheDir.resolve("language_${targetLanguage}_hash.txt")
+        val originalHash = computeHash(originalFile.readText())
+        val cacheFile = cacheDir.resolve("translations/language_${targetLanguage}.yml")
+        val hashFile = cacheDir.resolve("translations/language_${targetLanguage}_hash.txt")
 
         if (cacheFile.exists() && hashFile.exists() && hashFile.readText() == originalHash) {
-            plugin.logger.info("Loading translated language from cache (hash matches).")
             return YamlConfiguration.loadConfiguration(cacheFile)
         }
 
-        plugin.logger.info("Translating language.yml (cache invalid or hash mismatch).")
-        val translated = client.translate(originalConfig)
+        val translated = client.translate(YamlConfiguration.loadConfiguration(originalFile))
         if (translated != null) {
+            cacheFile.parentFile.mkdirs()
             translated.save(cacheFile)
             hashFile.writeText(originalHash)
-            plugin.logger.info("Translation saved to cache with new hash.")
             return translated
-        } else {
-            plugin.logger.warning("Translation failed, using original configuration.")
-            return originalConfig
+        }
+        return YamlConfiguration.loadConfiguration(originalFile)
+    }
+
+    fun translateFileWithState(sourceFile: File, relativePath: String): TranslationResult {
+        val cacheFile = cacheDir.resolve("$relativePath.yml")
+        val hashFile = cacheDir.resolve("${relativePath}_hash.txt")
+
+        if (!sourceFile.exists()) return TranslationResult.ERROR
+
+        val sourceText = sourceFile.readText()
+        val sourceHash = computeHash(sourceText)
+
+        if (cacheFile.exists() && hashFile.exists() && hashFile.readText() == sourceHash) {
+            return TranslationResult.SKIPPED
+        }
+
+        return try {
+            val sourceConfig = YamlConfiguration.loadConfiguration(sourceFile)
+            val translated = client.translate(sourceConfig)
+
+            if (translated != null) {
+                cacheFile.parentFile.mkdirs()
+                translated.save(cacheFile)
+                hashFile.writeText(sourceHash)
+                TranslationResult.SUCCESS
+            } else {
+                // Если клиент вернул null, обычно это лимит или ошибка провайдера
+                TranslationResult.QUOTA_LIMIT
+            }
+        } catch (e: Exception) {
+            val msg = e.message?.lowercase() ?: ""
+            if (msg.contains("429") || msg.contains("quota") || msg.contains("limit")) {
+                TranslationResult.QUOTA_LIMIT
+            } else {
+                plugin.logger.severe("Translation error for $relativePath: ${e.message}")
+                TranslationResult.ERROR
+            }
         }
     }
 
-    private fun computeHash(text: String): String {
+    fun computeHash(text: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
         val hashBytes = digest.digest(text.toByteArray())
         return hashBytes.joinToString("") { "%02x".format(it) }
     }
-
 }

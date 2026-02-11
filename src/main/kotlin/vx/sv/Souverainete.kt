@@ -17,6 +17,7 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import vx.sv.ai.ProviderManager
 import vx.sv.command.QuestCommand
+import vx.sv.command.TranslateCommand
 import vx.sv.config.lib.TranslationManager
 import vx.sv.gameplay.GameplayManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
@@ -121,6 +122,7 @@ class Souverainete : JavaPlugin(), Listener {
 
             // Command registration
             commandManager.registerCommand(QuestCommand())
+            commandManager.registerCommand(TranslateCommand())
         }
     }
 
@@ -149,7 +151,7 @@ class Souverainete : JavaPlugin(), Listener {
 
     companion object {
 
-        val premium: Boolean = false
+        val premium: Boolean = true
         lateinit var plugin: Souverainete
         lateinit var gson: Gson
 

@@ -136,6 +136,19 @@ command-message:
   verbose:
     activated: "§aVerbose mode activated."
     deactivated: "§cVerbose mode deactivated."
+  translate:
+    warning: "§7You are about to translate §e{count} §7race files. This will use multiple AI requests."
+    cooldown-info: "§7A §b10s §7delay is applied between files. Estimated time: §e{time} §7min."
+    resume-info: "§7Unfinished translating session found! Use §6/s translate resume §7to continue."
+    accept-prompt: "§7Type §6/s translate accept §7to start."
+    already-running: "§cTranslation is already in progress!"
+    quota-exceeded: "§eQuota exceeded! §7Waiting 60 seconds to reset..."
+    success: "§aAll race files have been translated and cached."
+    bossbar:
+      initializing: "§dAI: Initializing..."
+      processing: "§dAI: {race} - {file} ({progress}%)"
+      cooldown: "§eAI: Cooldown {time}s..."
+      quota-wait: "§cAI: Quota limit! Retrying in {time}s..."
 
 info-messages:
   premium-only: "This feature is only available in the premium version."

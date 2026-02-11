@@ -14,7 +14,6 @@ import org.bukkit.inventory.ItemStack
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.personality.PersonalityManager.Gender
 import java.io.File
-import java.util.logging.Level
 import kotlin.random.Random
 
 class RaceManager {
@@ -87,6 +86,15 @@ class RaceManager {
             val raceFolder = File(plugin.dataFolder, "races/$name")
 
             fun loadRaceResource(fileName: String): YamlConfiguration {
+                // Пытаемся найти переведенный файл в кэше
+                val cachePath = "races/$name/${fileName.substringBeforeLast(".")}"
+                val cacheFile = File(plugin.dataFolder, "cache/$cachePath.yml")
+
+                if (cacheFile.exists()) {
+                    return YamlConfiguration.loadConfiguration(cacheFile)
+                }
+
+                // Стандартная логика загрузки из ресурсов плагина или папки
                 val file = File(raceFolder, fileName)
                 val resourcePath = "races/$name/$fileName"
 
@@ -94,7 +102,7 @@ class RaceManager {
                     if (plugin.getResource(resourcePath) != null) {
                         plugin.saveResource(resourcePath, false)
                     } else {
-                        plugin.logger.log(Level.WARNING, "Resource '$resourcePath' not found in JAR. Creating empty file.")
+                        plugin.logger.log(java.util.logging.Level.WARNING, "Resource '$resourcePath' not found. Creating empty.")
                         file.parentFile.mkdirs()
                         file.createNewFile()
                     }
