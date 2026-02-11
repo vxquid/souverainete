@@ -50,7 +50,7 @@ class TranslateCommand : BaseCommand(), Listener {
         const val STEP_PREFIX = "§e[Step {n}/4] "
 
         const val MSG_START = "$SETUP_PREFIX§7Select your provider: §e/s provider <type>"
-        const val MSG_LIST = "§7Available: §fGROQ (recommended), GEMINI, OPENROUTER, DEEPSEEK, CHATGPT, ANYTHINGLLM"
+        const val MSG_LIST = "§7Available: §fGROQ, GEMINI, OPENROUTER, DEEPSEEK, CHATGPT, ANYTHINGLLM"
         const val MSG_INVALID = "§cInvalid provider type!"
         const val MSG_CANCELLED = "§c[AI Setup] Setup cancelled."
 
