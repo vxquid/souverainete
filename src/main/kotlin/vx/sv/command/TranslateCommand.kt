@@ -1,31 +1,167 @@
 package vx.sv.command
 
 import co.aikar.commands.BaseCommand
-import co.aikar.commands.annotation.CommandAlias
-import co.aikar.commands.annotation.CommandPermission
-import co.aikar.commands.annotation.Subcommand
+import co.aikar.commands.annotation.*
 import org.bukkit.Bukkit
 import org.bukkit.boss.BarColor
 import org.bukkit.boss.BarStyle
 import org.bukkit.boss.BossBar
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.Player
+import org.bukkit.event.EventHandler
+import org.bukkit.event.EventPriority
+import org.bukkit.event.Listener
+import org.bukkit.event.player.AsyncPlayerChatEvent
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.sendFormattedMessage
+import vx.sv.config.ProviderConfiguration.ProviderType
+import vx.sv.config.lib.ConfigurationManager
+import vx.sv.config.lib.TranslationManager
 import vx.sv.config.lib.TranslationManager.TranslationResult
 import java.io.File
+import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 
 @CommandAlias("s|sv")
-class TranslateCommand : BaseCommand() {
+class TranslateCommand : BaseCommand(), Listener {
 
     private val isRunning = AtomicBoolean(false)
     private val queueFile = File(plugin.dataFolder, "cache/queue.yml")
     private var bossBar: BossBar? = null
 
+    private enum class SetupStep { KEY, LANGUAGE, SETTING, NAMING }
+    private data class Session(val type: ProviderType, var step: SetupStep)
+
+    private val setupSessions = mutableMapOf<UUID, Session>()
+
+    init {
+        // Register this class as a listener to intercept chat for setup wizard
+        plugin.server.pluginManager.registerEvents(this, plugin)
+
+        // Auto-completions for provider types in /s provider
+        plugin.commandManager.commandCompletions.registerCompletion("providers") {
+            ProviderType.entries.map { it.name }
+        }
+    }
+
+    // --- Hardcoded Setup Messages ---
+    private companion object {
+        const val SETUP_PREFIX = "§6[AI Setup] "
+        const val STEP_PREFIX = "§e[Step {n}/4] "
+
+        const val MSG_START = "$SETUP_PREFIX§7Select your provider: §e/s provider <type>"
+        const val MSG_LIST = "§7Available: §fGROQ (recommended), GEMINI, OPENROUTER, DEEPSEEK, CHATGPT, ANYTHINGLLM"
+        const val MSG_INVALID = "§cInvalid provider type!"
+        const val MSG_CANCELLED = "§c[AI Setup] Setup cancelled."
+
+        const val STEP_1_PROMPT = "${STEP_PREFIX}§fPaste your §6API Key §fin chat. §7(It will be hidden)."
+        const val STEP_2_PROMPT = "${STEP_PREFIX}§fType the §6Language §ffor generation (e.g., English, Russian, Elvish):"
+        const val STEP_3_PROMPT = "${STEP_PREFIX}§fType the §6Thematic Setting §f(e.g., Medieval Fantasy, Sci-Fi):"
+        const val STEP_4_PROMPT = "${STEP_PREFIX}§fType the §6Naming Style §f(e.g., Fantasy Names, Nordic):"
+
+        const val MSG_LOCALIZING = "$SETUP_PREFIX§7Setup complete! Localizing §elanguage.yml §7to §b{lang}§7. Please wait..."
+        const val MSG_SUCCESS = "§a[AI Setup] Configuration complete and language localized! Provider: §6{provider}."
+        const val MSG_SUGGESTION = "$SETUP_PREFIX§7It's also recommended to translate the plugin content using §e/s translate§7."
+    }
+
+    @Subcommand("setup")
+    @CommandPermission("sv.admin.setup")
+    fun onSetup(player: Player) {
+        player.sendFormattedMessage(MSG_START)
+        player.sendFormattedMessage(MSG_LIST)
+    }
+
+    @Subcommand("provider")
+    @CommandPermission("sv.admin.setup")
+    @CommandCompletion("@providers")
+    fun onSelectProvider(player: Player, @Values("@providers") type: String) {
+        val providerType = try { ProviderType.valueOf(type.uppercase()) } catch (e: Exception) {
+            player.sendFormattedMessage(MSG_INVALID)
+            return
+        }
+
+        val url = when (providerType) {
+            ProviderType.GEMINI -> "https://aistudio.google.com/app/apikey"
+            ProviderType.GROQ -> "https://console.groq.com/keys"
+            ProviderType.OPENROUTER -> "https://openrouter.ai/keys"
+            ProviderType.DEEPSEEK -> "https://platform.deepseek.com/api_keys"
+            ProviderType.CHATGPT -> "https://platform.openai.com/api-keys"
+            ProviderType.ANYTHINGLLM -> "Workspace API settings"
+        }
+
+        setupSessions[player.uniqueId] = Session(providerType, SetupStep.KEY)
+
+        player.sendFormattedMessage("$SETUP_PREFIX§7Selected §e${providerType.name}§7. URL: §b$url")
+        player.sendFormattedMessage(STEP_1_PROMPT.replace("{n}", "1"))
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    fun onChatInterceptor(event: AsyncPlayerChatEvent) {
+        val player = event.player
+        val session = setupSessions[player.uniqueId] ?: return
+
+        event.isCancelled = true
+        val input = event.message.trim()
+
+        if (input.equals("cancel", true)) {
+            setupSessions.remove(player.uniqueId)
+            player.sendFormattedMessage(MSG_CANCELLED)
+            return
+        }
+
+        val config = plugin.providerManager.config
+
+        when (session.step) {
+            SetupStep.KEY -> {
+                config.apiKey = input
+                config.providerType = session.type
+                session.step = SetupStep.LANGUAGE
+                player.sendFormattedMessage(STEP_2_PROMPT.replace("{n}", "2"))
+            }
+            SetupStep.LANGUAGE -> {
+                config.language = input
+                session.step = SetupStep.SETTING
+                player.sendFormattedMessage(STEP_3_PROMPT.replace("{n}", "3"))
+            }
+            SetupStep.SETTING -> {
+                config.setting = input
+                session.step = SetupStep.NAMING
+                player.sendFormattedMessage(STEP_4_PROMPT.replace("{n}", "4"))
+            }
+            SetupStep.NAMING -> {
+                config.namingStyle = input
+                ConfigurationManager.save(plugin, config)
+                setupSessions.remove(player.uniqueId)
+
+                plugin.server.scheduler.runTask(plugin, Runnable {
+                    plugin.providerManager.load()
+                    plugin.translationManager = TranslationManager(
+                        plugin,
+                        plugin.providerManager.client,
+                        plugin.providerManager.config.language
+                    )
+
+                    player.sendFormattedMessage(MSG_LOCALIZING.replace("{lang}", config.language))
+
+                    plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+                        val languageFile = File(plugin.dataFolder, "language.yml")
+                        plugin.language = plugin.translationManager.getTranslated(languageFile)
+
+                        plugin.server.scheduler.runTask(plugin, Runnable {
+                            player.sendFormattedMessage(MSG_SUCCESS.replace("{provider}", config.providerType.name))
+                            player.sendFormattedMessage(MSG_SUGGESTION)
+                        })
+                    })
+                })
+            }
+        }
+    }
+
+    // --- Bulk Translation Logic (stays localized because it's for established setups) ---
+
     @Subcommand("translate")
     @CommandPermission("sv.admin.translate")
-    fun onTranslate(player: Player) {
+    fun onTranslateInfo(player: Player) {
         if (isRunning.get()) {
             player.sendFormattedMessage(plugin.language.getString("command-message.translate.already-running")!!)
             return
@@ -37,10 +173,9 @@ class TranslateCommand : BaseCommand() {
 
         val races = plugin.gameplayManager.humanoidManager.raceManager.races.getKeys(false)
         val fileCount = races.size * 2
-        val estTime = (fileCount * 12) / 60 // ~12 сек на файл
 
-        player.sendFormattedMessage(plugin.language.getString("command-message.translate.warning")!!.replace("{count}", fileCount.toString()))
-        player.sendFormattedMessage(plugin.language.getString("command-message.translate.cooldown-info")!!.replace("{time}", estTime.toString()))
+        player.sendFormattedMessage(plugin.language.getString("command-message.translate.warning")!!
+            .replace("{count}", fileCount.toString()))
         player.sendFormattedMessage(plugin.language.getString("command-message.translate.accept-prompt")!!)
     }
 
@@ -49,7 +184,6 @@ class TranslateCommand : BaseCommand() {
     fun onAccept(player: Player) {
         if (isRunning.get()) return
 
-        // Создаем очередь, если её нет
         if (!queueFile.exists()) {
             val config = YamlConfiguration()
             val races = plugin.gameplayManager.humanoidManager.raceManager.races.getKeys(false)
@@ -64,15 +198,15 @@ class TranslateCommand : BaseCommand() {
         }
 
         isRunning.set(true)
-        startWorker(player)
+        startTranslationWorker(player)
     }
 
-    private fun startWorker(admin: Player) {
+    private fun startTranslationWorker(admin: Player) {
         val config = YamlConfiguration.loadConfiguration(queueFile)
         val total = config.getInt("total", 1)
 
         bossBar = Bukkit.createBossBar(
-            plugin.language.getString("command-message.translate.bossbar.initializing")!!,
+            plugin.language.getString("command-message.translate.bossbar.initializing", "§dAI: Initializing...")!!,
             BarColor.PURPLE, BarStyle.SOLID
         ).apply { addPlayer(admin) }
 
@@ -101,7 +235,7 @@ class TranslateCommand : BaseCommand() {
                         TranslationResult.SUCCESS -> {
                             pending.removeAt(0)
                             saveQueue(pending)
-                            doCooldown(10, progress)
+                            handleCooldown(10, progress)
                         }
                         TranslationResult.SKIPPED -> {
                             pending.removeAt(0)
@@ -109,12 +243,12 @@ class TranslateCommand : BaseCommand() {
                         }
                         TranslationResult.QUOTA_LIMIT -> {
                             for (i in 60 downTo 1) {
-                                updateBar(plugin.language.getString("command-message.translate.bossbar.quota-wait")!!.replace("{time}", i.toString()), progress.toDouble() / 100)
+                                updateBar(plugin.language.getString("command-message.translate.bossbar.quota-wait")!!
+                                    .replace("{time}", i.toString()), progress.toDouble() / 100)
                                 Thread.sleep(1000)
                             }
                         }
                         TranslationResult.ERROR -> {
-                            // Пропускаем проблемный файл после лога или пробуем позже
                             pending.removeAt(0)
                             saveQueue(pending)
                             Thread.sleep(2000)
@@ -122,7 +256,6 @@ class TranslateCommand : BaseCommand() {
                     }
                 }
 
-                // Завершение
                 plugin.server.scheduler.runTask(plugin, Runnable {
                     bossBar?.removeAll()
                     queueFile.delete()
@@ -133,14 +266,15 @@ class TranslateCommand : BaseCommand() {
 
             } catch (e: Exception) {
                 isRunning.set(false)
-                plugin.logger.severe("Worker crashed: ${e.message}")
+                plugin.logger.severe("Worker failure: ${e.message}")
             }
         })
     }
 
-    private fun doCooldown(seconds: Int, progress: Int) {
+    private fun handleCooldown(seconds: Int, progress: Int) {
         for (i in seconds downTo 1) {
-            updateBar(plugin.language.getString("command-message.translate.bossbar.cooldown")!!.replace("{time}", i.toString()), progress.toDouble() / 100)
+            updateBar(plugin.language.getString("command-message.translate.bossbar.cooldown")!!
+                .replace("{time}", i.toString()), progress.toDouble() / 100)
             Thread.sleep(1000)
         }
     }
@@ -157,5 +291,4 @@ class TranslateCommand : BaseCommand() {
             bossBar?.progress = progress.coerceIn(0.0, 1.0)
         })
     }
-
 }

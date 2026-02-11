@@ -16,6 +16,9 @@ class TranslationManager(
 
     enum class TranslationResult { SUCCESS, SKIPPED, QUOTA_LIMIT, ERROR }
 
+    /**
+     * Translates language.yml. Used during plugin startup.
+     */
     fun getTranslated(originalFile: File): YamlConfiguration {
         val resourceText = plugin.getResource("language.yml")?.let { InputStreamReader(it).readText() } ?: ""
         val resourceHash = computeHash(resourceText)
@@ -42,6 +45,9 @@ class TranslationManager(
         return YamlConfiguration.loadConfiguration(originalFile)
     }
 
+    /**
+     * Translates a specific file (names.yml or phrases.yml) with state tracking.
+     */
     fun translateFileWithState(sourceFile: File, relativePath: String): TranslationResult {
         val cacheFile = cacheDir.resolve("$relativePath.yml")
         val hashFile = cacheDir.resolve("${relativePath}_hash.txt")
@@ -51,6 +57,7 @@ class TranslationManager(
         val sourceText = sourceFile.readText()
         val sourceHash = computeHash(sourceText)
 
+        // Skip if hash matches (already translated)
         if (cacheFile.exists() && hashFile.exists() && hashFile.readText() == sourceHash) {
             return TranslationResult.SKIPPED
         }
@@ -65,7 +72,6 @@ class TranslationManager(
                 hashFile.writeText(sourceHash)
                 TranslationResult.SUCCESS
             } else {
-                // Если клиент вернул null, обычно это лимит или ошибка провайдера
                 TranslationResult.QUOTA_LIMIT
             }
         } catch (e: Exception) {

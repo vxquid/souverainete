@@ -77,7 +77,7 @@ quest:
   description-missing: "Quest description missing."
 
 party:
-  member: "§b{playerName} Party Member"
+  member: "§b{playerName}'s Group Member"
   full: "Your party is full!"
   dismiss-response: "Farewell, traveler."
   order:
@@ -131,11 +131,6 @@ npc-state:
 
 # Command output messages.
 command-message:
-  dialogue-format-changed: "Dialogue format has been set to §6{dialogueFormat}"
-  player-fame-changed: "§e{playerName}§7's fame has been changed to §3{newFame}"
-  verbose:
-    activated: "§aVerbose mode activated."
-    deactivated: "§cVerbose mode deactivated."
   translate:
     warning: "§7You are about to translate §e{count} §7race files. This will use multiple AI requests."
     cooldown-info: "§7A §b10s §7delay is applied between files. Estimated time: §e{time} §7min."

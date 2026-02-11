@@ -84,6 +84,8 @@ class ChatGPTClient(
             **ORIGINAL LANGUAGE:** English
             **TARGET LANGUAGE:** $lang
             
+            CRITICAL: IMPORTANT: Your response must be a valid YAML. ALWAYS wrap all string values in double quotes. Example: key: "value with : colon". Do not include any text before or after the YAML block.
+            
             **ACTIONS REQUIRED:**
             1. **TRANSLATE ALL** visible string values from English to **$lang**. Translation is MANDATORY.
             2. **PRESERVE ALL YAML KEYS** exactly as they appear. They are never translated.

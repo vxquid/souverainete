@@ -11,39 +11,49 @@ import vx.sv.config.ProviderConfiguration
 import vx.sv.config.ProviderConfiguration.ProviderType
 import vx.sv.config.lib.ConfigurationManager
 
-class ProviderManager {
+class ProviderManager : Listener {
 
-    val config: ProviderConfiguration = ConfigurationManager.load(plugin, ProviderConfiguration::class.java)
+    lateinit var config: ProviderConfiguration
+    lateinit var client: AIClient
 
-    val client: AIClient = run {
+    init {
+        load()
+        plugin.server.pluginManager.registerEvents(this, plugin)
+    }
 
+    /**
+     * Loads the configuration from disk and initializes the AI Client.
+     * Can be called multiple times to hot-reload settings.
+     */
+    fun load() {
+        this.config = ConfigurationManager.load(plugin, ProviderConfiguration::class.java)
+        this.client = createClient()
+    }
+
+    private fun createClient(): AIClient {
         val apiKey = listOf(config.apiKey)
 
-        // Check if the API key is set to the default value
-        if (config.apiKey == "YOUR_API_KEY") {
-            plugin.logger.warning("Souverainete can generate content using AI. For full plugin functionality, you must configure provider.yml.")
-
-            plugin.server.pluginManager.registerEvents(object : Listener {
-                @EventHandler
-                fun onPlayerJoin(event: PlayerJoinEvent) {
-                    if (event.player.isOp) {
-                        event.player.sendFormattedMessage("AI provider is not configured! Please check provider.yml to enable AI features.")
-                    }
-                }
-            }, plugin)
-
-            return@run DummyClient()
+        // Return a DummyClient if the key is default or empty
+        if (config.apiKey == "YOUR_API_KEY" || config.apiKey.isBlank()) {
+            return DummyClient()
         }
 
-        plugin.logger.info("Selected AI provider is ${config.providerType}.")
+        plugin.logger.info("Initializing AI provider: ${config.providerType}")
 
-        when (config.providerType) {
-            ProviderType.GEMINI -> GeminiClient(keyManager = GeminiClient.KeyManager(apiKey), config = config)
+        return when (config.providerType) {
+            ProviderType.GEMINI -> GeminiClient(GeminiClient.KeyManager(apiKey), config)
             ProviderType.OPENROUTER -> OpenRouterClient(apiKey[0], config = config)
-            ProviderType.GROQ -> GroqClient(keyManager = GroqClient.KeyManager(apiKey), config)
+            ProviderType.GROQ -> GroqClient(GroqClient.KeyManager(apiKey), config)
             ProviderType.DEEPSEEK -> DeepSeekClient(DeepSeekClient.KeyManager(apiKey), config)
             ProviderType.CHATGPT -> ChatGPTClient(ChatGPTClient.KeyManager(apiKey), config)
             ProviderType.ANYTHINGLLM -> AnythingLLMClient(AnythingLLMClient.KeyManager(apiKey), config)
+        }
+    }
+
+    @EventHandler
+    fun onPlayerJoin(event: PlayerJoinEvent) {
+        if (event.player.isOp && (config.apiKey == "YOUR_API_KEY" || config.apiKey.isBlank())) {
+            event.player.sendFormattedMessage("§cAI is not configured! Run §6/s setup §cto begin.")
         }
     }
 }
