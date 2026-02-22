@@ -5,13 +5,13 @@ import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.format.NamedTextColor
 import org.bukkit.*
 import org.bukkit.attribute.Attribute
-import org.bukkit.block.data.BlockData
 import org.bukkit.entity.*
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.settlement
 import kotlin.math.cos
@@ -21,37 +21,86 @@ import kotlin.random.Random
 class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
 
     private val viewingPlayers = mutableSetOf<Player>()
+
+    // Primary Boss Bar: Attacker vs Defender
     private var bossBar: BossBar = createBossBar()
+
+    // Secondary Boss Bar: Alive Defenders
+    private var defendersBossBar: BossBar = createDefendersBossBar()
 
     // Timer Logic
     private var lastWaveStartTick: Long = data.activeTicks
+    private var maxDefendersTracked: Int = 1
 
-    // Configurable thresholds (in ticks)
-    private val glowThreshold = 1800L // 1.5 minutes
-    private val killThreshold = 3600L // 3.0 minutes
-    private val broadcastRadius = 1000.0
+    // Chunk Loading Flag
+    private var chunksLocked: Boolean = false
 
-    private val allyReputationThreshold = 200
+    // ==========================================
+    // === CONFIGURATION & STRINGS            ===
+    // ==========================================
 
-    // Dummy block data for blood particles
-    private val bloodBlockData: BlockData = Material.REDSTONE_BLOCK.createBlockData()
+    private val raidConfig get() = plugin.gameplayManager.config.raid
+
+    // Thresholds & Ranges
+    private val glowThreshold get() = raidConfig.glowThreshold
+    private val killThreshold get() = raidConfig.killThreshold
+    private val broadcastRadius get() = raidConfig.broadcastRadius
+    private val hornRadius get() = raidConfig.hornRadius
+
+    // Chunk Loading Radius (8 chunks = 128 blocks radius)
+    private val forceLoadRadius = 8
+
+    // Reputation Balancing
+    private val allyReputationThreshold get() = raidConfig.allyReputationThreshold
+    private val repGainPerKill get() = raidConfig.repGainPerKill
+
+    // UI Strings
+    private val msgRaidInit get() = plugin.language.getString("raid.bossbar.init", "Raid Initialization...") ?: "Raid Initialization..."
+    private val msgDefendersAlive get() = plugin.language.getString("raid.bossbar.defenders-alive", "Defenders Alive: {count}") ?: "Defenders Alive: {count}"
+    private val msgTitlePrimary get() = plugin.language.getString("raid.bossbar.title", "{attacker} ⚔ {defender} (Wave {wave}/{total})") ?: "{attacker} ⚔ {defender} (Wave {wave}/{total})"
+
+    // Victory/Loss End Titles
+    private val msgVictoryPrimary get() = plugin.language.getString("raid.bossbar.victory-primary", "Attackers defeated") ?: "Attackers defeated"
+    private val msgVictorySecondary get() = plugin.language.getString("raid.bossbar.victory-secondary", "Settlement protected") ?: "Settlement protected"
+
+    private val msgLossPrimary get() = plugin.language.getString("raid.bossbar.loss-primary", "Settlement conquered") ?: "Settlement conquered"
+    private val msgLossSecondary get() = plugin.language.getString("raid.bossbar.loss-secondary", "Defenders eliminated") ?: "Defenders eliminated"
+
+    private val msgStoppedPrimary get() = plugin.language.getString("raid.bossbar.stopped-primary", "Raid stopped") ?: "Raid stopped"
+    private val msgStoppedSecondary get() = plugin.language.getString("raid.bossbar.stopped-secondary", "Combat ceased") ?: "Combat ceased"
+
+    // Chat Broadcasts & Entities
+    private val msgRaiderName get() = plugin.language.getString("raid.entity.raider-name", "§cRaider ({attacker})") ?: "§cRaider ({attacker})"
+    private val msgWaveStarted get() = plugin.language.getString("raid.chat.wave-started", "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!") ?: "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!"
+    private val msgReinforcements get() = plugin.language.getString("raid.chat.reinforcements", "§c⚔ Reinforcements have arrived for §6{attacker}§c!") ?: "§c⚔ Reinforcements have arrived for §6{attacker}§c!"
+    private val msgVictoryChat get() = plugin.language.getString("raid.chat.victory", "§a⚔ The raid on §6{defender} §ahas been repelled! Victory!") ?: "§a⚔ The raid on §6{defender} §ahas been repelled! Victory!"
+    private val msgLossChat get() = plugin.language.getString("raid.chat.loss", "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c.") ?: "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c."
+    private val msgLossWipedChat get() = plugin.language.getString("raid.chat.loss-wiped", "§4☠ §cThe settlement {defender} has been wiped out!") ?: "§4☠ §cThe settlement {defender} has been wiped out!"
+    private val msgRepIncrease get() = plugin.language.getString("settlement-reputation.increase", "§a+ {amount} reputation with {entity}.") ?: "§a+ {amount} reputation with {entity}."
+
+    // ==========================================
 
     val isActive: Boolean
         get() = data.status == Settlement.RaidStatus.ONGOING
 
     private fun createBossBar(): BossBar {
-        val title = Component.text("Raid - Wave ${data.currentWave} / ${data.totalWaves}", NamedTextColor.RED)
-        val progress = if (data.totalRaidersInWave > 0) {
-            (data.aliveRaiders.size.toFloat() / data.totalRaidersInWave.toFloat()).coerceIn(0.0f, 1.0f)
-        } else {
-            1.0f
-        }
-        return BossBar.bossBar(title, progress, BossBar.Color.RED, BossBar.Overlay.NOTCHED_10)
+        val title = Component.text(msgRaidInit, NamedTextColor.RED)
+        return BossBar.bossBar(title, 1.0f, BossBar.Color.RED, BossBar.Overlay.NOTCHED_10)
+    }
+
+    private fun createDefendersBossBar(): BossBar {
+        val title = Component.text(msgDefendersAlive.replace("{count}", "?"), NamedTextColor.YELLOW)
+        return BossBar.bossBar(title, 1.0f, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS)
     }
 
     fun tick() {
         if (!isActive) return
         data.activeTicks++
+
+        // Ensure chunks are force-loaded for simulation
+        if (!chunksLocked) {
+            manageChunkLoading(true)
+        }
 
         val attacker = SettlementManager.getById(data.attackerId)
         if (attacker == null) {
@@ -59,10 +108,11 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
             return
         }
 
-        updateLivingRaiders()
+        processDeadRaiders()
+        updateBossBars(attacker)
         updateBossBarViewers()
         updateRaidAI()
-        checkStuckState()
+        checkStuckState(attacker)
 
         if (defender.villagers.all { it.isDead }) {
             finishRaid(Settlement.RaidStatus.LOSS)
@@ -78,7 +128,24 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         }
     }
 
-    private fun checkStuckState() {
+    /**
+     * Force loads or unloads chunks around the settlement center.
+     */
+    private fun manageChunkLoading(load: Boolean) {
+        val centerChunk = defender.data.center.chunk
+        val world = defender.world
+
+        for (x in -forceLoadRadius..forceLoadRadius) {
+            for (z in -forceLoadRadius..forceLoadRadius) {
+                val cx = centerChunk.x + x
+                val cz = centerChunk.z + z
+                world.getChunkAt(cx, cz).isForceLoaded = load
+            }
+        }
+        chunksLocked = load
+    }
+
+    private fun checkStuckState(attacker: Settlement) {
         val waveDuration = data.activeTicks - lastWaveStartTick
 
         if (waveDuration > glowThreshold && data.aliveRaiders.size <= 3) {
@@ -87,10 +154,57 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
             }
         }
 
-        if (waveDuration > killThreshold) {
-            data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) as? LivingEntity }.forEach {
-                it.damage(100.0) // Force kill
+        if (waveDuration > killThreshold && data.aliveRaiders.isNotEmpty()) {
+            val center = defender.data.center
+            val world = center.world ?: return
+            val stuckCount = data.aliveRaiders.size
+
+            data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) }.forEach {
+                it.remove()
             }
+            data.aliveRaiders.clear()
+
+            world.getNearbyPlayers(center, hornRadius).forEach { player ->
+                player.playSound(center, Sound.EVENT_RAID_HORN, 64.0f, 1.0f)
+            }
+
+            val message = msgReinforcements.replace("{attacker}", attacker.data.settlementName)
+            world.getNearbyPlayers(center, broadcastRadius).forEach { player ->
+                player.sendMessage(message)
+            }
+
+            val attackerRace = SettlementManager.getDominantRace(attacker)
+            val entityType = attackerRace.targetEntityType.get() ?: EntityType.VILLAGER
+
+            for (i in 0 until stuckCount) {
+                val angle = Random.nextDouble(0.0, 2 * Math.PI)
+                val distance = Random.nextDouble(3.0, 7.0)
+                val spawnX = center.x + cos(angle) * distance
+                val spawnZ = center.z + sin(angle) * distance
+
+                val highestY = world.getHighestBlockYAt(spawnX.toInt(), spawnZ.toInt()).toDouble()
+                val spawnLocation = Location(world, spawnX, highestY + 1.0, spawnZ)
+
+                world.spawnParticle(Particle.SMOKE, spawnLocation.clone().add(0.0, 1.0, 0.0), 20, 0.5, 1.0, 0.5, 0.05)
+                world.spawnParticle(Particle.LAVA, spawnLocation, 5, 0.2, 0.2, 0.2)
+
+                val raider = world.spawnEntity(spawnLocation, entityType) as? LivingEntity ?: continue
+
+                if (raider is Villager) {
+                    raider.villagerType = attackerRace.targetVillagerType
+                    raider.profession = Villager.Profession.NITWIT
+                }
+
+                raider.settlement = attacker
+                raider.customName = msgRaiderName.replace("{attacker}", attacker.data.settlementName)
+                raider.isCustomNameVisible = true
+
+                equipRaider(raider, attacker)
+
+                data.aliveRaiders.add(raider.uniqueId)
+            }
+
+            lastWaveStartTick = data.activeTicks
         }
     }
 
@@ -115,20 +229,13 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                     currentTarget = potentialTargets.random()
                     performAttack(raider, currentTarget)
                 }
-            } else {
-                // If already has target, randomly play attack effects during combat ticks
-                if (raider.location.distanceSquared(currentTarget!!.location) < 9.0) { // < 3 blocks
-                    performCombatEffects(raider, currentTarget)
-                }
             }
 
-            // Movement Logic (Slower Speed: 0.6)
             if (currentTarget != null) {
                 if (raider.location.distance(currentTarget.location) > 2.5) {
                     raider.pathfinder.moveTo(currentTarget, 0.6)
                 }
             } else {
-                // Storm Center
                 if (raider.location.distance(defender.data.center) > 5.0) {
                     raider.pathfinder.moveTo(defender.data.center, 0.6)
                 }
@@ -145,13 +252,8 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                     currentTarget = aliveRaidersList.minByOrNull { it.location.distanceSquared(def.location) }
                     performAttack(def, currentTarget)
                 }
-            } else {
-                if (def.location.distanceSquared(currentTarget!!.location) < 9.0) {
-                    performCombatEffects(def, currentTarget)
-                }
             }
 
-            // Movement Logic (Slower Speed: 0.55 - slightly slower than raiders to allow kiting)
             if (currentTarget != null && aliveRaidersList.contains(currentTarget)) {
                 if (def.location.distance(currentTarget.location) > 2.5) {
                     def.pathfinder.moveTo(currentTarget, 0.55)
@@ -181,40 +283,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         }
     }
 
-    /**
-     * Simulates "Juicy" combat sounds and particles.
-     */
-    private fun performCombatEffects(attacker: LivingEntity, target: LivingEntity) {
-        // Limit frequency (20% chance per tick close to target)
-        if (Random.nextInt(100) > 20) return
-
-        val world = attacker.world
-        val loc = target.location.add(0.0, 1.0, 0.0)
-        val hasArmor = target.equipment?.chestplate?.type?.isAir == false
-
-        // 1. Audio Layering
-
-        // Base heavy hit (Thud)
-        world.playSound(loc, Sound.ENTITY_PLAYER_ATTACK_STRONG, 0.8f, 1.0f)
-
-        if (hasArmor) {
-            // Metal Clank (High pitch iron door or anvil)
-            world.playSound(loc, Sound.ENTITY_ZOMBIE_ATTACK_IRON_DOOR, 0.6f, 1.5f)
-            // Spark particles
-            world.spawnParticle(Particle.CRIT, loc, 3, 0.2, 0.2, 0.2, 0.1)
-        } else {
-            // Flesh rip (Wet sound)
-            world.playSound(loc, Sound.BLOCK_HONEY_BLOCK_BREAK, 0.7f, 1.2f)
-            // Blood particles
-            world.spawnParticle(Particle.BLOCK_CRUMBLE, loc, 10, 0.2, 0.2, 0.2, bloodBlockData)
-        }
-
-        // Occasional Crit sound for emphasis
-        if (Random.nextBoolean()) {
-            world.playSound(loc, Sound.ENTITY_PLAYER_ATTACK_CRIT, 1.0f, 1.0f)
-        }
-    }
-
     private fun spawnNextWave(attacker: Settlement) {
         data.currentWave++
         lastWaveStartTick = data.activeTicks
@@ -225,20 +293,17 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         val center = defender.data.center
         val world = center.world ?: return
 
-        // 1. Broadcast Message (No Horn Sound)
-        val message = plugin.language.getString("raid.wave-started", "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!")
-            ?.replace("{attacker}", attacker.data.settlementName)
-            ?.replace("{defender}", defender.data.settlementName)
+        val message = msgWaveStarted
+            .replace("{attacker}", attacker.data.settlementName)
+            .replace("{defender}", defender.data.settlementName)
 
-        if (message != null) {
-            world.getNearbyPlayers(center, broadcastRadius).forEach { player ->
-                player.sendMessage(message)
-            }
+        // Local broadcast for wave start
+        world.getNearbyPlayers(center, broadcastRadius).forEach { player ->
+            player.sendMessage(message)
         }
 
-        // Music only on first wave
-        if (data.currentWave == 1) {
-            playRandomMusicDisc(center)
+        world.getNearbyPlayers(center, hornRadius).forEach { player ->
+            player.playSound(center, Sound.EVENT_RAID_HORN, 64.0f, 1.0f)
         }
 
         buffDefenders()
@@ -275,7 +340,7 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 }
 
                 raider.settlement = attacker
-                raider.customName = "§cRaider (${attacker.data.settlementName})"
+                raider.customName = msgRaiderName.replace("{attacker}", attacker.data.settlementName)
                 raider.isCustomNameVisible = true
 
                 equipRaider(raider, attacker)
@@ -285,8 +350,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
             }
         }
 
-        bossBar.name(Component.text("Raid - Wave ${data.currentWave} / ${data.totalWaves}", NamedTextColor.RED))
-        bossBar.progress(1.0f)
         SettlementManager.saveSettlements(defender.world)
     }
 
@@ -304,22 +367,11 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         }
     }
 
-    private fun playRandomMusicDisc(location: Location) {
-        val discs = listOf(
-            Sound.MUSIC_DISC_13, Sound.MUSIC_DISC_CAT, Sound.MUSIC_DISC_BLOCKS,
-            Sound.MUSIC_DISC_CHIRP, Sound.MUSIC_DISC_FAR, Sound.MUSIC_DISC_MALL,
-            Sound.MUSIC_DISC_MELLOHI, Sound.MUSIC_DISC_STAL, Sound.MUSIC_DISC_STRAD,
-            Sound.MUSIC_DISC_WARD, Sound.MUSIC_DISC_11, Sound.MUSIC_DISC_WAIT,
-            Sound.MUSIC_DISC_PIGSTEP
-        )
-        location.world.playSound(location, discs.random(), 20.0f, 1.0f)
-    }
-
     private fun equipRaider(raider: LivingEntity, attacker: Settlement) {
         val loadout = mutableMapOf<EquipmentSlot, ItemStack>()
         val roll = Random.nextInt(100)
 
-        val isRanged = Random.nextInt(100) < 35
+        val isRanged = Random.nextInt(100) < 25
         val size = attacker.size()
 
         when (size) {
@@ -410,21 +462,61 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         }
     }
 
-    private fun updateLivingRaiders() {
+    private fun processDeadRaiders() {
         val iterator = data.aliveRaiders.iterator()
         while (iterator.hasNext()) {
             val uuid = iterator.next()
             val entity = Bukkit.getEntity(uuid)
-            if (entity != null && entity.isDead) {
+
+            if (entity == null || !entity.isValid || entity.isDead) {
+
+                if (entity is LivingEntity && entity.isDead) {
+                    val killer = entity.killer
+                    if (killer != null) {
+                        val currentRep = defender.data.reputation.getOrDefault(killer.uniqueId, 0)
+                        defender.data.reputation[killer.uniqueId] = currentRep + repGainPerKill
+
+                        if (plugin.gameplayManager.config.reputation.chatNotification) {
+                            val msg = msgRepIncrease
+                                .replace("{entity}", defender.data.settlementName)
+                                .replace("{amount}", repGainPerKill.toString())
+                            killer.sendMessage(msg)
+                        }
+                    }
+                }
                 iterator.remove()
             }
         }
-        val progress = if (data.totalRaidersInWave > 0) {
+    }
+
+    private fun updateBossBars(attacker: Settlement) {
+        val primaryTitle = msgTitlePrimary
+            .replace("{attacker}", attacker.data.settlementName)
+            .replace("{defender}", defender.data.settlementName)
+            .replace("{wave}", data.currentWave.toString())
+            .replace("{total}", data.totalWaves.toString())
+
+        bossBar.name(Component.text(primaryTitle, NamedTextColor.RED))
+
+        val raiderProgress = if (data.totalRaidersInWave > 0) {
             (data.aliveRaiders.size.toFloat() / data.totalRaidersInWave.toFloat()).coerceIn(0.0f, 1.0f)
         } else {
             0.0f
         }
-        bossBar.progress(progress)
+        bossBar.progress(raiderProgress)
+
+        val aliveDefendersCount = defender.villagers.count { !it.isDead && it.isValid }
+
+        if (aliveDefendersCount > maxDefendersTracked) {
+            maxDefendersTracked = aliveDefendersCount
+        }
+
+        val maxDef = maxDefendersTracked.coerceAtLeast(1)
+        val defProgress = (aliveDefendersCount.toFloat() / maxDef.toFloat()).coerceIn(0.0f, 1.0f)
+
+        val secondaryTitle = msgDefendersAlive.replace("{count}", aliveDefendersCount.toString())
+        defendersBossBar.name(Component.text(secondaryTitle, NamedTextColor.YELLOW))
+        defendersBossBar.progress(defProgress)
     }
 
     private fun updateBossBarViewers() {
@@ -435,76 +527,106 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         val toRemove = viewingPlayers.filter { it !in currentPlayersInTerritory }
         toRemove.forEach { player ->
             player.hideBossBar(bossBar)
+            player.hideBossBar(defendersBossBar)
             viewingPlayers.remove(player)
         }
 
         val toAdd = currentPlayersInTerritory.filter { it !in viewingPlayers }
         toAdd.forEach { player ->
             player.showBossBar(bossBar)
+            player.showBossBar(defendersBossBar)
             viewingPlayers.add(player)
         }
     }
 
     private fun finishRaid(finalStatus: Settlement.RaidStatus) {
+        manageChunkLoading(false)
+
         data.status = finalStatus
         val attacker = SettlementManager.getById(data.attackerId)
 
-        val (titleText, color) = when (finalStatus) {
+        val primaryText: String
+        val secondaryText: String
+        val primaryColor: NamedTextColor
+        val secondaryColor: NamedTextColor
+
+        when (finalStatus) {
             Settlement.RaidStatus.VICTORY -> {
-                // Broadcast Victory
-                broadcastRaidMessage("§a⚔ The raid on §6${defender.data.settlementName} §ahas been repelled! Victory!")
-                "Raid - Victory!" to NamedTextColor.GREEN
+                val msg = msgVictoryChat.replace("{defender}", defender.data.settlementName)
+                broadcastGlobalMessage(msg)
+
+                primaryText = msgVictoryPrimary
+                secondaryText = msgVictorySecondary
+                primaryColor = NamedTextColor.GREEN
+                secondaryColor = NamedTextColor.GREEN
             }
 
             Settlement.RaidStatus.LOSS -> {
                 if (attacker != null) {
-                    val attackerRace = SettlementManager.getDominantRace(attacker)
 
                     val oldName = defender.data.settlementName
-                    val newName = attackerRace.settlementNames.random()
+                    val newName = (Bukkit.getEntity(this.data.aliveRaiders.random()) as Villager).race.settlementNames.random()
                     defender.data.settlementName = newName
 
-                    // --- CONQUEST LOGIC ---
-                    // 1. Get ALL living raiders (even those not rendered in Bukkit yet via UUID)
-                    // We iterate through the data set directly.
-                    data.aliveRaiders.forEach { uuid ->
-                        val entity = Bukkit.getEntity(uuid) as? LivingEntity ?: return@forEach
+                    // --- CONQUEST CONSEQUENCES ---
+                    SettlementManager.setRelation(attacker, defender, Settlement.RelationLevel.ALLIANCE)
+                    defender.data.reputation.clear()
+                    defender.data.reputation.putAll(attacker.data.reputation)
 
-                        // Convert to citizen
-                        entity.settlement = defender
-                        defender.villagers.add(entity as? Villager ?: return@forEach)
+                    data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) as? LivingEntity }.forEach { victor ->
+                        victor.settlement = defender
+                        defender.villagers.add(victor as? Villager ?: return@forEach)
 
-                        // Strip Raid Metadata
-                        entity.customName = null
-                        entity.isCustomNameVisible = false
-                        entity.isGlowing = false
-                        entity.profession = Villager.Profession.NONE
-                        entity.pathfinder.moveTo(defender.data.center, 0.55)
+                        victor.customName = null
+                        victor.isCustomNameVisible = false
+                        victor.isGlowing = false
+                        victor.profession = Villager.Profession.NONE
 
-                        // Give them a personality
-                        plugin.gameplayManager.personalityManager.generateCharacterName(entity)
+                        plugin.gameplayManager.personalityManager.generateCharacterName(victor)
                     }
 
-                    // 2. Broadcast Defeat & Rename
-                    val msg = "§4☠ §c${oldName} has fallen! Conquered by §4${attacker.data.settlementName}§c. It is now known as §6${newName}§c."
-                    broadcastRaidMessage(msg)
+                    val msg = msgLossChat
+                        .replace("{defender}", oldName)
+                        .replace("{attacker}", attacker.data.settlementName)
+                        .replace("{newName}", newName)
+
+                    broadcastGlobalMessage(msg)
                     plugin.logger.info("[Raid] $msg")
 
-                    "Raid - Conquered!" to NamedTextColor.DARK_RED
+                    primaryText = msgLossPrimary
+                    secondaryText = msgLossSecondary
+                    primaryColor = NamedTextColor.DARK_RED
+                    secondaryColor = NamedTextColor.DARK_RED
                 } else {
-                    broadcastRaidMessage("§4☠ §cThe settlement ${defender.data.settlementName} has been wiped out!")
-                    "Raid - Defeat!" to NamedTextColor.DARK_RED
+                    val msg = msgLossWipedChat.replace("{defender}", defender.data.settlementName)
+                    broadcastGlobalMessage(msg)
+
+                    primaryText = msgLossPrimary
+                    secondaryText = msgLossSecondary
+                    primaryColor = NamedTextColor.DARK_RED
+                    secondaryColor = NamedTextColor.DARK_RED
                 }
             }
 
-            else -> "Raid - Stopped" to NamedTextColor.GRAY
+            else -> {
+                primaryText = msgStoppedPrimary
+                secondaryText = msgStoppedSecondary
+                primaryColor = NamedTextColor.GRAY
+                secondaryColor = NamedTextColor.GRAY
+            }
         }
 
-        bossBar.name(Component.text(titleText, color))
+        bossBar.name(Component.text(primaryText, primaryColor))
         bossBar.progress(0.0f)
 
+        defendersBossBar.name(Component.text(secondaryText, secondaryColor))
+        defendersBossBar.progress(0.0f)
+
         plugin.server.scheduler.runTaskLater(plugin, Runnable {
-            viewingPlayers.forEach { it.hideBossBar(bossBar) }
+            viewingPlayers.forEach {
+                it.hideBossBar(bossBar)
+                it.hideBossBar(defendersBossBar)
+            }
             viewingPlayers.clear()
             defender.data.activeRaid = null
             SettlementManager.saveSettlements(defender.world)
@@ -512,15 +634,20 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         }, 200L)
     }
 
-    private fun broadcastRaidMessage(message: String) {
-        val center = defender.data.center
-        center.world?.getNearbyPlayers(center, 1000.0)?.forEach { player ->
-            player.sendMessage(message)
+    private fun broadcastGlobalMessage(message: String) {
+        plugin.gameplayManager.allowedWorlds.forEach { world ->
+            world.players.forEach { player ->
+                player.sendMessage(message)
+            }
         }
     }
 
     fun destroy() {
-        viewingPlayers.forEach { it.hideBossBar(bossBar) }
+        manageChunkLoading(false)
+        viewingPlayers.forEach {
+            it.hideBossBar(bossBar)
+            it.hideBossBar(defendersBossBar)
+        }
         viewingPlayers.clear()
     }
 }

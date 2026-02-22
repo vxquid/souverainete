@@ -15,6 +15,7 @@ class GameplayConfiguration {
     val humanoid   = HumanoidConfig()
     val reputation = ReputationConfig()
     val settlement = SettlementConfig()
+    val raid       = RaidConfig()
     val hunger     = HungerConfig()
     val nametag    = NametagDisplayConfig()
     val quest      = QuestConfig()
@@ -23,7 +24,6 @@ class GameplayConfiguration {
     val party      = PartyConfig()
 
     class GeneralConfig {
-
         @Comment("Message prefix.")
         val messagePrefix: String = "§6♣ §8| §7"
 
@@ -33,7 +33,6 @@ class GameplayConfiguration {
             "Enabling this means that all content coming from professions.yml will be disabled. Think twice."
         )
         val vanillaTrading: Boolean = false
-
     }
 
     class WorldsConfig {
@@ -42,14 +41,12 @@ class GameplayConfiguration {
     }
 
     class DialogueConfig {
-
         @Comment("Default dialogue format.", "IMMERSIVE, CHAT, HOLOGRAM, BOTH.")
         var dialogueFormat: DialogueFormat = DialogueFormat.BOTH
 
         enum class DialogueFormat {
             IMMERSIVE, CHAT, HOLOGRAM, BOTH
         }
-
     }
 
     class HumanoidConfig {
@@ -73,7 +70,6 @@ class GameplayConfiguration {
         @Comment("Sound played on reputation status update.")
         var statusUpdateSound: String = "ui.hud.bubble_pop"
 
-        // --- Tracker Settings ---
         @Comment("Reputation loss per 1 point of damage dealt to an NPC.")
         var damageReputationMultiplier: Double = 2.0
 
@@ -128,7 +124,6 @@ class GameplayConfiguration {
             "WITCH" to 10,
             "ILLUSIONER" to 30
         )
-
     }
 
     class SettlementConfig {
@@ -144,6 +139,27 @@ class GameplayConfiguration {
         val titleFadeIn: Int = 20
         val titleStay: Int = 40
         val titleFadeOut: Int = 20
+    }
+
+    // --- ДОБАВЛЕНО ДЛЯ РЕЙДОВ ---
+    class RaidConfig {
+        @Comment("Time in seconds before stuck raiders start glowing to help players find them.")
+        var glowThreshold: Long = 60L
+
+        @Comment("Time in seconds before stuck raiders are forcefully removed and reinforcements spawn at the center.")
+        var killThreshold: Long = 120L
+
+        @Comment("Minimum reputation score for a player to be considered an ally and targeted by raiders.")
+        var allyReputationThreshold: Int = 200
+
+        @Comment("Reputation gained with the defending settlement for killing a raider.")
+        var repGainPerKill: Int = 150
+
+        @Comment("Radius in blocks to broadcast raid chat messages.")
+        var broadcastRadius: Double = 1000.0
+
+        @Comment("Radius in blocks to play the ominous raid horn sound.")
+        var hornRadius: Double = 250.0
     }
 
     class HungerConfig {
@@ -290,7 +306,6 @@ class GameplayConfiguration {
             "KNOCKOUT: Villagers fall down and bleed out. Can be revived with GAP or carried. Bleeding out triggers RESPAWN logic."
         )
         var deathHandleStrategy: String = "KNOCKOUT"
-
     }
 
 }

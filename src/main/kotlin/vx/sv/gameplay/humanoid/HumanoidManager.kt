@@ -2,6 +2,7 @@ package vx.sv.gameplay.humanoid
 
 import com.github.retrooper.packetevents.PacketEvents
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.humanoid.combat.HumanoidCombatHandler
 import vx.sv.gameplay.humanoid.protocol.ProtocolListener
 import vx.sv.gameplay.humanoid.race.RaceManager
 
@@ -9,6 +10,7 @@ class HumanoidManager {
 
     val raceManager      = RaceManager()
     val protocolListener = ProtocolListener()
+    val combatListener   = HumanoidCombatHandler()
     val equipmentManager = EquipmentManager()
     val humanoidDisplay  = NametagDisplayManager()
 

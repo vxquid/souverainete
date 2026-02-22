@@ -133,6 +133,7 @@ class SettlementCommand : BaseCommand() {
     }
 
     @Subcommand("raid")
+    @CommandAlias("raid")
     @CommandPermission("sv.settlement.raid")
     @CommandCompletion("@settlements @settlements")
     fun onRaid(player: Player, attackerName: String, defenderName: String) {

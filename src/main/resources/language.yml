@@ -64,6 +64,27 @@ settlement:
       cancelled: "§cCancelled."
       success: "§aSettlement renamed to: §6{name}"
 
+# Raid system messages.
+raid:
+  bossbar:
+    init: "Raid Initialization..."
+    defenders-alive: "Defenders Alive: {count}"
+    title: "{attacker} ⚔ {defender} (Wave {wave}/{total})"
+    victory-primary: "Attackers defeated!"
+    victory-secondary: "Settlement protected!"
+    loss-primary: "Settlement conquered!"
+    loss-secondary: "Defenders eliminated!"
+    stopped-primary: "Raid stopped!"
+    stopped-secondary: "Combat ceased!"
+  entity:
+    raider-name: "§cRaider ({attacker})"
+  chat:
+    wave-started: "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!"
+    reinforcements: "§c⚔ Reinforcements have arrived for §6{attacker}§c!"
+    victory: "§a⚔ The raid on §6{defender} §ahas been repelled! Victory!"
+    loss: "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c."
+    loss-wiped: "§4☠ §cThe settlement {defender} has been wiped out!"
+
 quest:
   finished: "You have finished the quest §6{quest}§7."
   failed:
@@ -168,6 +189,16 @@ info-messages:
     completed: "You have completed §2{questsCompleted} §7quests."
     failed: "You have failed §4{questsFailed} §7quests."
     xp-earned: "You have earned §e{xpEarned}xp §7by completing quests."
+  settlement-command:
+    not-found: "§cSettlement {settlement} not found."
+    teleported: "§aTeleported to {settlement}."
+    player-not-found: "§cPlayer {player} not found."
+    reputation-set: "§aReputation of {player} in {settlement} has been set to {amount}."
+    same-settlement: "§cYou cannot establish a relation with the same settlement."
+    relation-set: "§aRelation between {settlementA} and {settlementB} is now {level}."
+    same-settlement-raid: "§cA settlement cannot raid itself!"
+    already-raided: "§cSettlement {settlement} is already under attack!"
+    raid-started: "§aSuccessfully started a raid! Attacker: {attacker}, Defender: {defender}."
 
 # Interaction menu buttons (GUI).
 interaction-menu:
