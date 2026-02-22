@@ -8,7 +8,26 @@ import java.util.*
 
 class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> = mutableSetOf()) {
 
-    data class SettlementData(val id: UUID, val worldUUID: UUID, var settlementName: String, val center: Location, val creationTime: Long, val reputation: MutableMap<UUID, Int> = mutableMapOf())
+    data class SettlementData(
+        val id: UUID,
+        val worldUUID: UUID,
+        var settlementName: String,
+        val center: Location,
+        val creationTime: Long,
+        val reputation: MutableMap<UUID, Int> = mutableMapOf(),
+        val relations: MutableMap<UUID, RelationLevel> = mutableMapOf(),
+        var activeRaid: RaidData? = null // Nullable to signify no active raid
+    )
+
+    data class RaidData(
+        val attackerId: UUID,
+        var status: RaidStatus = RaidStatus.ONGOING,
+        var currentWave: Int = 0,
+        val totalWaves: Int = 3,
+        var totalRaidersInWave: Int = 0,
+        val aliveRaiders: MutableSet<UUID> = mutableSetOf(),
+        var activeTicks: Long = 0
+    )
 
     val world        = plugin.server.getWorld(data.worldUUID)!!
     var territory    = BoundingBox.of(data.center, 64.0, 64.0, 64.0)
@@ -30,6 +49,21 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         ESTABLISHED,
         ADVANCED,
         METROPOLIS
+    }
+
+    enum class RelationLevel {
+        WAR,
+        TENSE,
+        NEUTRAL,
+        WARM,
+        ALLIANCE
+    }
+
+    enum class RaidStatus {
+        ONGOING,
+        VICTORY,  // Defenders won
+        LOSS,     // Defenders lost (all villagers died)
+        STOPPED   // Raid was cancelled/interrupted
     }
 
 }

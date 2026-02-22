@@ -101,7 +101,7 @@ class PersonalityManager : Listener {
         }
     }
 
-    private fun generateCharacterName(entity: LivingEntity) {
+    fun generateCharacterName(entity: LivingEntity) {
         val gender = entity.gender
         val race = entity.race
         val name = race.randomName(gender)

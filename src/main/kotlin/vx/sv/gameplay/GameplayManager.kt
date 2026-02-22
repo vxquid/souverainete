@@ -20,6 +20,8 @@ import vx.sv.gameplay.profession.ProfessionManager
 import vx.sv.gameplay.quest.QuestManager
 import vx.sv.gameplay.reputation.ReputationManager
 import vx.sv.gameplay.reputation.ReputationTracker
+import vx.sv.gameplay.settlement.PoliticsManager
+import vx.sv.gameplay.settlement.RaidManager
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.gameplay.trade.TradeManager
@@ -49,6 +51,8 @@ class GameplayManager(val firstWorld: World) : Listener {
     val humanoidManager    = HumanoidManager()
     val professionManager  = ProfessionManager()
     val settlementManager  = SettlementManager()
+    val politicsManager    = PoliticsManager()
+    val raidManager        = RaidManager()
     val hungerManager      = HungerManager.also { it.startTicker() }
     val partyManager       = PartyManager(plugin, plugin.gameplayManager.config)
     val deathManager       = DeathManager()
@@ -60,6 +64,7 @@ class GameplayManager(val firstWorld: World) : Listener {
             this.allowedWorlds.add(event.world)
             this.settlementManager.handleWorldLoad(event.world).also {
                 if (!settlements.keys.contains(firstWorld)) settlementManager.handleWorldLoad(firstWorld)
+                plugin.gameplayManager.raidManager.restoreRaidsFromData(settlements[event.world] ?: emptyList())
             }
         }
     }

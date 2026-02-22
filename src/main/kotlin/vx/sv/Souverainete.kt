@@ -17,6 +17,7 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import vx.sv.ai.ProviderManager
 import vx.sv.command.QuestCommand
+import vx.sv.command.SettlementCommand
 import vx.sv.command.TranslateCommand
 import vx.sv.config.lib.TranslationManager
 import vx.sv.gameplay.GameplayManager
@@ -111,6 +112,7 @@ class Souverainete : JavaPlugin(), Listener {
             PersistentDataType.LONG_ARRAY,
             gameplayManager.actualQuests.toLongArray()
         )
+        gameplayManager.raidManager.disable()
     }
 
     /* Gameplay-related stuff must be initialized post-world. */
@@ -123,6 +125,7 @@ class Souverainete : JavaPlugin(), Listener {
             // Command registration
             commandManager.registerCommand(QuestCommand())
             commandManager.registerCommand(TranslateCommand())
+            commandManager.registerCommand(SettlementCommand())
         }
     }
 

@@ -18,6 +18,7 @@ import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Gender
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.Settlement
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.currentSettlement
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.persistent.LivingEntityExtend.settlement
@@ -48,18 +49,13 @@ class ReputationTracker : Listener {
         AGGRESSIVE("npc-state.aggressive", "§c")
     }
 
-    /**
-     * Determines the visual state of the NPC for a specific player.
-     */
     fun getNPCState(npc: LivingEntity, player: Player): NPCState? {
         val finalStatus = getFinalStatus(npc, player)
 
-        // Full combat (Hostile/Exiled)
         if (finalStatus.ordinal >= Reputation.HOSTILE.ordinal) {
             return NPCState.AGGRESSIVE
         }
 
-        // Warning phase (Unfriendly + Player within 5 blocks and timer active)
         if (finalStatus == Reputation.UNFRIENDLY && annoyanceTimers.containsKey(npc.uniqueId to player.uniqueId)) {
             return NPCState.ANNOYED
         }
@@ -79,6 +75,7 @@ class ReputationTracker : Listener {
 
     /**
      * Ticker for aggression and annoyance logic.
+     * Evaluates both Player vs NPC and NPC vs NPC (Warfare).
      */
     private fun startAggressionTicker() {
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
@@ -91,10 +88,11 @@ class ReputationTracker : Listener {
                         (playerSettlement == null || player.location.distance(plugin.server.getEntity(it.first)?.location ?: player.location) > personalSpaceRadius)
                 }
 
-                for (entity in nearby) {
-                    if (entity !is LivingEntity || (entity !is Villager && entity !is IronGolem)) continue
+                // Gather nearby NPCs for internal warfare checks
+                val npcs = nearby.filterIsInstance<LivingEntity>().filter { it is Villager || it is IronGolem }
 
-                    // Reset aggro and timers if player left the settlement area
+                // --- 1. Player vs NPC Logic ---
+                for (entity in npcs) {
                     if (playerSettlement == null || (entity.settlement != null && entity.settlement?.data?.settlementName != playerSettlement)) {
                         resetAggro(entity, player)
                         continue
@@ -105,32 +103,51 @@ class ReputationTracker : Listener {
                     val distance = entity.location.distance(player.location)
 
                     when {
-                        // 1. UNFRIENDLY status: Only get annoyed if player is within personal space
                         finalStatus == Reputation.UNFRIENDLY -> {
                             if (distance <= personalSpaceRadius && entity.hasLineOfSight(player)) {
                                 val startTime = annoyanceTimers.getOrPut(pair) {
-                                    // Shout warning when timer starts (Aggressive tone)
                                     shoutWithCooldown(entity, entity.race.phrases.warning.randomOrNull(), isAggressive = true)
                                     System.currentTimeMillis()
                                 }
-
-                                val elapsed = System.currentTimeMillis() - startTime
-                                if (elapsed > 20000L) { // 20 seconds elapsed
-                                    triggerAggression(entity, player, finalStatus)
+                                if (System.currentTimeMillis() - startTime > 20000L) {
+                                    triggerAggression(entity, player, isFullCombat = false)
                                 }
                             }
                         }
-
-                        // 2. HOSTILE and EXILED statuses: Immediate attack
                         finalStatus.ordinal >= Reputation.HOSTILE.ordinal -> {
                             if (entity.hasLineOfSight(player)) {
-                                triggerAggression(entity, player, finalStatus)
+                                triggerAggression(entity, player, isFullCombat = true)
                                 callForHelp(entity, player)
                             }
                         }
-
-                        // 3. Neutral or better: remove any annoyance tracking
                         else -> annoyanceTimers.remove(pair)
+                    }
+                }
+
+                // --- 2. NPC vs NPC Logic (Settlement Warfare) ---
+                // O(N^2) check is lightweight here because 'npcs' list is limited to player's view distance
+                for (i in npcs.indices) {
+                    for (j in i + 1 until npcs.size) {
+                        val npc1 = npcs[i]
+                        val npc2 = npcs[j]
+
+                        val s1 = npc1.settlement ?: continue
+                        val s2 = npc2.settlement ?: continue
+
+                        // Proceed only if they belong to different settlements
+                        if (s1.data.id != s2.data.id) {
+                            val relation = SettlementManager.getRelation(s1, s2)
+                            if (relation == Settlement.RelationLevel.WAR) {
+                                if (npc1.hasLineOfSight(npc2)) {
+                                    triggerAggression(npc1, npc2, isFullCombat = true)
+                                    callForHelp(npc1, npc2)
+                                }
+                                if (npc2.hasLineOfSight(npc1)) {
+                                    triggerAggression(npc2, npc1, isFullCombat = true)
+                                    callForHelp(npc2, npc1)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -148,9 +165,8 @@ class ReputationTracker : Listener {
         if (penalty > 0) repManager.addReputation(victim, attacker, -penalty)
 
         val finalStatus = getFinalStatus(victim, attacker)
-        // If attacker is already disliked, respond immediately
         if (finalStatus.ordinal >= Reputation.UNFRIENDLY.ordinal) {
-            triggerAggression(victim, attacker, finalStatus)
+            triggerAggression(victim, attacker, isFullCombat = finalStatus.ordinal >= Reputation.HOSTILE.ordinal)
         }
     }
 
@@ -159,9 +175,7 @@ class ReputationTracker : Listener {
         val victim = event.entity
         val killerEntity = victim.killer
 
-        // --- NPC DEATH LOGIC ---
         if (victim is Villager || victim is IronGolem) {
-            // Fix: Clear internal timers immediately when the NPC dies
             annoyanceTimers.keys.removeIf { it.first == victim.uniqueId }
             shoutCooldowns.remove(victim.uniqueId)
 
@@ -189,12 +203,10 @@ class ReputationTracker : Listener {
                 shoutWithCooldown(screamer, phrase, isAggressive = true, ignoreCooldown = true)
             }
 
-            witnesses.forEach { triggerAggression(it, killerEntity, Reputation.HOSTILE) }
+            witnesses.forEach { triggerAggression(it, killerEntity, isFullCombat = true) }
             return
         }
 
-        // --- MONSTER/ILLAGER DEATH LOGIC (Reputation Gain) ---
-        // Fix: Only players should receive reputation to prevent data bloating
         if (killerEntity == null) return
 
         val worldSettlements = settlements[victim.world] ?: return
@@ -218,55 +230,58 @@ class ReputationTracker : Listener {
     fun onGolemTarget(event: EntityTargetLivingEntityEvent) {
         if (event.entity !is IronGolem) return
         val target = event.target ?: return
-        if (target is Villager || target is IronGolem) event.isCancelled = true
+
+        if (target is Villager || target is IronGolem) {
+            val golem = event.entity as IronGolem
+            val golemSettlement = golem.settlement
+            val targetSettlement = target.settlement
+
+            // Allow Golems to attack if the targets belong to a hostile settlement
+            if (golemSettlement != null && targetSettlement != null && golemSettlement.data.id != targetSettlement.data.id) {
+                if (SettlementManager.getRelation(golemSettlement, targetSettlement) == Settlement.RelationLevel.WAR) {
+                    return // Permit the attack
+                }
+            }
+            event.isCancelled = true // Cancel friendly fire / neutral hits
+        }
     }
 
     // --- AGGRESSION LOGIC ---
 
     /**
-     * Triggers the NPC attack.
-     * For UNFRIENDLY: Performs a single strike to scare the player.
-     * For HOSTILE/EXILED: Engages in full combat until target is dead.
+     * Triggers the NPC attack towards any LivingEntity (Player or rival NPC).
      */
-    private fun triggerAggression(npc: LivingEntity, target: Player, status: Reputation) {
-        val isFullCombat = status.ordinal >= Reputation.HOSTILE.ordinal
-
-        // Determine which phrase pool to use
+    private fun triggerAggression(npc: LivingEntity, target: LivingEntity, isFullCombat: Boolean) {
         val phrasePool = if (isFullCombat) {
             npc.race.phrases.startFight
         } else {
             npc.race.phrases.warning
         }
 
-        // Play aggressive shout with voice
         shoutWithCooldown(npc, phrasePool.randomOrNull(), isAggressive = true)
 
         try {
             val humanoid = plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(npc)
 
             if (isFullCombat) {
-                // War mode: attack until target is dead
                 humanoid.attack(target)
             } else {
-                // Annoyance mode: just one punch/strike to say "get out"
-                humanoid.attack(target, 1)
-
-                // Also clear the annoyance timer so the 20-second cycle can restart
-                // if the player stays in personal space after being punched
-                annoyanceTimers.remove(npc.uniqueId to target.uniqueId)
+                // Annoyance mode: just one punch
+                if (target is Player) {
+                    humanoid.attack(target, 1)
+                    annoyanceTimers.remove(npc.uniqueId to target.uniqueId)
+                } else {
+                    humanoid.attack(target) // NPCs always full attack other NPCs if provoked
+                }
             }
         } catch (_: Exception) {
-            // Fallback for non-humanoid entities like Golems
             if (npc is IronGolem) {
                 npc.target = target
             }
         }
     }
 
-    /**
-     * Resets NPC aggro by cycling AI state and clearing timers.
-     */
-    private fun resetAggro(npc: LivingEntity, target: Player) {
+    private fun resetAggro(npc: LivingEntity, target: LivingEntity) {
         try {
             npc.setAI(false)
             npc.setAI(true)
@@ -276,12 +291,12 @@ class ReputationTracker : Listener {
         annoyanceTimers.remove(npc.uniqueId to target.uniqueId)
     }
 
-    private fun callForHelp(caller: LivingEntity, enemy: Player) {
+    private fun callForHelp(caller: LivingEntity, enemy: LivingEntity) {
         val settlement = caller.settlement ?: return
         caller.getNearbyEntities(15.0, 10.0, 15.0)
             .filterIsInstance<LivingEntity>()
             .filter { (it is Villager || it is IronGolem) && it.settlement == settlement }
-            .forEach { triggerAggression(it, enemy, Reputation.HOSTILE) }
+            .forEach { triggerAggression(it, enemy, isFullCombat = true) }
     }
 
     private fun triggerSettlementAlarm(settlement: Settlement) {
@@ -293,13 +308,6 @@ class ReputationTracker : Listener {
 
     // --- PHRASE LOGIC ---
 
-    /**
-     * Sends a chat message from the NPC with a 10s cooldown per entity.
-     * Plays a race-specific voice sound with pitch modification.
-     *
-     * @param isAggressive If true, pitch is lowered to sound more threatening.
-     * @param ignoreCooldown If true, bypasses the 10s timer (used for critical events like murder).
-     */
     private fun shoutWithCooldown(entity: LivingEntity, message: String?, isAggressive: Boolean = false, ignoreCooldown: Boolean = false) {
         if (message == null) return
 
@@ -309,7 +317,6 @@ class ReputationTracker : Listener {
         if (ignoreCooldown || now - lastShout > 10000L) {
             shoutCooldowns[entity.uniqueId] = now
 
-            // 1. Send Chat Message
             val name = entity.customName ?: entity.race.name
             val formatted = "§6$name§7: §c$message"
 
@@ -317,26 +324,19 @@ class ReputationTracker : Listener {
                 it.sendMessage(formatted)
             }
 
-            // 2. Play Voice Sound
             val race = entity.race
             val voices = if (entity.gender == Gender.MALE) race.maleVoices else race.femaleVoices
 
             if (voices.isNotEmpty()) {
                 val voice = voices.random()
                 val sound = voice.sound.get() ?: Sound.INTENTIONALLY_EMPTY
-                // Calculate random pitch within range
                 var pitch = Random.nextDouble(voice.min, voice.max).toFloat()
 
-                // Lower pitch for aggressive shouts (makes them sound angry)
-                if (isAggressive) {
-                    pitch *= 0.85f
-                }
+                if (isAggressive) pitch *= 0.85f
 
                 try {
                     entity.world.playSound(entity.location, sound, 1.0f, pitch)
-                } catch (_: Exception) {
-                    // Fallback if sound is invalid
-                }
+                } catch (_: Exception) {}
             }
         }
     }

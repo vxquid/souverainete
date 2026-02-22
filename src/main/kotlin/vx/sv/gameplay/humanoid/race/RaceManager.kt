@@ -274,5 +274,6 @@ class RaceManager {
 
             return racesRegistry.values.find { it.matching(this) } ?: Race.VILLAGER_RACE
         }
+
     }
 }
