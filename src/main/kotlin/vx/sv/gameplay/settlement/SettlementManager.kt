@@ -39,6 +39,11 @@ class SettlementManager : Listener {
     fun handleWorldLoad(world: World) {
         settlements[world] = mutableListOf()
         this.loadSettlements(world)
+
+        // FIX: Restore active raids for the loaded settlements
+        val worldSettlements = settlements[world] ?: emptyList()
+        plugin.gameplayManager.raidManager.restoreRaidsFromData(worldSettlements)
+
         this.startEnteringTick(world)
         this.startSettlementDetectionTask(world)
 
@@ -205,7 +210,10 @@ class SettlementManager : Listener {
         val client = plugin.providerManager.client
 
         // 1. Calculate dominant race in advance
-        val dominantRace = getDominantRace(settlement)
+        val dominantRace = getDominantRace(settlement) // Fixed: Now returns Race object via helper in companion if needed, but logic below was using string from data?
+        // Wait, getDominantRace companion returns String, instance private method returns Race.
+        // Let's use the local private method which returns Race for the generator.
+        val raceEnum = getDominantRaceEnum(settlement)
 
         if (client is DummyClient) {
             pickRaceName(settlement) // Fallback to legacy logic
@@ -215,7 +223,7 @@ class SettlementManager : Listener {
         CompletableFuture.runAsync {
             try {
                 // 2. Pass race to the generator
-                val generator = SettlementNameGenerator(settlement, dominantRace)
+                val generator = SettlementNameGenerator(settlement, raceEnum)
 
                 val response = client.sendPromptWithSchema(generator.prompt, SettlementData::class)
                     ?: throw IllegalStateException("Empty response from AI")
@@ -234,7 +242,7 @@ class SettlementManager : Listener {
     }
 
     private fun pickRaceName(settlement: Settlement) {
-        val dominantRace = getDominantRace(settlement)
+        val dominantRace = getDominantRaceEnum(settlement)
         val possibleNames = dominantRace.settlementNames
 
         val usedNames = settlements[settlement.world]?.map { it.data.settlementName } ?: emptyList()
@@ -246,7 +254,8 @@ class SettlementManager : Listener {
         applySettlementCreation(settlement, finalName)
     }
 
-    private fun getDominantRace(settlement: Settlement): Race {
+    // Renamed local helper to avoid confusion with Companion.getDominantRace(String)
+    private fun getDominantRaceEnum(settlement: Settlement): Race {
         return settlement.villagers
             .groupingBy { it.race }
             .eachCount()
@@ -268,7 +277,7 @@ class SettlementManager : Listener {
             val message = plugin.language.getString("settlement.created")?.replace("{settlementName}", name)
             if (!message.isNullOrEmpty()) world.players.forEach { it.sendMessage(message) }
         }
-        plugin.logger.info("New settlement founded: $name (Dominant Race: ${getDominantRace(settlement).name})")
+        plugin.logger.info("New settlement founded: $name (Dominant Race: ${getDominantRaceEnum(settlement).name})")
     }
 
     private fun loadSettlements(world: World) {
@@ -347,7 +356,7 @@ class SettlementManager : Listener {
         val settlementsWorldKey = NamespacedKey(plugin, "SettlementList")
         val currentSettlementKey = NamespacedKey(plugin, "CurrentSettlement")
 
-        /** Get dominant race for a settlement. */
+        /** Get dominant race for a settlement (String version). */
         fun getDominantRace(settlement: Settlement): String {
             return settlement.data.dominantRace
         }

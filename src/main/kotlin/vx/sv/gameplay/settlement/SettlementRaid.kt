@@ -8,9 +8,11 @@ import org.bukkit.attribute.Attribute
 import org.bukkit.entity.*
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataType
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.humanoid.NametagDisplayManager
 import vx.sv.gameplay.humanoid.race.RaceManager
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.humanoid.race.RaceManager.Race
@@ -34,6 +36,9 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     // Timer Logic
     private var lastWaveStartTick: Long = data.activeTicks
     private var maxDefendersTracked: Int = 1
+
+    // Flag to prevent infinite reinforcements loops
+    private var hasReinforced: Boolean = false
 
     // Chunk Loading Flag
     private var chunksLocked: Boolean = false
@@ -76,6 +81,7 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     private val msgRaiderName get() = plugin.language.getString("raid.entity.raider-name", "§cRaider ({attacker})") ?: "§cRaider ({attacker})"
     private val msgWaveStarted get() = plugin.language.getString("raid.chat.wave-started", "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!") ?: "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!"
     private val msgReinforcements get() = plugin.language.getString("raid.chat.reinforcements", "§c⚔ Reinforcements have arrived for §6{attacker}§c!") ?: "§c⚔ Reinforcements have arrived for §6{attacker}§c!"
+    private val msgRaidAbandoned get() = plugin.language.getString("raid.chat.abandoned", "§e⚔ The siege failed. The raiders decided to take their loot and retreat.") ?: "§e⚔ The siege failed. The raiders decided to take their loot and retreat."
     private val msgVictoryChat get() = plugin.language.getString("raid.chat.victory", "§a⚔ The raid on §6{defender} §ahas been repelled! Victory!") ?: "§a⚔ The raid on §6{defender} §ahas been repelled! Victory!"
     private val msgLossChat get() = plugin.language.getString("raid.chat.loss", "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c.") ?: "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c."
     private val msgLossWipedChat get() = plugin.language.getString("raid.chat.loss-wiped", "§4☠ §cThe settlement {defender} has been wiped out!") ?: "§4☠ §cThe settlement {defender} has been wiped out!"
@@ -158,56 +164,76 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         }
 
         if (waveDuration > killThreshold && data.aliveRaiders.isNotEmpty()) {
-            val center = defender.data.center
-            val world = center.world ?: return
-            val stuckCount = data.aliveRaiders.size
 
-            data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) }.forEach {
-                it.remove()
-            }
-            data.aliveRaiders.clear()
+            if (!hasReinforced) {
+                // First stuck: Reinforcements
+                val center = defender.data.center
+                val world = center.world ?: return
+                val stuckCount = data.aliveRaiders.size
 
-            world.getNearbyPlayers(center, hornRadius).forEach { player ->
-                player.playSound(center, Sound.EVENT_RAID_HORN, 64.0f, 1.0f)
-            }
+                data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) }.forEach {
+                    it.remove()
+                }
+                data.aliveRaiders.clear()
 
-            val message = msgReinforcements.replace("{attacker}", attacker.data.settlementName)
-            world.getNearbyPlayers(center, broadcastRadius).forEach { player ->
-                player.sendMessage(message)
-            }
-
-            val attackerRace = RaceManager.racesRegistry.values.find { it.name == SettlementManager.getDominantRace(attacker) } ?: Race.VILLAGER_RACE
-            val entityType = attackerRace.targetEntityType.get() ?: EntityType.VILLAGER
-
-            for (i in 0 until stuckCount) {
-                val angle = Random.nextDouble(0.0, 2 * Math.PI)
-                val distance = Random.nextDouble(3.0, 7.0)
-                val spawnX = center.x + cos(angle) * distance
-                val spawnZ = center.z + sin(angle) * distance
-
-                val highestY = world.getHighestBlockYAt(spawnX.toInt(), spawnZ.toInt()).toDouble()
-                val spawnLocation = Location(world, spawnX, highestY + 1.0, spawnZ)
-
-                world.spawnParticle(Particle.SMOKE, spawnLocation.clone().add(0.0, 1.0, 0.0), 20, 0.5, 1.0, 0.5, 0.05)
-                world.spawnParticle(Particle.LAVA, spawnLocation, 5, 0.2, 0.2, 0.2)
-
-                val raider = world.spawnEntity(spawnLocation, entityType) as? LivingEntity ?: continue
-
-                if (raider is Villager) {
-                    raider.villagerType = attackerRace.targetVillagerType
-                    raider.profession = Villager.Profession.NITWIT
+                world.getNearbyPlayers(center, hornRadius).forEach { player ->
+                    player.playSound(center, Sound.EVENT_RAID_HORN, 64.0f, 1.0f)
                 }
 
-                raider.settlement = attacker
-                raider.customName = msgRaiderName.replace("{attacker}", attacker.data.settlementName)
-                raider.isCustomNameVisible = true
+                val message = msgReinforcements.replace("{attacker}", attacker.data.settlementName)
+                world.getNearbyPlayers(center, broadcastRadius).forEach { player ->
+                    player.sendMessage(message)
+                }
 
-                equipRaider(raider, attacker)
+                val attackerRace = RaceManager.racesRegistry.values.find { it.name == SettlementManager.getDominantRace(attacker) } ?: Race.VILLAGER_RACE
+                val entityType = attackerRace.targetEntityType.get() ?: EntityType.VILLAGER
 
-                data.aliveRaiders.add(raider.uniqueId)
+                for (i in 0 until stuckCount) {
+                    val angle = Random.nextDouble(0.0, 2 * Math.PI)
+                    val distance = Random.nextDouble(3.0, 7.0)
+                    val spawnX = center.x + cos(angle) * distance
+                    val spawnZ = center.z + sin(angle) * distance
+
+                    val highestY = world.getHighestBlockYAt(spawnX.toInt(), spawnZ.toInt()).toDouble()
+                    val spawnLocation = Location(world, spawnX, highestY + 1.0, spawnZ)
+
+                    world.spawnParticle(Particle.SMOKE, spawnLocation.clone().add(0.0, 1.0, 0.0), 20, 0.5, 1.0, 0.5, 0.05)
+                    world.spawnParticle(Particle.LAVA, spawnLocation, 5, 0.2, 0.2, 0.2)
+
+                    val raider = world.spawnEntity(spawnLocation, entityType) as? LivingEntity ?: continue
+
+                    if (raider is Villager) {
+                        raider.villagerType = attackerRace.targetVillagerType
+                        raider.profession = Villager.Profession.NITWIT
+                    }
+
+                    // Mark raider for nametags
+                    raider.persistentDataContainer.set(NametagDisplayManager.RAIDER_KEY, PersistentDataType.BYTE, 1.toByte())
+
+                    raider.settlement = attacker
+                    raider.customName = msgRaiderName.replace("{attacker}", attacker.data.settlementName)
+                    raider.isCustomNameVisible = true
+
+                    equipRaider(raider, attacker)
+
+                    data.aliveRaiders.add(raider.uniqueId)
+                }
+
+                hasReinforced = true
+                lastWaveStartTick = data.activeTicks
+
+            } else {
+                // Second stuck: Abandon Raid
+                broadcastGlobalMessage(msgRaidAbandoned)
+
+                // Clear remaining raiders to simulate them retreating
+                data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) }.forEach {
+                    it.remove()
+                }
+                data.aliveRaiders.clear()
+
+                finishRaid(Settlement.RaidStatus.STOPPED)
             }
-
-            lastWaveStartTick = data.activeTicks
         }
     }
 
@@ -289,6 +315,8 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     private fun spawnNextWave(attacker: Settlement) {
         data.currentWave++
         lastWaveStartTick = data.activeTicks
+        hasReinforced = false // Reset reinforcement flag for new wave
+
         val waveSize = Random.nextInt(3, 6) + data.currentWave
         data.totalRaidersInWave = waveSize
         data.aliveRaiders.clear()
@@ -341,6 +369,9 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                     raider.villagerType = attackerRace.targetVillagerType
                     raider.profession = Villager.Profession.NITWIT
                 }
+
+                // Mark raider for nametags
+                raider.persistentDataContainer.set(NametagDisplayManager.RAIDER_KEY, PersistentDataType.BYTE, 1.toByte())
 
                 raider.settlement = attacker
                 raider.customName = msgRaiderName.replace("{attacker}", attacker.data.settlementName)
@@ -555,6 +586,14 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
 
         when (finalStatus) {
             Settlement.RaidStatus.VICTORY -> {
+                // Remove tags from surviving raiders
+                data.aliveRaiders.forEach { uuid ->
+                    val entity = Bukkit.getEntity(uuid)
+                    if (entity is LivingEntity) {
+                        entity.persistentDataContainer.remove(NametagDisplayManager.RAIDER_KEY)
+                    }
+                }
+
                 val msg = msgVictoryChat.replace("{defender}", defender.data.settlementName)
                 broadcastGlobalMessage(msg)
 
@@ -582,6 +621,9 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                     defender.data.reputation.putAll(attacker.data.reputation)
 
                     data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) as? LivingEntity }.forEach { victor ->
+                        // Remove raider tag so they become normal citizens
+                        victor.persistentDataContainer.remove(NametagDisplayManager.RAIDER_KEY)
+
                         victor.settlement = defender
                         defender.villagers.add(victor as? Villager ?: return@forEach)
 

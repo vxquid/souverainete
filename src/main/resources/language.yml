@@ -82,6 +82,7 @@ raid:
     wave-started: "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!"
     reinforcements: "§c⚔ Reinforcements have arrived for §6{attacker}§c!"
     victory: "§a⚔ The raid on §6{defender} §ahas been repelled! Victory!"
+    abandoned: "§e⚔ The siege failed. The raiders decided to take their loot and retreat."
     loss: "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c."
     loss-wiped: "§4☠ §cThe settlement {defender} has been wiped out!"
 
@@ -140,6 +141,8 @@ villager-professions:
   toolsmith: "Toolsmith"
   weaponsmith: "Weaponsmith"
   none: "Jobless"
+  raider: "Raider"
+  guard: "Guard"
 
 # Hunger status names.
 hunger-status:
