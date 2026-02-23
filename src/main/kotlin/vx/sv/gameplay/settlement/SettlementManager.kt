@@ -145,14 +145,15 @@ class SettlementManager : Listener {
 
             if (potentialCitizens.size >= config.villagersRequired) {
                 val settlementCenter = findNearbyBell(world, villager.location, config.detectionDistance) ?: continue
-
+                val dominantRace = villagers.groupingBy { it.race }.eachCount().maxByOrNull { it.value }?.key ?: Race.VILLAGER_RACE
                 CompletableFuture.runAsync {
                     val newData = Settlement.SettlementData(
                         UUID.randomUUID(),
                         world.uid,
                         config.defaultName,
                         settlementCenter,
-                        System.currentTimeMillis()
+                        System.currentTimeMillis(),
+                        dominantRace.name
                     )
                     this.generateSettlementName(Settlement(newData, potentialCitizens.toMutableSet()))
                 }
@@ -347,12 +348,8 @@ class SettlementManager : Listener {
         val currentSettlementKey = NamespacedKey(plugin, "CurrentSettlement")
 
         /** Get dominant race for a settlement. */
-        fun getDominantRace(settlement: Settlement): Race {
-            return settlement.villagers
-                .groupingBy { it.race }
-                .eachCount()
-                .maxByOrNull { it.value }?.key
-                ?: Race.VILLAGER_RACE
+        fun getDominantRace(settlement: Settlement): String {
+            return settlement.data.dominantRace
         }
 
         /**

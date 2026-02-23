@@ -11,7 +11,10 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.humanoid.race.RaceManager
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
+import vx.sv.gameplay.humanoid.race.RaceManager.Race
+import vx.sv.gameplay.settlement.SettlementManager.Companion.currentSettlement
 import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.settlement
 import kotlin.math.cos
@@ -173,7 +176,7 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 player.sendMessage(message)
             }
 
-            val attackerRace = SettlementManager.getDominantRace(attacker)
+            val attackerRace = RaceManager.racesRegistry.values.find { it.name == SettlementManager.getDominantRace(attacker) } ?: Race.VILLAGER_RACE
             val entityType = attackerRace.targetEntityType.get() ?: EntityType.VILLAGER
 
             for (i in 0 until stuckCount) {
@@ -308,7 +311,7 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
 
         buffDefenders()
 
-        val attackerRace = SettlementManager.getDominantRace(attacker)
+        val attackerRace = RaceManager.racesRegistry.values.find { it.name == SettlementManager.getDominantRace(attacker) } ?: Race.VILLAGER_RACE
         val entityType = attackerRace.targetEntityType.get() ?: EntityType.VILLAGER
         var raidersSpawned = 0
 
@@ -567,6 +570,11 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                     val oldName = defender.data.settlementName
                     val newName = (Bukkit.getEntity(this.data.aliveRaiders.random()) as Villager).race.settlementNames.random()
                     defender.data.settlementName = newName
+
+                    // Don't forget to update current player settlement as well!
+                    defender.world.getNearbyEntities(defender.territory).filterIsInstance<Player>().forEach { player ->
+                        player.currentSettlement = newName
+                    }
 
                     // --- CONQUEST CONSEQUENCES ---
                     SettlementManager.setRelation(attacker, defender, Settlement.RelationLevel.ALLIANCE)

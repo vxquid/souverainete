@@ -14,9 +14,10 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         var settlementName: String,
         val center: Location,
         val creationTime: Long,
+        var dominantRace: String,
         val reputation: MutableMap<UUID, Int> = mutableMapOf(),
         val relations: MutableMap<UUID, RelationLevel> = mutableMapOf(),
-        var activeRaid: RaidData? = null // Nullable to signify no active raid
+        var activeRaid: RaidData? = null
     )
 
     data class RaidData(
@@ -61,9 +62,9 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
 
     enum class RaidStatus {
         ONGOING,
-        VICTORY,  // Defenders won
-        LOSS,     // Defenders lost (all villagers died)
-        STOPPED   // Raid was cancelled/interrupted
+        VICTORY,
+        LOSS,
+        STOPPED
     }
 
 }

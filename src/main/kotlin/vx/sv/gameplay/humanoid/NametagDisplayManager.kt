@@ -24,10 +24,10 @@ class NametagDisplayManager : Listener {
     private val displays = mutableMapOf<Pair<LivingEntity, Player>, TextDisplay>()
 
     init {
-        plugin.server.pluginManager.registerEvents(this, plugin)
+        //plugin.server.pluginManager.registerEvents(this, plugin)
         val config = plugin.gameplayManager.config
         if (config.nametag.enabled) {
-            startViewerUpdater()
+            //startViewerUpdater()
         }
     }
 
