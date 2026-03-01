@@ -10,18 +10,38 @@ import org.bukkit.Registry
 import org.bukkit.configuration.file.YamlConfiguration
 import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Villager
+import org.bukkit.event.EventHandler
+import org.bukkit.event.Listener
+import org.bukkit.event.entity.EntityBreedEvent
 import org.bukkit.inventory.ItemStack
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.personality.PersonalityManager.Gender
 import java.io.File
 import kotlin.random.Random
 
-class RaceManager {
+class RaceManager : Listener {
+
+    init {
+        plugin.server.pluginManager.registerEvents(this, plugin)
+    }
 
     var races: YamlConfiguration = run {
         val file = File(plugin.dataFolder, "races.yml")
         if (!file.exists()) plugin.saveResource("races.yml", false)
         YamlConfiguration.loadConfiguration(file)
+    }
+
+    @EventHandler
+    fun onVillagerBreed(event: EntityBreedEvent) {
+        // We only care about villagers breeding
+        val baby = event.entity as? Villager ?: return
+        val mother = event.mother as? Villager ?: return
+        val father = event.father as? Villager ?: return
+
+        // Prevent vanilla biome-based race mutation.
+        // The baby will randomly inherit the genetic Villager.Type (Race) of either the mother or the father.
+        val inheritedType = if (Random.nextBoolean()) mother.villagerType else father.villagerType
+        baby.villagerType = inheritedType
     }
 
     fun loadRaces() {

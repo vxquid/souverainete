@@ -144,7 +144,7 @@ class GameplayConfiguration {
     // --- ДОБАВЛЕНО ДЛЯ РЕЙДОВ ---
     class RaidConfig {
         @Comment("Time in seconds before stuck raiders start glowing to help players find them.")
-        var glowThreshold: Long = 60L
+        var glowThreshold: Long = 45L
 
         @Comment("Time in seconds before stuck raiders are forcefully removed and reinforcements spawn at the center.")
         var killThreshold: Long = 120L

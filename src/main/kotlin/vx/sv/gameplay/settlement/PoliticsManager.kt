@@ -1,6 +1,12 @@
 package vx.sv.gameplay.settlement
 
+import org.bukkit.World
+import org.bukkit.entity.Player
+import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.player.PlayerChangedWorldEvent
+import org.bukkit.event.player.PlayerJoinEvent
+import org.bukkit.event.player.PlayerRespawnEvent
 import vx.sv.Souverainete.Companion.plugin
 import kotlin.random.Random
 
@@ -80,6 +86,17 @@ class PoliticsManager : Listener {
                 // If they are already at war, launch a raid
                 if (target.data.activeRaid == null) {
                     plugin.gameplayManager.raidManager.startRaid(initiator, target)
+
+                    // Broadcast to all players in the world about the raid starting
+                    val world = target.data.center.world
+                    val broadcastMessage = plugin.language.getString("raid.chat.started-broadcast")
+                        ?.replace("{attacker}", initiator.data.settlementName)
+                        ?.replace("{defender}", target.data.settlementName)
+                        ?: "§c⚔ A raid has begun: §6${initiator.data.settlementName} §chas attacked §6${target.data.settlementName}§c!"
+
+                    world?.players?.forEach { player ->
+                        player.sendMessage(broadcastMessage)
+                    }
                 }
             }
             Settlement.RelationLevel.TENSE -> {
@@ -97,5 +114,53 @@ class PoliticsManager : Listener {
                 plugin.logger.info("[Politics] Critical Event: Diplomatic incident! ${initiator.data.settlementName} and ${target.data.settlementName} are now TENSE.")
             }
         }
+    }
+
+    // ========================================================================
+    // Events to notify players about active raids when they spawn in a world.
+    // ========================================================================
+    private fun notifyAboutActiveRaids(player: Player, world: World) {
+        val worldSettlements = SettlementManager.settlements[world] ?: return
+
+        // Find all settlements in this world that are currently being raided
+        val raidedSettlements = worldSettlements.filter { it.data.activeRaid != null }
+
+        if (raidedSettlements.isNotEmpty()) {
+            val header = plugin.language.getString("raid.world-summary.header")
+                ?: "§e⚔ Military conflicts are currently taking place in this world:"
+
+            val message = buildString {
+                append(header).append("\n")
+                raidedSettlements.forEach { settlement ->
+                    val item = plugin.language.getString("raid.world-summary.active-raid")
+                        ?.replace("{settlement}", settlement.data.settlementName)
+                        ?: "§c⚔ The settlement §6${settlement.data.settlementName} §cis under attack!"
+                    append(item).append("\n")
+                }
+            }
+            // A slight 1-tick delay ensures the player is fully loaded in the world before receiving the message
+            plugin.server.scheduler.runTaskLater(plugin, Runnable {
+                if (player.isOnline && player.world == world) {
+                    player.sendMessage(message)
+                }
+            }, 1L)
+        }
+    }
+
+    @EventHandler
+    fun onPlayerJoin(event: PlayerJoinEvent) {
+        notifyAboutActiveRaids(event.player, event.player.world)
+    }
+
+    @EventHandler
+    fun onPlayerChangedWorld(event: PlayerChangedWorldEvent) {
+        notifyAboutActiveRaids(event.player, event.player.world)
+    }
+
+    @EventHandler
+    fun onPlayerRespawn(event: PlayerRespawnEvent) {
+        // Get the world of the respawn location
+        val world = event.respawnLocation.world ?: return
+        notifyAboutActiveRaids(event.player, world)
     }
 }

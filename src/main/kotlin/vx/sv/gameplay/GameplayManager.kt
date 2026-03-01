@@ -30,7 +30,7 @@ import vx.sv.nms.VersionBridge
 class GameplayManager(val firstWorld: World) : Listener {
 
     val config: GameplayConfiguration    = ConfigurationManager.load(plugin, GameplayConfiguration::class.java)
-    val allowedWorlds: MutableSet<World> = mutableSetOf(firstWorld)
+    val allowedWorlds: MutableSet<World> = mutableSetOf()
 
     val actualQuests = firstWorld.persistentDataContainer.get(NamespacedKey(plugin, "ActualQuests"), PersistentDataType.LONG_ARRAY)?.toMutableList() ?: mutableListOf<Long>().toLongArray().also {
         firstWorld.persistentDataContainer.set(NamespacedKey(plugin, "ActualQuests"), PersistentDataType.LONG_ARRAY, it)
@@ -39,6 +39,9 @@ class GameplayManager(val firstWorld: World) : Listener {
     init {
         plugin.gameplayManager = this
         plugin.server.pluginManager.registerEvents(this, plugin)
+        if (plugin.gameplayManager.config.worlds.allowedWorlds.contains(firstWorld.name)) {
+            this.allowedWorlds.add(firstWorld) // Add the first world only if it is allowed in cfg.
+        }
     }
 
     val personalityManager = PersonalityManager()

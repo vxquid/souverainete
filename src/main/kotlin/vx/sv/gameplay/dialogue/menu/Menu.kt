@@ -17,38 +17,63 @@ class Menu(
     var lastScrollTime: Long = 0
 ) {
 
-    data class Button(val display: TextDisplay, val defaultColor: Color = defaultButtonColor, val isRainbow: Boolean = false)
+    // Switched from Map to a List of MenuRows.
+    // This removes the need for heavy .toList() conversions every tick.
+    data class MenuRow(
+        val display: TextDisplay,
+        val defaultColor: Color,
+        val isRainbow: Boolean,
+        val action: () -> Unit
+    )
 
-    // Позиция для отображения текста
+    // The pivot point for text display
     private val pivot: Location = calculatePosition()
-    private val buttons: MutableMap<Button, () -> Unit> = mutableMapOf()
+    private val rows: MutableList<MenuRow> = mutableListOf()
 
     private val height = 1.4
-    private val maxDistance = 5.5
+    // Using squared distance avoids heavy Math.sqrt() calculations every tick
+    private val maxDistanceSq = 5.5 * 5.5
     private val size = 0.4F
     private val step = 0.125
 
     private val selectedColor = Color.fromARGB(150, 200, 200, 0)
+
+    var isDestroyed = false
+        private set
 
     init {
         openedMenuList.add(this)
     }
 
     /**
-     * Вычисляет позицию отображения текста относительно игрока и жителя.
+     * Calculates the position to display text between the player and the villager.
      */
     private fun calculatePosition(): Location {
-        return viewer.eyeLocation.add(villager.location.add(0.0, height, 0.0)).multiply(0.5)
+        val vLoc = villager.location.clone().add(0.0, height, 0.0)
+        val pLoc = viewer.eyeLocation.clone()
+
+        // CRITICAL: Prevent IllegalArgumentException if entities are in different worlds
+        if (vLoc.world != pLoc.world) {
+            return pLoc // Fallback to avoid crash before destroy() handles it
+        }
+
+        return pLoc.add(vLoc).multiply(0.5)
     }
 
     /**
-     * Перемещает GUI, если игрок находится в пределах допустимого расстояния.
+     * Moves the GUI or destroys it if the player is out of range/in another world.
      */
     fun relocate() {
-        if (viewer.location.distance(villager.location.add(0.0, height, 0.0)) > maxDistance) {
+        if (isDestroyed) return
+
+        val targetLoc = villager.location.clone().add(0.0, height, 0.0)
+
+        // Safety check: different worlds OR too far away
+        if (viewer.world != targetLoc.world || viewer.location.distanceSquared(targetLoc) > maxDistanceSq) {
             destroy()
             return
         }
+
         updatePosition()
         updateSelection()
         plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager).talkingPlayer = viewer
@@ -56,8 +81,8 @@ class Menu(
 
     private fun updatePosition() {
         val newLocation = calculatePosition()
-        buttons.keys.forEachIndexed { index, button ->
-            button.display.teleport(newLocation.clone().add(0.0, -index * step, 0.0))
+        rows.forEachIndexed { index, row ->
+            row.display.teleport(newLocation.clone().add(0.0, -index * step, 0.0))
         }
     }
 
@@ -68,22 +93,26 @@ class Menu(
         }
 
     /**
-     * Добавляет текстовую строку и связанную с ней функцию в GUI.
+     * Adds a text line and its associated function to the GUI.
      *
-     * @param text Текст для отображения.
-     * @param function Функция, вызываемая при выборе этой строки.
+     * @param text Text to display.
+     * @param function Function invoked when this line is selected.
      */
     fun addLine(text: String, buttonColor: Color = defaultButtonColor, rainbow: Boolean = false, function: () -> Unit) {
-        val button = Button(this.createButtonDisplay(text, buttonColor), isRainbow = rainbow)
-        buttons[button] = function
+        val display = createButtonDisplay(text, buttonColor)
+        rows.add(MenuRow(display, buttonColor, rainbow, function))
         updateSelection()
     }
 
-    private fun createButtonDisplay(text: String, buttonColor: Color = defaultButtonColor, rainbow: Boolean = false): TextDisplay {
+    private fun createButtonDisplay(text: String, buttonColor: Color): TextDisplay {
         val display = viewer.world.spawnEntity(
-            pivot.clone().add(0.0, -buttons.size * step, 0.0),
+            pivot.clone().add(0.0, -rows.size * step, 0.0),
             EntityType.TEXT_DISPLAY
         ) as TextDisplay
+
+        // CRITICAL MEMORY LEAK FIX: Ensure displays don't remain as ghosts if the server stops/crashes
+        display.isPersistent = false
+
         display.isVisibleByDefault = false
         viewer.showEntity(plugin, display)
         display.transformation = Transformation(Vector3f(0f, 0f, 0f), AxisAngle4f(), Vector3f(size, size, size), AxisAngle4f())
@@ -94,35 +123,49 @@ class Menu(
     }
 
     private fun updateSelection() {
-        buttons.keys.forEach { button -> button.display.backgroundColor  = if (button.isRainbow) rainbowColor else button.defaultColor }
-        buttons.keys.toList().getOrNull(index)?.display?.backgroundColor = selectedColor
-    }
+        if (rows.isEmpty()) return
 
-    /**
-     * Вызывает функцию, связанную с текущим выбранным элементом.
-     */
-    fun invokeSelected() {
-        buttons.keys.toList().getOrNull(index)?.let { display ->
-            buttons[display]?.invoke()
+        // Completely removed heavy Map.keys.toList() allocations. O(n) now instead of memory spam.
+        rows.forEachIndexed { i, row ->
+            row.display.backgroundColor = when {
+                i == index -> selectedColor
+                row.isRainbow -> rainbowColor
+                else -> row.defaultColor
+            }
         }
     }
 
     /**
-     * Уничтожает GUI и освобождает ресурсы.
+     * Invokes the function associated with the currently selected item.
      */
-    fun destroy() {
-        openedMenuList.remove(this)
-        buttons.keys.forEach { it.display.remove() }
-        buttons.clear()
+    fun invokeSelected() {
+        rows.getOrNull(index)?.action?.invoke()
     }
 
     /**
-     * Циклический индекс для навигации по доступным строкам.
+     * Destroys the GUI and frees resources.
+     */
+    fun destroy() {
+        if (isDestroyed) return
+        isDestroyed = true
+
+        // NOTE: If this destroy() is called while looping through `openedMenuList`
+        // in your handler, it may throw ConcurrentModificationException.
+        // Using CopyOnWriteArrayList for `openedMenuList` inside InteractionHandler is highly recommended.
+        openedMenuList.remove(this)
+
+        rows.forEach { it.display.remove() }
+        rows.clear()
+    }
+
+    /**
+     * Cyclic index for navigating available lines.
      */
     private fun cyclicIndex(value: Int): Int {
+        if (rows.isEmpty()) return 0
         return when {
-            value >= buttons.size -> 0
-            value < 0 -> buttons.size - 1
+            value >= rows.size -> 0
+            value < 0 -> rows.size - 1
             else -> value
         }
     }

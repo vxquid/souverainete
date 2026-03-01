@@ -98,6 +98,17 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
             it.add(EntityData(if (newIndexing) 16 else 17, EntityDataTypes.BYTE, SkinSection.ALL.mask))
         }
 
+        // Generate unique fake name based on UUID for scoreboard teams handling
+        val fakeName = humanoid.uniqueId.toString().substring(0, 16)
+
+        // Checking nameless team existence and adding unique entity fake name.
+        val team = plugin.server.scoreboardManager.mainScoreboard.getTeam("NamelessTeam") ?: plugin.server.scoreboardManager.mainScoreboard.registerNewTeam("NamelessTeam").apply {
+            setOption(Team.Option.NAME_TAG_VISIBILITY, Team.OptionStatus.NEVER)
+        }
+        if (!team.hasEntry(fakeName)) {
+            team.addEntry(fakeName)
+        }
+
         // Modifying base attributes
         humanoid.race.let { race ->
             race.attributes.forEach { (attribute, value) ->
@@ -238,9 +249,10 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                     when {
 
                         !registered -> {
+                            val fakeName = entity.uniqueId.toString().substring(0, 16)
                             HumanoidDataWrapper(
                                 entity,
-                                UserProfile(entity.uniqueId, "HideMyName"),
+                                UserProfile(entity.uniqueId, fakeName),
                                 entity.race
                             ).also { controller ->
                                 humanoidRegistry[entity] = controller

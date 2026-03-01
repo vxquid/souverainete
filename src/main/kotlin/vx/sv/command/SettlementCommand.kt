@@ -179,16 +179,17 @@ class SettlementCommand : BaseCommand() {
         // Temporarily override relationship to WAR just to make the raid logically sound for testing
         SettlementManager.setRelation(attacker, defender, Settlement.RelationLevel.WAR)
 
-        // Trigger the raid manually
+        // Trigger the raid manually.
         plugin.gameplayManager.raidManager.startRaid(attacker, defender)
 
-        val raidStartedMsg = plugin.language.getString(
-            "info-messages.settlement-command.raid-started",
-            "§aSuccessfully started a raid! Attacker: {attacker}, Defender: {defender}."
-        )!!.replace("{attacker}", attacker.data.settlementName)
-            .replace("{defender}", defender.data.settlementName)
+        val broadcastRaidMessage = plugin.language.getString("raid.chat.started-broadcast")
+            ?.replace("{attacker}", attacker.data.settlementName)
+            ?.replace("{defender}", defender.data.settlementName)
+            ?: "§c⚔ A raid has begun: §6${attacker.data.settlementName} §chas attacked §6${defender.data.settlementName}§c!"
 
-        player.sendFormattedMessage(raidStartedMsg)
+        player.world.players.forEach { player ->
+            player.sendMessage(broadcastRaidMessage)
+        }
     }
 
 }

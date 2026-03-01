@@ -12,8 +12,8 @@ settlement-reputation:
 
 # Settlement related messages.
 settlement:
-  entering: "You entering a settlement."
-  leaving: "You leaving a settlement."
+  entering: "You are entering a settlement."
+  leaving: "You are leaving a settlement."
   created: "§eA new settlement has been founded: §6{settlementName}§e."
 
   size:
@@ -79,20 +79,24 @@ raid:
   entity:
     raider-name: "§cRaider ({attacker})"
   chat:
+    started-broadcast: "§c⚔ A raid has begun: §6{attacker} §chas attacked §6{defender}§c!"
     wave-started: "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!"
     reinforcements: "§c⚔ Reinforcements have arrived for §6{attacker}§c!"
     victory: "§a⚔ The raid on §6{defender} §ahas been repelled! Victory!"
     abandoned: "§e⚔ The siege failed. The raiders decided to take their loot and retreat."
     loss: "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c."
     loss-wiped: "§4☠ §cThe settlement {defender} has been wiped out!"
+  world-summary:
+    header: "§e⚔ Military conflicts are currently taking place in this world:"
+    active-raid: "§c⚔ The settlement §6{settlement} §cis under attack!"
 
 quest:
   finished: "You have finished the quest §6{quest}§7."
   failed:
-    npcDeath: "Quest §6{quest} §7was failed; villager who gave you a quest is dead."
+    npcDeath: "Quest §6{quest} §7was failed; the villager who gave you the quest is dead."
     timeExpiration: "Quest §6{quest} §7was failed; quest duration expired."
-    finishedBySomeoneElse: "Quest §6{quest} §7was failed; it finished by someone else."
-    notActual: "Quest §6{quest} §7was failed; it's not actual anymore."
+    finishedBySomeoneElse: "Quest §6{quest} §7was failed; it was finished by someone else."
+    notActual: "Quest §6{quest} §7was failed; it's not relevant anymore."
   accepted: "You have accepted the quest §6{quest}§7."
   limit: "You can't have more than §6{playerQuestLimit} §7quests."
   already-accepted: "You already have this quest."
