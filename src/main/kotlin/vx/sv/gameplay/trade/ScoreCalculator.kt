@@ -20,7 +20,7 @@ object ScoreCalculator {
     /**
      * Вызывать при запуске плагина (onEnable) и при перезагрузке конфигов.
      */
-    fun reload() {
+    fun init() {
         materialPriceCache.clear()
         potionPriceCache.clear()
         missingPricesLogged.clear()

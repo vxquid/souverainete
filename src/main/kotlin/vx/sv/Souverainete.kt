@@ -23,6 +23,7 @@ import vx.sv.config.lib.TranslationManager
 import vx.sv.gameplay.GameplayManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
+import vx.sv.gameplay.trade.ScoreCalculator
 import vx.sv.serialization.ItemStackSerializer
 import vx.sv.serialization.LocationSerializer
 import vx.sv.serialization.UUIDSerializer
@@ -74,6 +75,7 @@ class Souverainete : JavaPlugin(), Listener {
 
     override fun onEnable() {
 
+        ScoreCalculator.init()
         RainbowColorTicker.init()
         this.providerManager = ProviderManager()
         this.translationManager = TranslationManager(this, providerManager.client, providerManager.config.language)
@@ -154,7 +156,7 @@ class Souverainete : JavaPlugin(), Listener {
 
     companion object {
 
-        val premium: Boolean = false
+        val premium: Boolean = true
         lateinit var plugin: Souverainete
         lateinit var gson: Gson
 

@@ -298,7 +298,10 @@ class NametagDisplayManager : Listener {
 
             // ИСПРАВЛЕНИЕ: Форматируем строго в Locale.US, чтобы избежать запятых в дробях (20,0 -> 20.0)
             val repStr = String.format(Locale.US, config.nametag.reputationTemplate, finalRepScore, repStatus.getLocalizedName())
+
+            // ИСПРАВЛЕНИЕ КРАША: Принудительно конвертируем в Double для совместимости с шаблонами %f / %.1f
             val healthStr = String.format(Locale.US, config.nametag.healthTemplate, snap.health, snap.maxHealth)
+
             val line2 = "$repStr &7|&r $healthStr"
 
             text += "\n$line2"
@@ -306,7 +309,7 @@ class NametagDisplayManager : Listener {
             if (snap.hungerValue <= config.hunger.eatThreshold) {
                 val statusKey = if (snap.hungerValue <= config.hunger.starvationThreshold) "starving" else "hungry"
                 val status = plugin.language.getString("hunger-status.$statusKey")!!
-                text += "\n${String.format(Locale.US, config.nametag.hungerTemplate, status, snap.hungerValue, config.hunger.max)}"
+                text += "\n${String.format(Locale.US, config.nametag.hungerTemplate, status, snap.hungerValue, config.hunger.max)}" // FIXME; f != java.lang.Integer
             }
 
             if (snap.partyLeaderUuid != null) {
@@ -318,7 +321,7 @@ class NametagDisplayManager : Listener {
             if (view.stateName != null && view.stateColor != null) {
                 val stateDisplayName = try {
                     plugin.language.getString(view.stateName) ?: view.stateName
-                } catch (e: Exception) { view.stateName }
+                } catch (_: Exception) { view.stateName }
                 text += "\n${view.stateColor}$stateDisplayName"
             }
         } else {

@@ -364,13 +364,45 @@ class QuestManager : Listener {
 
         private val questInfo = plugin.gameplayManager.questManager.gatheringDescription.replace("{taskDescription}", plugin.gameplayManager.questManager.taskDescriptions[questType]!!)
 
-        private val questPrompt = "Answer only in JSON format, without unnecessary text, make sure it will be JSON parseable. Generate a quest for NPC using the following JSON scheme: " +
-                "`questNames` — string array, five short but creative quest names, must differ from each other" +
-                "`extraShortTaskDescription` — extremely short description of the task (goal, quest giver name, amount), " +
-                "`shortRequiredQuestItemDescription` — a short (literally one sentence) description of the item in the context of the quest (from the third party), " +
-                "string array of `reputationBasedQuestDescriptions` and string array of `reputationBasedQuestFinishingDialogues` which will shift from the most negative reputation to the most positive (existing reputation states: exiled, hostile, unfriendly, neutral, friendly, honored, revered, exalted, don't mention the exact status, just play around it, eight values must be in each array). " +
-                "The writing style must be strictly tailored in the following order: global setting, race (race description), character definition, current biome, profession (profession level), gender. Start with a neutral description — it'll be easier for you to navigate that way. Don't shorten the descriptions because it's an array — we don't want scraps of phrases, right? Then, sort the content of the array from the worst to the best reputation. All content must be written in the first person to enhance player immersion and believability. In places where the npc want to address the player, use the %playerName% placeholder. " +
-                "The following is the information about the NPC: name is {npcName}, current biome is {currentBiome}, NPC personality definition is [{npcPersonality}], race is {npcRace} and race description: [{raceDescription}], profession is {npcProfession}, npc profession mastery level is {npcProfessionLevel}, npc gender is {npcGender}. {questInfo}"
+        private val questPrompt = """
+            You are an expert game narrative designer and voice actor. Your task is to generate a quest for an NPC.
+            Respond ONLY with valid, parseable JSON. Do not include markdown code blocks (like ```json), explanations, or any other text.
+        
+            ### JSON SCHEMA TO FOLLOW:
+            {
+              "questNames":[
+                // Array of 5 short, creative, and distinct quest names (Do NOT use personalized dialogue here)
+              ],
+              "extraShortTaskDescription": "Extremely short description of the task (Goal, Quest Giver Name, Amount).",
+              "shortRequiredQuestItemDescription": "Literally one sentence describing the item in the context of the quest (written in third-person perspective).",
+              "reputationBasedQuestDescriptions":[
+                // Array of exactly 8 strings (Written in FIRST-PERSON perspective).
+                // Order strictly from worst to best reputation: 1. Exiled, 2. Hostile, 3. Unfriendly, 4. Neutral, 5. Friendly, 6. Honored, 7. Revered, 8. Exalted.
+                // Do NOT mention the reputation name directly, reflect the attitude in the tone. Do not shorten phrases.
+              ],
+              "reputationBasedQuestFinishingDialogues":[
+                // Array of exactly 8 strings (Written in FIRST-PERSON perspective).
+                // Same 8 reputation stages and rules as above.
+              ]
+            }
+        
+            ### WRITING STYLE & RULES:
+            1. Deep Roleplay: Fully embody the NPC. Tone, vocabulary, and worldview MUST be heavily influenced by the following priority: Global Setting > Personality > Race > Biome > Profession > Gender.
+            2. Personal Connection: In the dialogue arrays (QuestDescriptions and FinishingDialogues), the NPC must communicate with the player in a highly personal, expressive, and engaging manner tailored to the current reputation level.
+            3. Clear Requests & Motives: In the dialogue, the NPC must explicitly state WHAT they need the player to do and explain WHY they need it done (their underlying motive/reason). Only omit the "why" if the NPC's specific personality (e.g., highly secretive, arrogant, mindless) strictly forbids explaining themselves.
+            4. Player Placeholder: Whenever the NPC addresses the player directly, use exactly "%playerName%".
+        
+            ### NPC & QUEST CONTEXT:
+            - Global Setting: {globalSetting}
+            - NPC Name: {npcName}
+            - Personality: {npcPersonality}
+            - Race: {npcRace}
+            - Race Description: {raceDescription}
+            - Profession: {npcProfession} (Mastery Level: {npcProfessionLevel})
+            - Current Biome: {currentBiome}
+            - Gender: {npcGender}
+            - Quest Info: {questInfo}
+        """.trimIndent()
 
         val questItem = questType.strategy.get(questGiver)
         val currency  = questGiver.race.normalCurrency.get() ?: throw NullPointerException("Can't get race normal currency: ${questGiver.race.name}.")
