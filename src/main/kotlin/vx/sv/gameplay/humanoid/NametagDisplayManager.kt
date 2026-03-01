@@ -291,15 +291,11 @@ class NametagDisplayManager : Listener {
 
         if (isFocused) {
             val repManager = plugin.gameplayManager.reputationManager
-            // ИСПРАВЛЕНИЕ: Теперь проверяем репутацию по UUID игрока, а не по UUID моба
             val settlementRep = snap.settlementRepMap[playerUUID] ?: 0
             val finalRepScore = view.personalRep + settlementRep
             val repStatus = repManager.getReputationStatusFromScore(finalRepScore)
 
-            // ИСПРАВЛЕНИЕ: Форматируем строго в Locale.US, чтобы избежать запятых в дробях (20,0 -> 20.0)
             val repStr = String.format(Locale.US, config.nametag.reputationTemplate, finalRepScore, repStatus.getLocalizedName())
-
-            // ИСПРАВЛЕНИЕ КРАША: Принудительно конвертируем в Double для совместимости с шаблонами %f / %.1f
             val healthStr = String.format(Locale.US, config.nametag.healthTemplate, snap.health, snap.maxHealth)
 
             val line2 = "$repStr &7|&r $healthStr"
@@ -309,7 +305,16 @@ class NametagDisplayManager : Listener {
             if (snap.hungerValue <= config.hunger.eatThreshold) {
                 val statusKey = if (snap.hungerValue <= config.hunger.starvationThreshold) "starving" else "hungry"
                 val status = plugin.language.getString("hunger-status.$statusKey")!!
-                text += "\n${String.format(Locale.US, config.nametag.hungerTemplate, status, snap.hungerValue, config.hunger.max)}" // FIXME; f != java.lang.Integer
+
+                // FIX: Cast integer values to Double to satisfy the %f format specifiers in the config template
+                val hungerStr = String.format(
+                    Locale.US,
+                    config.nametag.hungerTemplate,
+                    status,
+                    snap.hungerValue.toDouble(),
+                    config.hunger.max.toDouble()
+                )
+                text += "\n$hungerStr"
             }
 
             if (snap.partyLeaderUuid != null) {
@@ -321,7 +326,7 @@ class NametagDisplayManager : Listener {
             if (view.stateName != null && view.stateColor != null) {
                 val stateDisplayName = try {
                     plugin.language.getString(view.stateName) ?: view.stateName
-                } catch (_: Exception) { view.stateName }
+                } catch (e: Exception) { view.stateName }
                 text += "\n${view.stateColor}$stateDisplayName"
             }
         } else {
@@ -335,7 +340,6 @@ class NametagDisplayManager : Listener {
 
     private fun determineBackgroundColor(snap: NpcSnapshot, playerUUID: UUID, configColor: List<Int>, isFocused: Boolean): Int {
         val settlementRep = snap.settlementRepMap[playerUUID] ?: 0
-        val totalRep = settlementRep
 
         val baseAlpha = configColor[0]
         val targetAlpha = if (isFocused) baseAlpha else max(20, baseAlpha - 130)
@@ -344,8 +348,8 @@ class NametagDisplayManager : Listener {
             snap.isRaider -> Color.fromARGB(targetAlpha, 130, 20, 20)
             snap.partyLeaderUuid == playerUUID -> Color.fromARGB(targetAlpha, 20, 130, 20)
             snap.partyLeaderUuid != null -> Color.fromARGB(targetAlpha, 20, 90, 140)
-            totalRep > 100 -> Color.fromARGB(targetAlpha, 30, 110, 30)
-            totalRep < -50 -> Color.fromARGB(targetAlpha, 120, 50, 20)
+            settlementRep > 100 -> Color.fromARGB(targetAlpha, 30, 110, 30)
+            settlementRep < -50 -> Color.fromARGB(targetAlpha, 120, 50, 20)
             else -> {
                 when (snap.professionName) {
                     "armorer", "weaponsmith", "toolsmith", "guard" -> Color.fromARGB(targetAlpha, 60, 65, 75)
