@@ -1,5 +1,6 @@
 package vx.sv.gameplay.reputation
 
+import org.bukkit.GameMode
 import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.entity.IronGolem
@@ -30,14 +31,16 @@ class ReputationTracker : Listener {
     private val repManager = plugin.gameplayManager.reputationManager
     private val config get() = plugin.gameplayManager.config.reputation
 
-    // Annoyance timers: NPC UUID + Player UUID -> Contact start timestamp
+    // Annoyance timers: NPC UUID to Player UUID -> Contact start timestamp
     private val annoyanceTimers = mutableMapOf<Pair<UUID, UUID>, Long>()
 
     // Phrase cooldowns: NPC UUID -> Last shout timestamp
     private val shoutCooldowns = mutableMapOf<UUID, Long>()
 
-    // Personal space radius for Unfriendly warnings
-    private val personalSpaceRadius = 5.0
+    // Pre-calculated squared radius for performance (5.0 * 5.0 = 25.0)
+    private val personalSpaceRadiusSq = 25.0
+    // Squared distance to check before calculating heavy RayTrace (hasLineOfSight) in NPC vs NPC
+    private val npcWarfareRadiusSq = 225.0 // 15 blocks
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
@@ -49,7 +52,16 @@ class ReputationTracker : Listener {
         AGGRESSIVE("npc-state.aggressive", "§c")
     }
 
+    /**
+     * Checks if the player should be ignored by the NPC AI (Creative / Spectator)
+     */
+    private fun isIgnored(player: Player): Boolean {
+        return player.gameMode == GameMode.CREATIVE || player.gameMode == GameMode.SPECTATOR
+    }
+
     fun getNPCState(npc: LivingEntity, player: Player): NPCState? {
+        if (isIgnored(player)) return null
+
         val finalStatus = getFinalStatus(npc, player)
 
         if (finalStatus.ordinal >= Reputation.HOSTILE.ordinal) {
@@ -78,80 +90,99 @@ class ReputationTracker : Listener {
      * Evaluates both Player vs NPC and NPC vs NPC (Warfare).
      */
     private fun startAggressionTicker() {
+        // Increased interval to 40 ticks (2 seconds) to save TPS.
+        // 2 seconds is a perfectly fine reaction time for NPCs.
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
+            val now = System.currentTimeMillis()
+
+            // 1. Time-based cleanup: remove stale annoyance timers (older than 30s)
+            // This replaces the extremely heavy plugin.server.getEntity(UUID) call.
+            annoyanceTimers.entries.removeIf { now - it.value > 30000L }
+
+            // Cache to prevent redundant NPC vs NPC checks if players' view distances overlap
+            val checkedNpcPairs = mutableSetOf<Pair<UUID, UUID>>()
+
             for (player in plugin.server.onlinePlayers) {
+                if (isIgnored(player)) continue
+
                 val playerSettlement = player.currentSettlement
-                val nearby = player.getNearbyEntities(config.aggressionRadius, config.aggressionRadius, config.aggressionRadius)
 
-                // Cleanup timers if player is out of range or left the settlement
-                annoyanceTimers.keys.removeIf { it.second == player.uniqueId &&
-                        (playerSettlement == null || player.location.distance(plugin.server.getEntity(it.first)?.location ?: player.location) > personalSpaceRadius)
-                }
+                // Limiting bounding box entities fetching
+                val npcs = player.getNearbyEntities(config.aggressionRadius, config.aggressionRadius, config.aggressionRadius)
+                    .filterIsInstance<LivingEntity>()
+                    .filter { !it.isDead && (it is Villager || it is IronGolem) }
 
-                // Gather nearby NPCs for internal warfare checks
-                val npcs = nearby.filterIsInstance<LivingEntity>().filter { it is Villager || it is IronGolem }
+                // --- 2. Player vs NPC Logic ---
+                for (npc in npcs) {
+                    val pair = npc.uniqueId to player.uniqueId
 
-                // --- 1. Player vs NPC Logic ---
-                for (entity in npcs) {
-                    if (playerSettlement == null || (entity.settlement != null && entity.settlement?.data?.settlementName != playerSettlement)) {
-                        resetAggro(entity, player)
+                    // If player is not in a settlement or in a different settlement
+                    if (playerSettlement == null || npc.settlement?.data?.settlementName != playerSettlement) {
+                        if (annoyanceTimers.containsKey(pair)) resetAggro(npc, player)
                         continue
                     }
 
-                    val finalStatus = getFinalStatus(entity, player)
-                    val pair = entity.uniqueId to player.uniqueId
-                    val distance = entity.location.distance(player.location)
+                    val finalStatus = getFinalStatus(npc, player)
+                    // PERFORMANCE: Use distanceSquared to avoid Math.sqrt()
+                    val distanceSq = npc.location.distanceSquared(player.location)
 
                     when {
                         finalStatus == Reputation.UNFRIENDLY -> {
-                            if (distance <= personalSpaceRadius && entity.hasLineOfSight(player)) {
+                            // Check distance first, ONLY then use heavy RayTrace (hasLineOfSight)
+                            if (distanceSq <= personalSpaceRadiusSq && npc.hasLineOfSight(player)) {
                                 val startTime = annoyanceTimers.getOrPut(pair) {
-                                    shoutWithCooldown(entity, entity.race.phrases.warning.randomOrNull(), isAggressive = true)
-                                    System.currentTimeMillis()
+                                    shoutWithCooldown(npc, npc.race.phrases.warning.randomOrNull(), isAggressive = true)
+                                    now
                                 }
-                                if (System.currentTimeMillis() - startTime > 20000L) {
-                                    triggerAggression(entity, player, isFullCombat = false)
+                                if (now - startTime > 20000L) {
+                                    triggerAggression(npc, player, isFullCombat = false)
                                 }
+                            } else {
+                                // Player backed off or hid behind a wall -> remove annoyance
+                                annoyanceTimers.remove(pair)
                             }
                         }
                         finalStatus.ordinal >= Reputation.HOSTILE.ordinal -> {
-                            if (entity.hasLineOfSight(player)) {
-                                triggerAggression(entity, player, isFullCombat = true)
-                                callForHelp(entity, player)
+                            if (npc.hasLineOfSight(player)) {
+                                triggerAggression(npc, player, isFullCombat = true)
+                                callForHelp(npc, player)
                             }
                         }
                         else -> annoyanceTimers.remove(pair)
                     }
                 }
 
-                // --- 2. NPC vs NPC Logic (Settlement Warfare) ---
-                // O(N^2) check is lightweight here because 'npcs' list is limited to player's view distance
+                // --- 3. NPC vs NPC Logic (Settlement Warfare) ---
                 for (i in npcs.indices) {
                     for (j in i + 1 until npcs.size) {
                         val npc1 = npcs[i]
                         val npc2 = npcs[j]
+
+                        // Prevent reverse pair checking (A->B and B->A)
+                        val pairId = if (npc1.uniqueId > npc2.uniqueId) npc1.uniqueId to npc2.uniqueId else npc2.uniqueId to npc1.uniqueId
+                        if (!checkedNpcPairs.add(pairId)) continue
 
                         val s1 = npc1.settlement ?: continue
                         val s2 = npc2.settlement ?: continue
 
                         // Proceed only if they belong to different settlements
                         if (s1.data.id != s2.data.id) {
-                            val relation = SettlementManager.getRelation(s1, s2)
-                            if (relation == Settlement.RelationLevel.WAR) {
-                                if (npc1.hasLineOfSight(npc2)) {
-                                    triggerAggression(npc1, npc2, isFullCombat = true)
-                                    callForHelp(npc1, npc2)
-                                }
-                                if (npc2.hasLineOfSight(npc1)) {
-                                    triggerAggression(npc2, npc1, isFullCombat = true)
-                                    callForHelp(npc2, npc1)
+                            if (SettlementManager.getRelation(s1, s2) == Settlement.RelationLevel.WAR) {
+                                // PERFORMANCE: Check distance first
+                                if (npc1.location.distanceSquared(npc2.location) <= npcWarfareRadiusSq) {
+                                    // PERFORMANCE: Only one Line of Sight check instead of two
+                                    if (npc1.hasLineOfSight(npc2)) {
+                                        triggerAggression(npc1, npc2, isFullCombat = true)
+                                        triggerAggression(npc2, npc1, isFullCombat = true) // Mutual aggression
+                                        callForHelp(npc1, npc2)
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }, 20L, 20L)
+        }, 40L, 40L)
     }
 
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -159,7 +190,8 @@ class ReputationTracker : Listener {
         val victim = event.entity as? LivingEntity ?: return
         val attacker = event.damager as? Player ?: return
 
-        if (victim is IronGolem || victim !is Villager) return
+        if (isIgnored(attacker)) return
+        if (victim !is Villager && victim !is IronGolem) return
 
         val penalty = (event.damage * config.damageReputationMultiplier).toInt()
         if (penalty > 0) repManager.addReputation(victim, attacker, -penalty)
@@ -173,13 +205,13 @@ class ReputationTracker : Listener {
     @EventHandler
     fun onEntityDeath(event: EntityDeathEvent) {
         val victim = event.entity
-        val killerEntity = victim.killer
+        val killerEntity = victim.killer ?: return
 
         if (victim is Villager || victim is IronGolem) {
-            annoyanceTimers.keys.removeIf { it.first == victim.uniqueId }
+            annoyanceTimers.entries.removeIf { it.key.first == victim.uniqueId }
             shoutCooldowns.remove(victim.uniqueId)
 
-            if (killerEntity == null) return
+            if (isIgnored(killerEntity)) return
             val settlement = victim.settlement ?: return
 
             val currentSettlementRep = settlement.data.reputation.getOrDefault(killerEntity.uniqueId, 0)
@@ -196,7 +228,7 @@ class ReputationTracker : Listener {
 
             val witnesses = victim.getNearbyEntities(config.witnessRadius, config.witnessRadius, config.witnessRadius)
                 .filterIsInstance<LivingEntity>()
-                .filter { (it is Villager || it is IronGolem) && !it.isDead && it.settlement == settlement }
+                .filter { !it.isDead && (it is Villager || it is IronGolem) && it.settlement == settlement }
 
             witnesses.randomOrNull()?.let { screamer ->
                 val phrase = screamer.race.phrases.witnessMurder.randomOrNull()?.replace("{victim}", victim.customName ?: victim.name)
@@ -207,22 +239,23 @@ class ReputationTracker : Listener {
             return
         }
 
-        if (killerEntity == null) return
+        // PERFORMANCE: Fail-fast check!
+        // Avoid heavy territory (AABB/Polygon) checks for neutral animals or unconfigured mobs
+        val repGain = config.monsterKillReputation[victim.type.name] ?: return
+        if (repGain <= 0) return
 
         val worldSettlements = settlements[victim.world] ?: return
+        // Only run territory.contains() if we are 100% sure it's a valid monster that yields reputation
         val activeSettlement = worldSettlements.find { it.territory.contains(victim.location.toVector()) } ?: return
 
-        val repGain = config.monsterKillReputation[victim.type.name] ?: 0
-        if (repGain > 0) {
-            val currentRep = activeSettlement.data.reputation.getOrDefault(killerEntity.uniqueId, 0)
-            activeSettlement.data.reputation[killerEntity.uniqueId] = currentRep + repGain
+        val currentRep = activeSettlement.data.reputation.getOrDefault(killerEntity.uniqueId, 0)
+        activeSettlement.data.reputation[killerEntity.uniqueId] = currentRep + repGain
 
-            if (config.chatNotification) {
-                val msg = plugin.language.getString("settlement-reputation.increase")!!
-                    .replace("{entity}", activeSettlement.data.settlementName)
-                    .replace("{amount}", repGain.toString())
-                killerEntity.sendMessage(msg)
-            }
+        if (config.chatNotification) {
+            val msg = plugin.language.getString("settlement-reputation.increase")!!
+                .replace("{entity}", activeSettlement.data.settlementName)
+                .replace("{amount}", repGain.toString())
+            killerEntity.sendMessage(msg)
         }
     }
 
@@ -230,6 +263,11 @@ class ReputationTracker : Listener {
     fun onGolemTarget(event: EntityTargetLivingEntityEvent) {
         if (event.entity !is IronGolem) return
         val target = event.target ?: return
+
+        if (target is Player && isIgnored(target)) {
+            event.isCancelled = true
+            return
+        }
 
         if (target is Villager || target is IronGolem) {
             val golem = event.entity as IronGolem
@@ -250,8 +288,11 @@ class ReputationTracker : Listener {
 
     /**
      * Triggers the NPC attack towards any LivingEntity (Player or rival NPC).
+     * Must be executed synchronously!
      */
     private fun triggerAggression(npc: LivingEntity, target: LivingEntity, isFullCombat: Boolean) {
+        if (target is Player && isIgnored(target)) return
+
         val phrasePool = if (isFullCombat) {
             npc.race.phrases.startFight
         } else {
@@ -295,7 +336,7 @@ class ReputationTracker : Listener {
         val settlement = caller.settlement ?: return
         caller.getNearbyEntities(15.0, 10.0, 15.0)
             .filterIsInstance<LivingEntity>()
-            .filter { (it is Villager || it is IronGolem) && it.settlement == settlement }
+            .filter { !it.isDead && (it is Villager || it is IronGolem) && it.settlement == settlement }
             .forEach { triggerAggression(it, enemy, isFullCombat = true) }
     }
 

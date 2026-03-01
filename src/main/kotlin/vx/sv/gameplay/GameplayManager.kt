@@ -20,10 +20,10 @@ import vx.sv.gameplay.profession.ProfessionManager
 import vx.sv.gameplay.quest.QuestManager
 import vx.sv.gameplay.reputation.ReputationManager
 import vx.sv.gameplay.reputation.ReputationTracker
-import vx.sv.gameplay.settlement.PoliticsManager
-import vx.sv.gameplay.settlement.RaidManager
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
+import vx.sv.gameplay.settlement.politics.PoliticsManager
+import vx.sv.gameplay.settlement.politics.RaidManager
 import vx.sv.gameplay.trade.TradeManager
 import vx.sv.nms.VersionBridge
 

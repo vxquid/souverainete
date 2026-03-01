@@ -1,7 +1,9 @@
-package vx.sv.gameplay.settlement
+package vx.sv.gameplay.settlement.politics
 
 import org.bukkit.event.Listener
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.settlement.Settlement
+import vx.sv.gameplay.settlement.SettlementManager
 
 class RaidManager : Listener {
 
@@ -36,7 +38,7 @@ class RaidManager : Listener {
             totalWaves = 3
         )
         defender.data.activeRaid = raidData
-        SettlementManager.saveSettlements(defender.world)
+        SettlementManager.Companion.saveSettlements(defender.world)
 
         val raid = SettlementRaid(defender, raidData)
         activeRaids.add(raid)

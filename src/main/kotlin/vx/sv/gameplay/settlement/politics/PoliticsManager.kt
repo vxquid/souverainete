@@ -1,4 +1,4 @@
-package vx.sv.gameplay.settlement
+package vx.sv.gameplay.settlement.politics
 
 import org.bukkit.World
 import org.bukkit.entity.Player
@@ -8,6 +8,8 @@ import org.bukkit.event.player.PlayerChangedWorldEvent
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.player.PlayerRespawnEvent
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.settlement.Settlement
+import vx.sv.gameplay.settlement.SettlementManager
 import kotlin.random.Random
 
 class PoliticsManager : Listener {
@@ -31,7 +33,7 @@ class PoliticsManager : Listener {
         if (worlds.isEmpty()) return
 
         val world = worlds.random()
-        val worldSettlements = SettlementManager.settlements[world] ?: return
+        val worldSettlements = SettlementManager.Companion.settlements[world] ?: return
         if (worldSettlements.size < 2) return
 
         val initiator = worldSettlements.random()
@@ -56,7 +58,7 @@ class PoliticsManager : Listener {
      * Prevents jumping straight from ALLIANCE to WAR.
      */
     private fun shiftRelation(settlementA: Settlement, settlementB: Settlement) {
-        val currentRelation = SettlementManager.getRelation(settlementA, settlementB)
+        val currentRelation = SettlementManager.Companion.getRelation(settlementA, settlementB)
         val values = Settlement.RelationLevel.values()
         val currentIndex = currentRelation.ordinal
 
@@ -70,7 +72,7 @@ class PoliticsManager : Listener {
         val newRelation = values[newIndex]
 
         if (newRelation != currentRelation) {
-            SettlementManager.setRelation(settlementA, settlementB, newRelation)
+            SettlementManager.Companion.setRelation(settlementA, settlementB, newRelation)
             plugin.logger.info("[Politics] Relation shift: ${settlementA.data.settlementName} and ${settlementB.data.settlementName} are now $newRelation.")
         }
     }
@@ -79,7 +81,7 @@ class PoliticsManager : Listener {
      * Contextual critical events. Allies won't betray each other instantly.
      */
     private fun triggerCriticalEvent(initiator: Settlement, target: Settlement) {
-        val currentRelation = SettlementManager.getRelation(initiator, target)
+        val currentRelation = SettlementManager.Companion.getRelation(initiator, target)
 
         when (currentRelation) {
             Settlement.RelationLevel.WAR -> {
@@ -101,7 +103,7 @@ class PoliticsManager : Listener {
             }
             Settlement.RelationLevel.TENSE -> {
                 // Tense situations erupt into war
-                SettlementManager.setRelation(initiator, target, Settlement.RelationLevel.WAR)
+                SettlementManager.Companion.setRelation(initiator, target, Settlement.RelationLevel.WAR)
                 plugin.logger.info("[Politics] Critical Event: ${initiator.data.settlementName} declared WAR on ${target.data.settlementName}!")
             }
             Settlement.RelationLevel.ALLIANCE -> {
@@ -110,7 +112,7 @@ class PoliticsManager : Listener {
             }
             else -> {
                 // Neutral/Warm suffer a sudden diplomatic incident resulting in tension
-                SettlementManager.setRelation(initiator, target, Settlement.RelationLevel.TENSE)
+                SettlementManager.Companion.setRelation(initiator, target, Settlement.RelationLevel.TENSE)
                 plugin.logger.info("[Politics] Critical Event: Diplomatic incident! ${initiator.data.settlementName} and ${target.data.settlementName} are now TENSE.")
             }
         }
@@ -120,7 +122,7 @@ class PoliticsManager : Listener {
     // Events to notify players about active raids when they spawn in a world.
     // ========================================================================
     private fun notifyAboutActiveRaids(player: Player, world: World) {
-        val worldSettlements = SettlementManager.settlements[world] ?: return
+        val worldSettlements = SettlementManager.Companion.settlements[world] ?: return
 
         // Find all settlements in this world that are currently being raided
         val raidedSettlements = worldSettlements.filter { it.data.activeRaid != null }

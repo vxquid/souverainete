@@ -1,45 +1,92 @@
 package vx.sv.gameplay.humanoid
 
 import com.cryptomorin.xseries.XAttribute
+import com.github.retrooper.packetevents.PacketEvents
+import com.github.retrooper.packetevents.protocol.entity.data.EntityData
+import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes
+import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSetPassengers
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.Color
 import org.bukkit.NamespacedKey
-import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
-import org.bukkit.entity.TextDisplay
 import org.bukkit.entity.Villager
-import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
-import org.bukkit.event.entity.EntityDeathEvent
-import org.bukkit.event.world.ChunkUnloadEvent
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.scheduler.BukkitRunnable
-import org.bukkit.util.Transformation
-import org.joml.AxisAngle4f
-import org.joml.Vector3f
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.persistent.LivingEntityExtend.hunger
 import vx.sv.persistent.LivingEntityExtend.settlement
+import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
+import com.github.retrooper.packetevents.util.Vector3f as PEVector3f
 
 class NametagDisplayManager : Listener {
 
-    private val displays = mutableMapOf<Pair<LivingEntity, Player>, DisplayData>()
+    private val activeDisplays = ConcurrentHashMap<UUID, ConcurrentHashMap<Int, DisplayData>>()
+    private val entityIdGenerator = AtomicInteger(2_000_000)
 
     data class DisplayData(
-        val entity: TextDisplay,
+        val displayEntityId: Int,
         var lastFocusState: Boolean? = null,
         var lastCeilingState: Boolean? = null,
-        var lastBgColor: Color? = null,
+        var lastBgColor: Int? = null,
         var lastText: String = "",
         val randomYOffset: Float
     )
+
+    data class NpcSnapshot(
+        val entityId: Int,
+        val uuid: UUID,
+        val isCeilingLow: Boolean,
+        val name: String,
+        val professionName: String,
+        val level: Int,
+        val isRaider: Boolean,
+        val settlementName: String?,
+        val health: Double,
+        val maxHealth: Double,
+        val hungerValue: Int,
+        val partyLeaderUuid: UUID?,
+        val randomYOffset: Float,
+        val settlementRepMap: Map<UUID, Int>
+    )
+
+    data class PlayerViewData(
+        val snapshot: NpcSnapshot,
+        val personalRep: Int,
+        val stateName: String?,
+        val stateColor: String?,
+        val focusScore: Double,
+        val distanceSq: Double,
+        val isSingleClose: Boolean
+    )
+
+    /**
+     * Minecraft 1.20.2 - 1.21.x TextDisplay Metadata Indices.
+     */
+    object DisplayMeta {
+        const val INTERPOLATION_DELAY = 8
+        const val INTERPOLATION_DURATION = 9
+        const val TRANSLATION = 11
+        const val SCALE = 12
+        const val BILLBOARD = 15
+        const val TEXT = 23
+        const val BG_COLOR = 25
+        const val OPACITY = 26
+    }
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
         val config = plugin.gameplayManager.config
         if (config.nametag.enabled) {
-            startViewerUpdater()
+            startSnapshotTick()
         }
     }
 
@@ -47,354 +94,332 @@ class NametagDisplayManager : Listener {
         val RAIDER_KEY = NamespacedKey(plugin, "is_raider")
     }
 
-    private fun createPersonalDisplay(npc: LivingEntity, player: Player): DisplayData {
-        val config = plugin.gameplayManager.config
-        val location = npc.location.clone()
-
-        val display = npc.world.spawn(location, TextDisplay::class.java) { textDisplay ->
-            textDisplay.isPersistent = false
-            textDisplay.billboard = config.nametag.billboard
-            textDisplay.isSeeThrough = config.nametag.seeThrough
-            textDisplay.isVisibleByDefault = false
-
-            val bgColor = config.nametag.backgroundColor
-            textDisplay.backgroundColor = Color.fromARGB(bgColor[0], bgColor[1], bgColor[2], bgColor[3])
-        }
-
-        npc.addPassenger(display)
-
-        plugin.server.scheduler.runTaskLater(plugin, Runnable {
-            if (player.isOnline && display.isValid) player.showEntity(plugin, display)
-        }, 5L)
-
-        // Deterministic Y-offset based on UUID to prevent Z-fighting when multiple NPCs cluster
-        val randomYOffset = (npc.uniqueId.hashCode() % 16) / 100f
-
-        val displayData = DisplayData(display, randomYOffset = randomYOffset)
-        val pair = npc to player
-        displays[pair] = displayData
-
-        // Initial setup
-        updateDisplayText(displayData, npc, player, isFocused = false)
-        return displayData
-    }
-
-    /**
-     * @param isFocused True if the player is looking directly at this NPC.
-     */
-    private fun updateDisplayText(data: DisplayData, npc: LivingEntity, player: Player, isFocused: Boolean) {
-        val display = data.entity
-        val config = plugin.gameplayManager.config
-        if (npc !is Villager) return
-
-        // 1. --- CEILING FIX (Dynamic Y-Offset) ---
-        val headBlock = npc.location.clone().add(0.0, 2.2, 0.0).block
-        val isCeilingLow = headBlock.type.isSolid
-
-        // 2. --- VISUAL STATE & INTERPOLATION ---
-        val targetBgColor = determineBackgroundColor(npc, player, config.nametag.backgroundColor, isFocused)
-
-        val focusGained = isFocused && data.lastFocusState != true
-        val visualStateChanged = data.lastFocusState != isFocused ||
-                data.lastCeilingState != isCeilingLow ||
-                data.lastBgColor != targetBgColor
-
-        if (visualStateChanged) {
-            val baseOffsetY = config.nametag.displayOffsetY.toFloat()
-            val targetOffsetY = (if (isCeilingLow) baseOffsetY - 0.45f else baseOffsetY) + data.randomYOffset
-
-            val baseScale = config.nametag.displayScale
-            val targetScale = if (isFocused) 1.0f else 0.65f // Shrink to 65% when not in focus
-
-            val newTransform = Transformation(
-                Vector3f(0f, targetOffsetY, 0f),
-                AxisAngle4f(),
-                Vector3f(
-                    baseScale[0].toFloat() * targetScale,
-                    baseScale[1].toFloat() * targetScale,
-                    baseScale[2].toFloat() * targetScale
-                ),
-                AxisAngle4f()
-            )
-
-            if (focusGained) {
-                // INSTANT TEXT POP-IN:
-                // Set text to fully visible immediately so the player can read it without waiting for animation.
-                display.interpolationDuration = 0
-                display.textOpacity = 255.toByte()
-
-                // Schedule the background/scale expansion for the next tick to allow smooth transition
-                // without overriding the instant text alpha change.
-                plugin.server.scheduler.runTaskLater(plugin, Runnable {
-                    if (!display.isValid) return@Runnable
-                    display.interpolationDelay = 0
-                    display.interpolationDuration = 10
-                    display.backgroundColor = targetBgColor
-                    display.transformation = newTransform
-                }, 1L)
-            } else {
-                // FADING OUT / GENERAL UPDATE:
-                // When looking away, smooth fade everything out.
-                display.interpolationDelay = 0
-                display.interpolationDuration = 10
-                display.textOpacity = if (isFocused) 255.toByte() else 90.toByte()
-                display.backgroundColor = targetBgColor
-                display.transformation = newTransform
-            }
-
-            // Cache new states
-            data.lastFocusState = isFocused
-            data.lastCeilingState = isCeilingLow
-            data.lastBgColor = targetBgColor
-        }
-
-        // 3. --- TEXT ASSEMBLY ---
-        val npcSettlement = npc.settlement
-        val settlementLine = if (npcSettlement != null) "§6«${npcSettlement.data.settlementName}»\n" else ""
-
-        val name = npc.customName ?: "Unknown"
-        val level = npc.villagerLevel
-        val isRaider = npc.persistentDataContainer.has(RAIDER_KEY, PersistentDataType.BYTE)
-
-        val profession = if (isRaider) {
-            plugin.language.getString("villager-professions.raider") ?: "§cRaider"
-        } else {
-            val professionKey = npc.profession.key.key.lowercase()
-            (plugin.language.getString("villager-professions.$professionKey") ?: "ERR")
-                .replace("_", " ").capitalizeWords()
-        }
-
-        val line1 = config.nametag.nameProfessionLevelTemplate.format(name, profession, level)
-        var text = "$settlementLine$line1"
-
-        // Render full info ONLY when looking directly at them
-        if (isFocused) {
-            val reputationManager = plugin.gameplayManager.reputationManager
-            val personalRep = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
-            val settlementRep = npcSettlement?.data?.reputation?.get(player.uniqueId) ?: 0
-            val finalRepScore = personalRep + settlementRep
-            val repStatus = reputationManager.getReputationStatusFromScore(finalRepScore)
-
-            val health = npc.health
-            val maxHealth = npc.getAttribute(XAttribute.MAX_HEALTH.get()!!)?.value ?: 20.0
-
-            val line2 = config.nametag.reputationTemplate.format(finalRepScore, repStatus.getLocalizedName()) +
-                    " §7|§r " + config.nametag.healthTemplate.format(health, maxHealth)
-            text += "\n$line2"
-
-            val hungerValue = npc.hunger
-            if (hungerValue <= config.hunger.eatThreshold) {
-                val statusKey = if (hungerValue <= config.hunger.starvationThreshold) "starving" else "hungry"
-                val status = plugin.language.getString("hunger-status.$statusKey")!!
-                val line3 = config.nametag.hungerTemplate.format(status, hungerValue, config.hunger.max)
-                text += "\n$line3"
-            }
-
-            val partyManager = plugin.gameplayManager.partyManager
-            val leaderUUID = partyManager.getLeaderUUID(npc)
-            if (leaderUUID != null) {
-                val leaderName = Bukkit.getPlayer(leaderUUID)?.name
-                    ?: Bukkit.getOfflinePlayerIfCached(leaderUUID.toString())?.name ?: "Unknown"
-                val partyTemplate = plugin.language.getString("party.member") ?: "§b{playerName} Party Member"
-                text += "\n${partyTemplate.replace("{playerName}", leaderName)}"
-            }
-
-            val tracker = plugin.gameplayManager.reputationTracker
-            val state = tracker.getNPCState(npc, player)
-            if (state != null) {
-                val stateDisplayName = try {
-                    plugin.language.getString(state.translationKey) ?: state.name
-                } catch (e: Exception) { state.name }
-                text += "\n${state.color}$stateDisplayName"
-            }
-        } else {
-            // Subtle indicator that the NPC has something for the player when not focused
-            val tracker = plugin.gameplayManager.reputationTracker
-            val state = tracker.getNPCState(npc, player)
-            if (state != null) {
-                text = "${state.color}✦§r\n$text"
-            }
-        }
-
-        // Apply text update only if changed
-        if (data.lastText != text) {
-            display.text = text
-            data.lastText = text
-        }
-    }
-
-    /**
-     * Determines an expressive background color based on NPC roles.
-     * Uses darker, muted shades for a cleaner, non-intrusive RPG aesthetic.
-     */
-    private fun determineBackgroundColor(npc: Villager, player: Player, configColor: List<Int>, isFocused: Boolean): Color {
-        val isRaider = npc.persistentDataContainer.has(RAIDER_KEY, PersistentDataType.BYTE)
-        val partyManager = plugin.gameplayManager.partyManager
-        val leaderUUID = partyManager.getLeaderUUID(npc)
-
-        val reputationManager = plugin.gameplayManager.reputationManager
-        val personalRep = reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
-        val settlementRep = npc.settlement?.data?.reputation?.get(player.uniqueId) ?: 0
-        val totalRep = personalRep + settlementRep
-
-        // Dramatic alpha fade for unfocused NPCs
-        val baseAlpha = configColor[0]
-        val targetAlpha = if (isFocused) baseAlpha else max(20, baseAlpha - 130)
-
-        // Dark, distinguished color palette
-        return when {
-            isRaider -> Color.fromARGB(targetAlpha, 130, 20, 20) // Enemies -> Dark Red
-            leaderUUID == player.uniqueId -> Color.fromARGB(targetAlpha, 20, 130, 20) // Your Party -> Dark Forest Green
-            leaderUUID != null -> Color.fromARGB(targetAlpha, 20, 90, 140) // Other Party -> Dark Azure
-            totalRep > 100 -> Color.fromARGB(targetAlpha, 30, 110, 30) // High Rep -> Muted Green
-            totalRep < -50 -> Color.fromARGB(targetAlpha, 120, 50, 20) // Hostile Rep -> Dark Rust
-            else -> {
-                val profName = npc.profession.key.key.lowercase()
-                when {
-                    profName in listOf("armorer", "weaponsmith", "toolsmith", "guard") ->
-                        Color.fromARGB(targetAlpha, 60, 65, 75) // Guards/Smiths -> Dark Steel
-                    profName in listOf("cleric", "librarian", "mage") ->
-                        Color.fromARGB(targetAlpha, 90, 30, 120) // Scholars/Magic -> Dark Violet
-                    profName in listOf("farmer", "shepherd", "fisherman", "fletcher") ->
-                        Color.fromARGB(targetAlpha, 70, 100, 30) // Gatherers -> Dark Moss Green
-                    profName in listOf("butcher", "leatherworker") ->
-                        Color.fromARGB(targetAlpha, 100, 45, 30) // Meat/Leather -> Dark Maroon
-                    else -> Color.fromARGB(targetAlpha, configColor[1], configColor[2], configColor[3])
-                }
-            }
-        }
-    }
-
-    private fun startViewerUpdater() {
-        val config = plugin.gameplayManager.config
-        val viewDistance = config.nametag.viewDistance
-        val viewDistanceSquared = viewDistance * viewDistance
-
-        // Very fast tick rate (150ms) for snappy responsive gaze tracking
+    private fun startSnapshotTick() {
         val updateIntervalTicks = 3L
-        var tickCounter = 0
 
         object : BukkitRunnable() {
             override fun run() {
-                tickCounter += updateIntervalTicks.toInt()
                 val cfg = plugin.gameplayManager.config
                 if (!cfg.nametag.enabled || !cfg.humanoid.humanoidVillagers) {
-                    displays.values.forEach { if (it.entity.isValid) it.entity.remove() }
-                    displays.clear()
+                    cleanupAll()
                     return
                 }
 
+                val viewDistance = cfg.nametag.viewDistance.toDouble()
+                val viewDistanceSq = viewDistance * viewDistance
+
+                val npcCache = mutableMapOf<Int, NpcSnapshot>()
+                val dispatchMap = mutableMapOf<Player, List<PlayerViewData>>()
+
                 val onlinePlayers = Bukkit.getOnlinePlayers().filter {
                     cfg.worlds.allowedWorlds.contains(it.world.name)
-                }.toList()
+                }
 
                 for (player in onlinePlayers) {
-                    val nearbyEntities = player.getNearbyEntities(viewDistance, viewDistance, viewDistance)
-                    val nearbyVillagers = nearbyEntities.filterIsInstance<Villager>()
-                        .filter { it.location.distanceSquared(player.location) <= viewDistanceSquared }
-
-                    var bestFocus: Villager? = null
-                    var bestScore = -Double.MAX_VALUE
+                    val nearbyVillagers = player.location.getNearbyEntitiesByType(Villager::class.java, viewDistance)
                     val playerEyeLoc = player.eyeLocation
                     val playerDir = playerEyeLoc.direction
+
+                    val viewList = mutableListOf<PlayerViewData>()
 
                     for (npc in nearbyVillagers) {
                         val toNpcVector = npc.eyeLocation.toVector().subtract(playerEyeLoc.toVector())
                         val distSq = toNpcVector.lengthSquared()
-                        if (distSq < 0.1) continue
+                        if (distSq > viewDistanceSq || distSq < 0.1) continue
 
                         val dist = Math.sqrt(distSq)
                         val dot = playerDir.dot(toNpcVector.normalize())
+                        val focusScore = if (dot > 0.5) (dot * 10.0) - dist else -Double.MAX_VALUE
 
-                        if (dot > 0.5) {
-                            val score = (dot * 10.0) - dist
-                            if (score > bestScore) {
-                                bestScore = score
-                                bestFocus = npc
-                            }
+                        val snapshot = npcCache.getOrPut(npc.entityId) {
+                            val isCeilingLow = npc.location.clone().add(0.0, 2.2, 0.0).block.type.isSolid
+                            val isRaider = npc.persistentDataContainer.has(RAIDER_KEY, PersistentDataType.BYTE)
+                            val profName = npc.profession.key.key.lowercase()
+                            val settlementData = npc.settlement?.data
+
+                            NpcSnapshot(
+                                entityId = npc.entityId,
+                                uuid = npc.uniqueId,
+                                isCeilingLow = isCeilingLow,
+                                name = npc.customName ?: "Unknown",
+                                professionName = profName,
+                                level = npc.villagerLevel,
+                                isRaider = isRaider,
+                                settlementName = settlementData?.settlementName,
+                                health = npc.health,
+                                maxHealth = npc.getAttribute(XAttribute.MAX_HEALTH.get()!!)?.value ?: 20.0,
+                                hungerValue = npc.hunger.toInt(),
+                                partyLeaderUuid = plugin.gameplayManager.partyManager.getLeaderUUID(npc),
+                                randomYOffset = (npc.uniqueId.hashCode() % 16) / 100f,
+                                settlementRepMap = settlementData?.reputation?.toMap() ?: emptyMap()
+                            )
                         }
+
+                        val personalRep = plugin.gameplayManager.reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
+                        val npcState = plugin.gameplayManager.reputationTracker.getNPCState(npc, player)
+
+                        viewList.add(
+                            PlayerViewData(
+                                snapshot = snapshot,
+                                personalRep = personalRep,
+                                stateName = npcState?.translationKey, // <-- ИСПРАВЛЕНИЕ: берем ключ перевода, а не имя Enum
+                                stateColor = npcState?.color,
+                                focusScore = focusScore,
+                                distanceSq = distSq,
+                                isSingleClose = (nearbyVillagers.size == 1 && distSq < 9.0)
+                            )
+                        )
                     }
-
-                    for (npc in nearbyVillagers) {
-                        val pair = npc to player
-                        val currentData = displays[pair]
-
-                        val isFocused = (npc == bestFocus) ||
-                                (nearbyVillagers.size == 1 && npc.location.distanceSquared(player.location) < 9.0)
-
-                        if (currentData == null || !currentData.entity.isValid) {
-                            if (currentData != null) displays.remove(pair)
-                            createPersonalDisplay(npc, player)
-                        } else {
-                            updateDisplayText(currentData, npc, player, isFocused)
-                        }
-                    }
+                    dispatchMap[player] = viewList
                 }
 
-                // Garbage Collection runs every ~20 ticks (1 sec) to save CPU
-                if (tickCounter >= 20) {
-                    tickCounter = 0
-                    val iterator = displays.iterator()
-                    while (iterator.hasNext()) {
-                        val entry = iterator.next()
-                        val (npc, p) = entry.key
-                        val data = entry.value
-
-                        if (!npc.isValid || !data.entity.isValid || !p.isOnline ||
-                            !cfg.worlds.allowedWorlds.contains(p.world.name) ||
-                            npc.world != p.world ||
-                            npc.location.distanceSquared(p.location) > viewDistanceSquared
-                        ) {
-                            removePersonalDisplay(npc, p, data.entity)
-                            iterator.remove()
-                        }
-                    }
-                }
+                plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+                    processAsyncDisplayUpdates(dispatchMap)
+                })
             }
         }.runTaskTimer(plugin, 0L, updateIntervalTicks)
     }
 
-    private fun removePersonalDisplay(npc: LivingEntity, player: Player, display: TextDisplay) {
-        if (player.isOnline) player.hideEntity(plugin, display)
-        if (display.isValid) {
-            npc.removePassenger(display)
-            display.remove()
-        }
-    }
-
-    @EventHandler
-    fun onEntityDeath(event: EntityDeathEvent) {
-        val npc = event.entity
-        if (npc !is Villager) return
-
-        val iterator = displays.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            if (entry.key.first == npc) {
-                removePersonalDisplay(npc, entry.key.second, entry.value.entity)
-                iterator.remove()
-            }
-        }
-    }
-
-    @EventHandler
-    fun onChunkUnload(event: ChunkUnloadEvent) {
+    private fun processAsyncDisplayUpdates(dispatchMap: Map<Player, List<PlayerViewData>>) {
         val config = plugin.gameplayManager.config
-        if (!config.nametag.enabled) return
+        val baseConfigColor = config.nametag.backgroundColor
 
-        val iterator = displays.iterator()
-        while (iterator.hasNext()) {
-            val entry = iterator.next()
-            val npc = entry.key.first
+        for ((player, viewList) in dispatchMap) {
+            if (!player.isOnline) continue
 
-            val npcChunkX = npc.location.blockX shr 4
-            val npcChunkZ = npc.location.blockZ shr 4
+            val playerDisplays = activeDisplays.getOrPut(player.uniqueId) { ConcurrentHashMap() }
+            val currentVisibleIds = mutableSetOf<Int>()
 
-            if (event.chunk.x == npcChunkX && event.chunk.z == npcChunkZ) {
-                removePersonalDisplay(npc, entry.key.second, entry.value.entity)
-                iterator.remove()
+            var bestFocusId = -1
+            var bestScore = -Double.MAX_VALUE
+            for (view in viewList) {
+                if (view.focusScore > bestScore) {
+                    bestScore = view.focusScore
+                    bestFocusId = view.snapshot.entityId
+                }
+            }
+
+            for (view in viewList) {
+                val snapshot = view.snapshot
+                val isFocused = (snapshot.entityId == bestFocusId) || view.isSingleClose
+                currentVisibleIds.add(snapshot.entityId)
+
+                // Прокидываем UUID игрока для корректного получения репутации
+                val text = buildText(view, isFocused, player.uniqueId)
+
+                val targetBgColor = determineBackgroundColor(snapshot, player.uniqueId, baseConfigColor, isFocused)
+
+                val baseOffsetY = config.nametag.displayOffsetY.toFloat()
+                val targetOffsetY = (if (snapshot.isCeilingLow) baseOffsetY - 0.45f else baseOffsetY) + snapshot.randomYOffset
+
+                val baseScaleCfg = config.nametag.displayScale
+                val targetScaleMult = if (isFocused) 1.0f else 0.65f
+                val scale = PEVector3f(
+                    baseScaleCfg[0].toFloat() * targetScaleMult,
+                    baseScaleCfg[1].toFloat() * targetScaleMult,
+                    baseScaleCfg[2].toFloat() * targetScaleMult
+                )
+                val translation = PEVector3f(0f, targetOffsetY, 0f)
+
+                val data = playerDisplays[snapshot.entityId]
+
+                if (data == null) {
+                    val newDisplayId = entityIdGenerator.incrementAndGet()
+                    val newData = DisplayData(newDisplayId, randomYOffset = snapshot.randomYOffset)
+                    playerDisplays[snapshot.entityId] = newData
+
+                    sendSpawnPackets(player, snapshot.entityId, newDisplayId)
+                    sendMetadataPacket(player, newDisplayId, text, targetBgColor, if (isFocused) 255.toByte() else 90.toByte(), scale, translation, 0, 0)
+
+                    newData.lastFocusState = isFocused
+                    newData.lastCeilingState = snapshot.isCeilingLow
+                    newData.lastBgColor = targetBgColor
+                    newData.lastText = text
+                } else {
+                    val focusGained = isFocused && data.lastFocusState != true
+                    val visualChanged = data.lastFocusState != isFocused || data.lastCeilingState != snapshot.isCeilingLow || data.lastBgColor != targetBgColor
+                    val textChanged = data.lastText != text
+
+                    if (focusGained) {
+                        sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, 255.toByte(), scale, translation, 0, 0)
+
+                        plugin.server.scheduler.runTaskLaterAsynchronously(plugin, Runnable {
+                            if (player.isOnline && playerDisplays.contains(snapshot.entityId)) {
+                                sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, 255.toByte(), scale, translation, 10, 0)
+                            }
+                        }, 1L)
+                    } else if (visualChanged || textChanged) {
+                        val opacity = if (isFocused) 255.toByte() else 90.toByte()
+                        sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 10, 0)
+                    }
+
+                    data.lastFocusState = isFocused
+                    data.lastCeilingState = snapshot.isCeilingLow
+                    data.lastBgColor = targetBgColor
+                    data.lastText = text
+                }
+            }
+
+            val oldIds = playerDisplays.keys().toList()
+            val toRemove = oldIds.filter { it !in currentVisibleIds }
+
+            if (toRemove.isNotEmpty()) {
+                val destroyEntityIds = toRemove.mapNotNull { playerDisplays.remove(it)?.displayEntityId }.toIntArray()
+                if (destroyEntityIds.isNotEmpty() && player.isOnline) {
+                    PacketEvents.getAPI().playerManager.getUser(player)?.sendPacket(
+                        WrapperPlayServerDestroyEntities(*destroyEntityIds)
+                    )
+                }
             }
         }
+    }
+
+    private fun buildText(view: PlayerViewData, isFocused: Boolean, playerUUID: UUID): String {
+        val config = plugin.gameplayManager.config
+        val snap = view.snapshot
+
+        val settlementLine = if (snap.settlementName != null) "&6«${snap.settlementName}»\n" else ""
+        val profession = if (snap.isRaider) {
+            plugin.language.getString("villager-professions.raider") ?: "&cRaider"
+        } else {
+            (plugin.language.getString("villager-professions.${snap.professionName}") ?: "ERR").replace("_", " ").capitalizeWords()
+        }
+
+        val line1 = String.format(java.util.Locale.US, config.nametag.nameProfessionLevelTemplate, snap.name, profession, snap.level)
+        var text = "$settlementLine$line1"
+
+        if (isFocused) {
+            val repManager = plugin.gameplayManager.reputationManager
+            // ИСПРАВЛЕНИЕ: Теперь проверяем репутацию по UUID игрока, а не по UUID моба
+            val settlementRep = snap.settlementRepMap[playerUUID] ?: 0
+            val finalRepScore = view.personalRep + settlementRep
+            val repStatus = repManager.getReputationStatusFromScore(finalRepScore)
+
+            // ИСПРАВЛЕНИЕ: Форматируем строго в Locale.US, чтобы избежать запятых в дробях (20,0 -> 20.0)
+            val repStr = String.format(java.util.Locale.US, config.nametag.reputationTemplate, finalRepScore, repStatus.getLocalizedName())
+            val healthStr = String.format(java.util.Locale.US, config.nametag.healthTemplate, snap.health, snap.maxHealth)
+            val line2 = "$repStr &7|&r $healthStr"
+
+            text += "\n$line2"
+
+            if (snap.hungerValue <= config.hunger.eatThreshold) {
+                val statusKey = if (snap.hungerValue <= config.hunger.starvationThreshold) "starving" else "hungry"
+                val status = plugin.language.getString("hunger-status.$statusKey")!!
+                text += "\n${String.format(java.util.Locale.US, config.nametag.hungerTemplate, status, snap.hungerValue, config.hunger.max)}"
+            }
+
+            if (snap.partyLeaderUuid != null) {
+                val leaderName = Bukkit.getOfflinePlayer(snap.partyLeaderUuid).name ?: "Unknown"
+                val partyTemplate = plugin.language.getString("party.member") ?: "&b{playerName} Party Member"
+                text += "\n${partyTemplate.replace("{playerName}", leaderName)}"
+            }
+
+            if (view.stateName != null && view.stateColor != null) {
+                val stateDisplayName = try {
+                    plugin.language.getString(view.stateName) ?: view.stateName
+                } catch (e: Exception) { view.stateName }
+                text += "\n${view.stateColor}$stateDisplayName"
+            }
+        } else {
+            if (view.stateColor != null) {
+                text = "${view.stateColor}✦&r\n$text"
+            }
+        }
+
+        return text
+    }
+
+    private fun determineBackgroundColor(snap: NpcSnapshot, playerUUID: UUID, configColor: List<Int>, isFocused: Boolean): Int {
+        val settlementRep = snap.settlementRepMap[playerUUID] ?: 0
+        val totalRep = settlementRep
+
+        val baseAlpha = configColor[0]
+        val targetAlpha = if (isFocused) baseAlpha else max(20, baseAlpha - 130)
+
+        val color = when {
+            snap.isRaider -> Color.fromARGB(targetAlpha, 130, 20, 20)
+            snap.partyLeaderUuid == playerUUID -> Color.fromARGB(targetAlpha, 20, 130, 20)
+            snap.partyLeaderUuid != null -> Color.fromARGB(targetAlpha, 20, 90, 140)
+            totalRep > 100 -> Color.fromARGB(targetAlpha, 30, 110, 30)
+            totalRep < -50 -> Color.fromARGB(targetAlpha, 120, 50, 20)
+            else -> {
+                when (snap.professionName) {
+                    "armorer", "weaponsmith", "toolsmith", "guard" -> Color.fromARGB(targetAlpha, 60, 65, 75)
+                    "cleric", "librarian", "mage" -> Color.fromARGB(targetAlpha, 90, 30, 120)
+                    "farmer", "shepherd", "fisherman", "fletcher" -> Color.fromARGB(targetAlpha, 70, 100, 30)
+                    "butcher", "leatherworker" -> Color.fromARGB(targetAlpha, 100, 45, 30)
+                    else -> Color.fromARGB(targetAlpha, configColor[1], configColor[2], configColor[3])
+                }
+            }
+        }
+        return toARGBInt(color.alpha, color.red, color.green, color.blue)
+    }
+
+    private fun sendSpawnPackets(player: Player, baseEntityId: Int, displayEntityId: Int) {
+        val user = PacketEvents.getAPI().playerManager.getUser(player) ?: return
+
+        val spawnPos = com.github.retrooper.packetevents.util.Vector3d(
+            player.location.x,
+            player.location.y,
+            player.location.z
+        )
+
+        val spawnPacket = WrapperPlayServerSpawnEntity(
+            displayEntityId,
+            Optional.of(UUID.randomUUID()),
+            EntityTypes.TEXT_DISPLAY,
+            spawnPos,
+            0f, 0f, 0f, 0, Optional.empty()
+        )
+        user.sendPacket(spawnPacket)
+
+        val passengerPacket = WrapperPlayServerSetPassengers(
+            baseEntityId,
+            intArrayOf(displayEntityId)
+        )
+        user.sendPacket(passengerPacket)
+    }
+
+    private fun sendMetadataPacket(
+        player: Player, displayEntityId: Int, text: String, bgColor: Int, opacity: Byte,
+        scale: PEVector3f, translation: PEVector3f, interpDuration: Int, interpDelay: Int
+    ) {
+        val user = PacketEvents.getAPI().playerManager.getUser(player) ?: return
+
+        // ИСПРАВЛЕНИЕ: Чтобы Kyori не сыпал варнингами из-за LegacyFormattingCodes
+        // безопасно меняем все параграфы на амперсанды и скармливаем парсеру.
+        val safeText = text.replace('§', '&')
+        val component = LegacyComponentSerializer.legacyAmpersand().deserialize(safeText)
+
+        val metadata = listOf(
+            EntityData(DisplayMeta.TEXT, EntityDataTypes.ADV_COMPONENT, component),
+            EntityData(DisplayMeta.BG_COLOR, EntityDataTypes.INT, bgColor),
+            EntityData(DisplayMeta.OPACITY, EntityDataTypes.BYTE, opacity),
+            EntityData(DisplayMeta.SCALE, EntityDataTypes.VECTOR3F, scale),
+            EntityData(DisplayMeta.TRANSLATION, EntityDataTypes.VECTOR3F, translation),
+            EntityData(DisplayMeta.INTERPOLATION_DURATION, EntityDataTypes.INT, interpDuration),
+            EntityData(DisplayMeta.INTERPOLATION_DELAY, EntityDataTypes.INT, interpDelay),
+            EntityData(DisplayMeta.BILLBOARD, EntityDataTypes.BYTE, 3.toByte())
+        )
+
+        user.sendPacket(WrapperPlayServerEntityMetadata(displayEntityId, metadata))
+    }
+
+    private fun cleanupAll() {
+        activeDisplays.forEach { (uuid, entities) ->
+            val player = Bukkit.getPlayer(uuid)
+            val ids = entities.values.map { it.displayEntityId }.toIntArray()
+            if (player != null && player.isOnline && ids.isNotEmpty()) {
+                PacketEvents.getAPI().playerManager.getUser(player)?.sendPacket(
+                    WrapperPlayServerDestroyEntities(*ids)
+                )
+            }
+        }
+        activeDisplays.clear()
+    }
+
+    private fun toARGBInt(a: Int, r: Int, g: Int, b: Int): Int {
+        return (a shl 24) or (r shl 16) or (g shl 8) or b
     }
 
     private fun String.capitalizeWords(): String = split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
