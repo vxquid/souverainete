@@ -16,111 +16,140 @@ import vx.sv.Souverainete.Companion.plugin
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
 import vx.sv.persistent.LivingEntityExtend.subInventory
 import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 
 class EquipmentManager : Listener {
 
     companion object {
-        private const val UPDATE_INTERVAL_TICKS = 100L
+        private const val SWEEP_INTERVAL_TICKS = 100L // Раз в 5 секунд собираем всех
+        private const val PROCESS_INTERVAL_TICKS = 1L // Каждую 1 тику (50мс) обрабатываем пачку
+        private const val BATCH_SIZE = 10 // Сколько NPC обрабатывать за 1 тику
     }
+
+    // Потокобезопасная очередь для распределения нагрузки (FAWE style)
+    private val evaluationQueue = ConcurrentLinkedQueue<Villager>()
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
-        startEquipmentTicker()
+        startQueueFiller()
+        startQueueProcessor()
     }
 
-    private fun startEquipmentTicker() {
+    /**
+     * MAIN THREAD: Собираем NPC по мирам и закидываем в очередь.
+     * Запускается редко (раз в 5 секунд).
+     */
+    private fun startQueueFiller() {
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
-            tick()
-        }, UPDATE_INTERVAL_TICKS, UPDATE_INTERVAL_TICKS)
-    }
-
-    fun tick() {
-        plugin.gameplayManager.allowedWorlds.forEach { world ->
-            // Оптимизация: используем getEntitiesByClass вместо фильтрации всех сущностей мира
-            world.getEntitiesByClass(Villager::class.java).forEach { villager ->
-                if (villager.isValid) { // Проверяем, что энтити жив и валиден
-                    this.equipBestEquipmentFor(villager)
+            plugin.gameplayManager.allowedWorlds.forEach { world ->
+                // Быстрый сбор сущностей. Bukkit кэширует getEntitiesByClass, это работает быстро.
+                val villagers = world.getEntitiesByClass(Villager::class.java)
+                for (villager in villagers) {
+                    if (villager.isValid && !evaluationQueue.contains(villager)) {
+                        evaluationQueue.offer(villager)
+                    }
                 }
             }
-        }
+        }, SWEEP_INTERVAL_TICKS, SWEEP_INTERVAL_TICKS)
+    }
+
+    /**
+     * ASYNC THREAD: Воркер, который "откусывает" от очереди по BATCH_SIZE штук каждый тик.
+     * Это полностью сглаживает нагрузку, убирая микрофризы.
+     */
+    private fun startQueueProcessor() {
+        plugin.server.scheduler.runTaskTimerAsynchronously(plugin, Runnable {
+            if (evaluationQueue.isEmpty()) return@Runnable
+
+            // Обрабатываем не больше BATCH_SIZE мобов за 1 тик
+            for (i in 0 until BATCH_SIZE) {
+                val villager = evaluationQueue.poll() ?: break // Если очередь опустела - прерываем цикл
+
+                if (villager.isValid && !villager.isDead) {
+                    equipBestEquipmentFor(villager)
+                }
+            }
+        }, PROCESS_INTERVAL_TICKS, PROCESS_INTERVAL_TICKS)
     }
 
     @EventHandler
     private fun onWorldLoad(event: WorldLoadEvent) {
-        if (plugin.gameplayManager.allowedWorlds.contains(event.world)) {
-            event.world.getEntitiesByClass(Villager::class.java).forEach {
-                this.removeEquipment(it)
-                this.equipBestEquipmentFor(it)
+        if (!plugin.gameplayManager.allowedWorlds.contains(event.world)) return
+
+        // Просто закидываем в очередь, чтобы не вешать главный поток при запуске мира
+        val villagers = event.world.getEntitiesByClass(Villager::class.java)
+        villagers.forEach {
+            if (it.isValid && !evaluationQueue.contains(it)) {
+                // removeEquipment вызовем асинхронно прямо перед экипировкой, чтобы не спамить в Main Thread
+                plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable { removeEquipment(it) })
+                evaluationQueue.offer(it)
             }
         }
     }
 
     @EventHandler
     private fun onChunkLoad(event: ChunkLoadEvent) {
-        if (plugin.gameplayManager.allowedWorlds.contains(event.world)) {
-            // Оптимизация поиска сущностей в чанке
-            val villagers = event.chunk.entities.filterIsInstance<Villager>()
-            if (villagers.isNotEmpty()) {
-                villagers.forEach {
-                    this.removeEquipment(it)
-                    this.equipBestEquipmentFor(it)
-                }
+        if (!plugin.gameplayManager.allowedWorlds.contains(event.world)) return
+
+        // Если игрок летит на элитрах, этот ивент спамит страшно.
+        // Мы НЕ процессим инвентари тут, только добавляем в очередь.
+        val villagers = event.chunk.entities.filterIsInstance<Villager>()
+        villagers.forEach {
+            if (it.isValid && !evaluationQueue.contains(it)) {
+                plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable { removeEquipment(it) })
+                evaluationQueue.offer(it)
             }
         }
     }
 
     @EventHandler
     private fun onEntityResurrect(event: EntityResurrectEvent) {
-        if (plugin.gameplayManager.allowedWorlds.contains(event.entity.world)) {
-            (event.entity as? Villager)?.let { villager ->
-                event.hand?.let { slot ->
-                    villager.asHumanoid()?.equip(slot, ItemStack(AIR))
-                    villager.takeItemFromQuillInventory(ItemStack(TOTEM_OF_UNDYING), 1)
-                }
+        val villager = event.entity as? Villager ?: return
+        if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
+
+        val slot = event.hand ?: return
+
+        // Тотем срабатывает мгновенно, поэтому эту операцию выполняем вне очереди, но асинхронно
+        plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+            if (villager.isValid) {
+                villager.asHumanoid()?.equip(slot, ItemStack(AIR))
+                villager.takeItemFromQuillInventory(ItemStack(TOTEM_OF_UNDYING), 1)
             }
-        }
+        })
     }
 
     private fun removeEquipment(villager: Villager) {
         EquipmentSlot.entries.forEach { slot ->
-            villager.equipment?.clear()
+            villager.asHumanoid()?.equip(slot, ItemStack(AIR))
         }
     }
 
-    private fun equipBestEquipmentFor(villager: Villager) {
-        val changes = mutableMapOf<EquipmentSlot, ItemStack>()
-
-        // Получаем предметы (ленивая инициализация инвентаря произойдет здесь, если его еще нет)
+    fun equipBestEquipmentFor(villager: Villager) {
         val availableItems = villager.subInventory.filterNotNull()
-
         if (availableItems.isEmpty()) return
 
-        // Проходим по каждому слоту
-        for (slot in EquipmentSlot.entries) {
+        val bestItems = mutableMapOf<EquipmentSlot, ItemStack>()
+        val bestScores = mutableMapOf<EquipmentSlot, Double>()
 
-            // Собираем все подходящие предметы для слота
-            val possibleItems = availableItems
-                .filter { this.getSlotForItem(it) == slot }
+        for (item in availableItems) {
+            val slot = getSlotForItem(item) ?: continue
+            val score = evaluateItem(item, slot)
 
-            if (possibleItems.isEmpty()) continue
-
-            // Сортируем по оценке
-            val bestItem = if (possibleItems.size == 1) {
-                possibleItems.first()
-            } else possibleItems.maxByOrNull { evaluateItem(it, slot) }!!
-
-            changes[slot] = bestItem
+            val currentBestScore = bestScores.getOrDefault(slot, -1.0)
+            if (score > currentBestScore) {
+                bestScores[slot] = score
+                bestItems[slot] = item
+            }
         }
 
-        // Применяем изменения
-        this.applyEquipmentChanges(villager, changes)
+        if (bestItems.isNotEmpty()) {
+            applyEquipmentChanges(villager, bestItems)
+        }
     }
 
-    // Определяем подходящий слот для предмета
     private fun getSlotForItem(item: ItemStack): EquipmentSlot? {
         return when (item.type) {
-
             WOODEN_SWORD, STONE_SWORD, IRON_SWORD,
             GOLDEN_SWORD, DIAMOND_SWORD, NETHERITE_SWORD,
             WOODEN_AXE, STONE_AXE, IRON_AXE,
@@ -145,20 +174,16 @@ class EquipmentManager : Listener {
         }
     }
 
-    // Оценка качества предмета
-    private fun evaluateItem(item: ItemStack?, slot: EquipmentSlot): Double {
-        if (item == null || this.getSlotForItem(item) != slot) return 0.0
-
+    private fun evaluateItem(item: ItemStack, slot: EquipmentSlot): Double {
         var score = 0.0
 
-        // Оценка по материалу
         score += when (item.type) {
-            in listOf(WOODEN_SWORD, WOODEN_AXE) -> 1.0
-            in listOf(STONE_SWORD, STONE_AXE) -> 2.0
-            in listOf(IRON_SWORD, IRON_AXE, IRON_HELMET, IRON_CHESTPLATE, IRON_LEGGINGS, IRON_BOOTS) -> 3.0
-            in listOf(GOLDEN_SWORD, GOLDEN_AXE, GOLDEN_HELMET, GOLDEN_CHESTPLATE, GOLDEN_LEGGINGS, GOLDEN_BOOTS) -> 2.5
-            in listOf(DIAMOND_SWORD, DIAMOND_AXE, DIAMOND_HELMET, DIAMOND_CHESTPLATE, DIAMOND_LEGGINGS, DIAMOND_BOOTS) -> 4.0
-            in listOf(NETHERITE_SWORD, NETHERITE_AXE, NETHERITE_HELMET, NETHERITE_CHESTPLATE, NETHERITE_LEGGINGS, NETHERITE_BOOTS) -> 5.0
+            WOODEN_SWORD, WOODEN_AXE -> 1.0
+            STONE_SWORD, STONE_AXE -> 2.0
+            IRON_SWORD, IRON_AXE, IRON_HELMET, IRON_CHESTPLATE, IRON_LEGGINGS, IRON_BOOTS -> 3.0
+            GOLDEN_SWORD, GOLDEN_AXE, GOLDEN_HELMET, GOLDEN_CHESTPLATE, GOLDEN_LEGGINGS, GOLDEN_BOOTS -> 2.5
+            DIAMOND_SWORD, DIAMOND_AXE, DIAMOND_HELMET, DIAMOND_CHESTPLATE, DIAMOND_LEGGINGS, DIAMOND_BOOTS -> 4.0
+            NETHERITE_SWORD, NETHERITE_AXE, NETHERITE_HELMET, NETHERITE_CHESTPLATE, NETHERITE_LEGGINGS, NETHERITE_BOOTS -> 5.0
             SHIELD -> 2.0
             TOTEM_OF_UNDYING -> 3.0
             TURTLE_HELMET -> 3.5
@@ -167,7 +192,6 @@ class EquipmentManager : Listener {
             else -> 0.0
         }
 
-        // Оценка по зачарованиям
         item.enchantments.forEach { (enchant, level) ->
             score += when (enchant) {
                 Enchantment.SHARPNESS, Enchantment.PROTECTION -> level * 1.5
@@ -177,21 +201,26 @@ class EquipmentManager : Listener {
         }
 
         (item.itemMeta as? Damageable)?.let { meta ->
-            val durability = (item.type.maxDurability - meta.damage).toDouble() / item.type.maxDurability
-            score -= durability * 0.5 // Штраф за износ
+            if (item.type.maxDurability > 0) {
+                val wearFraction = meta.damage.toDouble() / item.type.maxDurability
+                score -= wearFraction * 0.5
+            }
         }
 
         return score
     }
 
-    // Применяем изменения экипировки
     private fun applyEquipmentChanges(villager: Villager, changes: Map<EquipmentSlot, ItemStack>) {
-        for ((slot, item) in changes) {
+        val loc = villager.location
 
+        // Собираем игроков в радиусе 16 блоков асинхронно
+        val nearbyPlayers = plugin.server.onlinePlayers.filter {
+            it.world == loc.world && it.location.distanceSquared(loc) <= 256.0
+        }
+
+        for ((slot, item) in changes) {
             val equipped = villager.equipment?.getItem(slot)
 
-            // Если предмет уже надет и он похож на тот, что мы хотим надеть - пропускаем.
-            // Это предотвращает спам звуков каждые 5 секунд.
             if (equipped != null && equipped.isSimilar(item))
                 continue
 
@@ -208,7 +237,11 @@ class EquipmentManager : Listener {
                 else -> Sound.ENTITY_ITEM_PICKUP
             }
 
-            villager.world.playSound(villager.location, sound, 0.85F, 1F + Random.nextDouble(-0.25, 0.25).toFloat())
+            val pitch = 1F + Random.nextDouble(-0.25, 0.25).toFloat()
+
+            for (player in nearbyPlayers) {
+                player.playSound(loc, sound, 0.85F, pitch)
+            }
         }
     }
 

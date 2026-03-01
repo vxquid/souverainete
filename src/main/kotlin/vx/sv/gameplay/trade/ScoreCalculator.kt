@@ -5,63 +5,92 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.PotionMeta
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.profession.UniqueItemManager.Companion.getUniqueItemRarity
+import java.util.*
 import kotlin.random.Random
 
-/**
- * Utility object for calculating trade scores/prices for item collections and individual items.
- * Excludes edibles and enchanted books from collections to prevent inflated scores from consumables.
- */
 object ScoreCalculator {
 
+    // Кэш для быстрого доступа без обращения к YamlConfiguration
+    private val materialPriceCache = EnumMap<Material, Int>(Material::class.java)
+    private val potionPriceCache = mutableMapOf<String, Int>()
+
+    // Сет для отслеживания уже залогированных предметов (защита от флуда в консоли и падения TPS)
+    private val missingPricesLogged = EnumSet.noneOf(Material::class.java)
+
     /**
-     * Calculates the score for an entire stack of items.
-     * Formula: (base material score * amount) + potion effect bonus (if applicable) + rarity bonus.
-     * @return Total score for the stack.
+     * Вызывать при запуске плагина (onEnable) и при перезагрузке конфигов.
+     */
+    fun reload() {
+        materialPriceCache.clear()
+        potionPriceCache.clear()
+        missingPricesLogged.clear()
+
+        val pricingConfig = plugin.prices
+
+        // Предзагрузка цен на материалы
+        for (material in Material.entries) {
+            if (material.isAir) continue
+            val price = pricingConfig.getInt(material.name, -1)
+            if (price != -1) {
+                materialPriceCache[material] = price
+            }
+        }
+
+        // Предзагрузка цен на зелья
+        val potionSection = pricingConfig.getConfigurationSection("effect-type")
+        potionSection?.getKeys(false)?.forEach { key ->
+            potionPriceCache[key.uppercase()] = potionSection.getInt(key)
+        }
+    }
+
+    /**
+     * Вычисляет общую стоимость стака предметов.
      */
     fun ItemStack.calculateScore(): Int {
+        if (this.type == Material.AIR) return 0
+
         val baseScore = this.type.getBasicScore()
         val amountMultiplier = this.amount
-        val potionBonus = calculatePotionBonus()
+
+        // Быстрая проверка типа перед тяжелым кастом меты
+        val potionBonus = if (this.type == Material.POTION || this.type == Material.SPLASH_POTION || this.type == Material.LINGERING_POTION) {
+            calculatePotionBonus()
+        } else 0
+
         val rarityBonus = this.getUniqueItemRarity().extraPrice
+
         return (baseScore * amountMultiplier) + potionBonus + rarityBonus
     }
 
     /**
-     * Calculates bonus for potion effects, if the item is a potion.
-     * Looks up config price for base potion type; defaults to a random value in (2400, 2800) if not found or zero.
-     * @return Potion bonus score, or 0 if not a potion.
+     * Вычисляет бонус для зелий. Если цены нет в конфиге, возвращает рандомное значение.
      */
     private fun ItemStack.calculatePotionBonus(): Int {
         val meta = itemMeta as? PotionMeta ?: return 0
-        val potionType = meta.basePotionType ?: return 0 // Skip if no base type (e.g., custom potions)
+        val potionType = meta.basePotionType ?: return 0
 
-        val configPrice = plugin.prices.getInt("effect-type.${potionType.name}")
-        return if (configPrice > 0) {
-            configPrice
-        } else {
-            2400 + Random.nextInt(1, 6) * 200 // Random bonus in range 2400-2800
-        }
+        val cachedPrice = potionPriceCache[potionType.name]
+        return cachedPrice ?: (2400 + Random.nextInt(1, 6) * 200)
     }
 
     /**
-     * Retrieves the base score for a material from the config.
-     * Uses lowercase material name as the config key for consistency.
-     * @param defaultPrice Fallback score if not found in config (default: 50).
-     * @return Configured score or default.
+     * Получает базовую цену предмета. Если цены нет — пишет в лог (1 раз) и возвращает дефолт.
      */
     fun Material.getBasicScore(defaultPrice: Int = 50): Int {
-        if (this == Material.AIR) return 0
+        if (this.isAir) return 0
 
-        val configKey = this.name
-        val pricingConfig = plugin.prices
-
-        return if (pricingConfig.contains(configKey)) {
-            pricingConfig.getInt(configKey)
-        } else {
-            defaultPrice.also {
-                plugin.logger.warning("Price for material $this (key: $configKey) not found in config. Using default: $defaultPrice")
-            }
+        val cachedPrice = materialPriceCache[this]
+        if (cachedPrice != null) {
+            return cachedPrice
         }
+
+        // Если цены нет в кэше, добавляем материал в сет "залогированных".
+        // Метод add() вернет true только если этого материала там еще не было.
+        if (missingPricesLogged.add(this)) {
+            plugin.logger.warning("Price for material $this (key: ${this.name}) not found in config. Using default: $defaultPrice")
+        }
+
+        return defaultPrice
     }
 
 }

@@ -25,6 +25,7 @@ import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
+import kotlin.math.sqrt
 import com.github.retrooper.packetevents.util.Vector3f as PEVector3f
 
 class NametagDisplayManager : Listener {
@@ -125,9 +126,9 @@ class NametagDisplayManager : Listener {
                     for (npc in nearbyVillagers) {
                         val toNpcVector = npc.eyeLocation.toVector().subtract(playerEyeLoc.toVector())
                         val distSq = toNpcVector.lengthSquared()
-                        if (distSq > viewDistanceSq || distSq < 0.1) continue
+                        if (distSq !in 0.1..viewDistanceSq) continue
 
-                        val dist = Math.sqrt(distSq)
+                        val dist = sqrt(distSq)
                         val dot = playerDir.dot(toNpcVector.normalize())
                         val focusScore = if (dot > 0.5) (dot * 10.0) - dist else -Double.MAX_VALUE
 
@@ -215,9 +216,9 @@ class NametagDisplayManager : Listener {
                 val baseScaleCfg = config.nametag.displayScale
                 val targetScaleMult = if (isFocused) 1.0f else 0.65f
                 val scale = PEVector3f(
-                    baseScaleCfg[0].toFloat() * targetScaleMult,
-                    baseScaleCfg[1].toFloat() * targetScaleMult,
-                    baseScaleCfg[2].toFloat() * targetScaleMult
+                    baseScaleCfg[0] * targetScaleMult,
+                    baseScaleCfg[1] * targetScaleMult,
+                    baseScaleCfg[2] * targetScaleMult
                 )
                 val translation = PEVector3f(0f, targetOffsetY, 0f)
 
@@ -296,8 +297,8 @@ class NametagDisplayManager : Listener {
             val repStatus = repManager.getReputationStatusFromScore(finalRepScore)
 
             // ИСПРАВЛЕНИЕ: Форматируем строго в Locale.US, чтобы избежать запятых в дробях (20,0 -> 20.0)
-            val repStr = String.format(java.util.Locale.US, config.nametag.reputationTemplate, finalRepScore, repStatus.getLocalizedName())
-            val healthStr = String.format(java.util.Locale.US, config.nametag.healthTemplate, snap.health, snap.maxHealth)
+            val repStr = String.format(Locale.US, config.nametag.reputationTemplate, finalRepScore, repStatus.getLocalizedName())
+            val healthStr = String.format(Locale.US, config.nametag.healthTemplate, snap.health, snap.maxHealth)
             val line2 = "$repStr &7|&r $healthStr"
 
             text += "\n$line2"
@@ -305,7 +306,7 @@ class NametagDisplayManager : Listener {
             if (snap.hungerValue <= config.hunger.eatThreshold) {
                 val statusKey = if (snap.hungerValue <= config.hunger.starvationThreshold) "starving" else "hungry"
                 val status = plugin.language.getString("hunger-status.$statusKey")!!
-                text += "\n${String.format(java.util.Locale.US, config.nametag.hungerTemplate, status, snap.hungerValue, config.hunger.max)}"
+                text += "\n${String.format(Locale.US, config.nametag.hungerTemplate, status, snap.hungerValue, config.hunger.max)}"
             }
 
             if (snap.partyLeaderUuid != null) {

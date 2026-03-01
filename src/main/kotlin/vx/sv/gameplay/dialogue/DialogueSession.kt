@@ -323,7 +323,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
                         // Modifying reputation after talking. We should add check for it.
                         plugin.gameplayManager.reputationManager.addReputation(entity, player, impression.score)
                         // Force equipment update.
-                        plugin.gameplayManager.humanoidManager.equipmentManager.tick()
+                        plugin.gameplayManager.humanoidManager.equipmentManager.equipBestEquipmentFor(entity)
                     }
                 }, delay)
                 delay += 60L
