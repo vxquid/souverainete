@@ -21,6 +21,9 @@ import io.github.retrooper.packetevents.util.SpigotConversionUtil
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
+import org.bukkit.block.Block
+import org.bukkit.block.BlockFace
+import org.bukkit.block.data.type.*
 import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
@@ -34,13 +37,18 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.scoreboard.Team
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.humanoid.event.HumanoidInitializationEvent
+import vx.sv.gameplay.humanoid.leisure.HumanoidLeisureManager
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Gender.FEMALE
 import vx.sv.gameplay.personality.PersonalityManager.Gender.MALE
 import java.util.*
+import kotlin.math.abs
 
 class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, HumanoidDataWrapper> = hashMapOf()) : SimplePacketListenerAbstract(), Listener {
+
+    val actionController = HumanoidActionController()
+    val leisureManager   = HumanoidLeisureManager()
 
     companion object {
 
@@ -172,6 +180,25 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
             humanoidRegistry.remove(garbage)
         }
 
+        // Send active action states to the new observer (e.g., sitting mount)
+        actionController.sittingMounts[humanoid]?.let { mountId ->
+            val spawnMount = WrapperPlayServerSpawnEntity(
+                mountId,
+                UUID.randomUUID(),
+                EntityTypes.ARMOR_STAND,
+                humanoid.location.clone().apply { y -= 1.7 }.toPacketEventsLocation(),
+                0f, 0, null
+            )
+
+            val invisibleData = EntityData(0, EntityDataTypes.BYTE, 0x20.toByte())
+            val metaPacket = WrapperPlayServerEntityMetadata(mountId, listOf(invisibleData))
+            val mountPacket = WrapperPlayServerSetPassengers(mountId, intArrayOf(humanoid.entityId))
+
+            player.sendPacket(spawnMount)
+            player.sendPacket(metaPacket)
+            player.sendPacket(mountPacket)
+        }
+
     }
 
     // We are currently listening for the sending of five packets: SOUND_EFFECT, SPAWN_ENTITY, ENTITY_METADATA, ENTITY_HEAD_LOOK, and DESTROY_ENTITIES.
@@ -201,7 +228,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                             return
 
                         player.sendVerbose(" §2> Trying to spawn a villager!")
-                        this.debug("Trying to spawn a villager! [ID: ${packet.entityId}]")
+                        this.debug("Trying to spawn a villager![ID: ${packet.entityId}]")
 
                         val humanoidProvider = humanoidRegistry[entity] ?: run {
                             this.debug("Preventing villager with ID ${packet.entityId} from showing.")
@@ -331,6 +358,8 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                         humanoidProvider.subscribers.remove(player)
                         if (humanoidProvider.subscribers.isEmpty()) {
                             humanoidRegistry.remove(entity)?.let { data ->
+                                // Cleanup action states when the entity is completely unregistered
+                                actionController.sittingMounts.remove(entity)
                                 player.sendVerbose(" §4> Due to lack of subscribers, entity with ID ${data.entity.entityId} was unregistred.")
                             }
                         } else if (ADAPTIVE_PACKET_MANIPULATOR) humanoidProvider.forcedViewers.add(player)
@@ -425,54 +454,190 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
         if (sendDebugMessages) this.sendMessage("§e$message")
     }
 
-    /**
-     * Temporarily equips an item in the hand of a humanoid entity for a specified number of ticks.
-     * This method only affects client-side visuals for subscribers (players viewing the humanoid).
-     * It does not change the server's entity equipment.
-     *
-     * @param entity The LivingEntity (humanoid) to equip the item to.
-     * @param slot The hand slot (HAND for main hand, OFF_HAND for offhand).
-     * @param item The ItemStack to temporarily equip.
-     * @param ticks The duration in ticks to display the item before resetting to original.
-     */
-    fun temporaryEquip(entity: LivingEntity, slot: EquipmentSlot, item: ItemStack, ticks: Int) {
+    // =======================================================================================
+    // ACTION CONTROLLER
+    // Handles specific visual actions for humanoid entities like sitting, equipping, etc.
+    // =======================================================================================
+    // =======================================================================================
+    // ACTION CONTROLLER
+    // Handles specific visual actions for humanoid entities like sitting, equipping, etc.
+    // =======================================================================================
+    inner class HumanoidActionController {
 
-        if (!humanoidRegistry.containsKey(entity)) {
-            debug("Cannot temporary equip: Entity ${entity.entityId} is not a registered humanoid.")
-            return
+        val sittingMounts = hashMapOf<LivingEntity, Int>()
+
+        /**
+         * Toggles the sitting state of a humanoid entity.
+         * Optionally accepts a target block to calculate exact surface height and snap the entity to it.
+         */
+        fun toggleSitting(entity: LivingEntity, state: Boolean, targetBlock: Block? = null) {
+            val provider = humanoidRegistry[entity] ?: return
+
+            if (state) {
+                if (sittingMounts.containsKey(entity)) return
+
+                // Prevent entity from moving on the server side
+                entity.getAttribute(org.bukkit.attribute.Attribute.MOVEMENT_SPEED)?.baseValue = 0.0
+
+                val mountId = -(abs(UUID.randomUUID().hashCode() / 2)) - 100000
+                sittingMounts[entity] = mountId
+
+                val seatLocation = entity.location.clone()
+
+                // Calculate the precise seating location if a target block is provided
+                if (targetBlock != null) {
+                    val blockData = targetBlock.blockData
+
+                    // По умолчанию сажаем по центру
+                    var offsetX = 0.5
+                    var offsetZ = 0.5
+
+                    val surfaceHeight = when {
+                        blockData is Slab -> if (blockData.type == Slab.Type.BOTTOM) 0.25 else 0.75
+                        blockData is Stairs -> {
+                            // Умный просчёт поворота и оффсета для угловых ступенек
+                            when (blockData.facing) {
+                                BlockFace.NORTH -> { // Открыта на Юг (+Z)
+                                    when (blockData.shape) {
+                                        Stairs.Shape.INNER_LEFT -> { seatLocation.yaw = -45f; offsetX = 0.75; offsetZ = 0.75 }
+                                        Stairs.Shape.INNER_RIGHT -> { seatLocation.yaw = 45f; offsetX = 0.25; offsetZ = 0.75 }
+                                        Stairs.Shape.OUTER_LEFT -> { seatLocation.yaw = -45f; offsetX = 0.65; offsetZ = 0.65 }
+                                        Stairs.Shape.OUTER_RIGHT -> { seatLocation.yaw = 45f; offsetX = 0.35; offsetZ = 0.65 }
+                                        else -> { seatLocation.yaw = 0f }
+                                    }
+                                }
+                                BlockFace.SOUTH -> { // Открыта на Север (-Z)
+                                    when (blockData.shape) {
+                                        Stairs.Shape.INNER_LEFT -> { seatLocation.yaw = 135f; offsetX = 0.25; offsetZ = 0.25 }
+                                        Stairs.Shape.INNER_RIGHT -> { seatLocation.yaw = -135f; offsetX = 0.75; offsetZ = 0.25 }
+                                        Stairs.Shape.OUTER_LEFT -> { seatLocation.yaw = 135f; offsetX = 0.35; offsetZ = 0.35 }
+                                        Stairs.Shape.OUTER_RIGHT -> { seatLocation.yaw = -135f; offsetX = 0.65; offsetZ = 0.35 }
+                                        else -> { seatLocation.yaw = 180f }
+                                    }
+                                }
+                                BlockFace.WEST -> { // Открыта на Восток (+X)
+                                    when (blockData.shape) {
+                                        Stairs.Shape.INNER_LEFT -> { seatLocation.yaw = -135f; offsetX = 0.75; offsetZ = 0.25 }
+                                        Stairs.Shape.INNER_RIGHT -> { seatLocation.yaw = -45f; offsetX = 0.75; offsetZ = 0.75 }
+                                        Stairs.Shape.OUTER_LEFT -> { seatLocation.yaw = -135f; offsetX = 0.65; offsetZ = 0.35 }
+                                        Stairs.Shape.OUTER_RIGHT -> { seatLocation.yaw = -45f; offsetX = 0.65; offsetZ = 0.65 }
+                                        else -> { seatLocation.yaw = -90f }
+                                    }
+                                }
+                                BlockFace.EAST -> { // Открыта на Запад (-X)
+                                    when (blockData.shape) {
+                                        Stairs.Shape.INNER_LEFT -> { seatLocation.yaw = 45f; offsetX = 0.25; offsetZ = 0.75 }
+                                        Stairs.Shape.INNER_RIGHT -> { seatLocation.yaw = 135f; offsetX = 0.25; offsetZ = 0.25 }
+                                        Stairs.Shape.OUTER_LEFT -> { seatLocation.yaw = 45f; offsetX = 0.35; offsetZ = 0.65 }
+                                        Stairs.Shape.OUTER_RIGHT -> { seatLocation.yaw = 135f; offsetX = 0.35; offsetZ = 0.35 }
+                                        else -> { seatLocation.yaw = 90f }
+                                    }
+                                }
+                                else -> { seatLocation.yaw = seatLocation.yaw }
+                            }
+                            if (blockData.half == org.bukkit.block.data.Bisected.Half.BOTTOM) 0.25 else 0.75
+                        }
+                        blockData is Bed -> 0.25
+                        blockData is Campfire -> 0.4375
+                        blockData is Snow -> blockData.layers * 0.125
+                        targetBlock.type.name.endsWith("CARPET") -> 0.0625
+                        !targetBlock.type.isSolid -> 0.0
+                        else -> 1.0
+                    }
+
+                    // Apply the smart offsets
+                    seatLocation.x = targetBlock.x + offsetX
+                    seatLocation.y = targetBlock.y + surfaceHeight
+                    seatLocation.z = targetBlock.z + offsetZ
+
+                    // Телепортируем самого жителя для серверного хитбокса
+                    entity.teleport(seatLocation)
+                }
+
+                // Spawn the mount client-side, translating Y-axis down so the humanoid sits flush with the surface
+                val spawnMount = WrapperPlayServerSpawnEntity(
+                    mountId,
+                    UUID.randomUUID(),
+                    EntityTypes.ARMOR_STAND,
+                    seatLocation.clone().apply { y -= 1.7 }.toPacketEventsLocation(),
+                    seatLocation.yaw, // <-- ВАЖНО: передаём реальный yaw вместо 0f!
+                    0,
+                    null
+                )
+
+                // Apply invisibility to the armor stand
+                val invisibleData = EntityData(0, EntityDataTypes.BYTE, 0x20.toByte())
+                val metaPacket = WrapperPlayServerEntityMetadata(mountId, listOf(invisibleData))
+
+                // Mount the humanoid
+                val mountPacket = WrapperPlayServerSetPassengers(mountId, intArrayOf(entity.entityId))
+
+                provider.subscribers.forEach { player ->
+                    player.sendPacket(spawnMount)
+                    player.sendPacket(metaPacket)
+                    player.sendPacket(mountPacket)
+                }
+
+            } else {
+                val mountId = sittingMounts.remove(entity) ?: return
+
+                // Restore the original movement speed based on the humanoid's race
+                entity.getAttribute(org.bukkit.attribute.Attribute.MOVEMENT_SPEED)?.baseValue =
+                    (entity as? Villager)?.race?.attributes?.get(XAttribute.MOVEMENT_SPEED) ?: 0.5
+
+                val unmountPacket = WrapperPlayServerSetPassengers(mountId, intArrayOf())
+                val destroyPacket = WrapperPlayServerDestroyEntities(mountId)
+
+                provider.subscribers.forEach { player ->
+                    player.sendPacket(unmountPacket)
+                    player.sendPacket(destroyPacket)
+                }
+            }
         }
 
-        val provider = humanoidRegistry[entity]!!
-        val originalItem = entity.equipment?.getItem(slot) ?: ItemStack(Material.AIR)
-
-        val peSlot = when (slot) {
-            EquipmentSlot.HAND -> com.github.retrooper.packetevents.protocol.player.EquipmentSlot.MAIN_HAND
-            EquipmentSlot.OFF_HAND -> com.github.retrooper.packetevents.protocol.player.EquipmentSlot.OFF_HAND
-            else -> {
-                debug("Temporary equip only supports hand slots.")
+        /**
+         * Temporarily equips an item in the hand of a humanoid entity for a specified number of ticks.
+         * This method only affects client-side visuals for subscribers (players viewing the humanoid).
+         * It does not change the server's entity equipment.
+         */
+        fun temporaryEquip(entity: LivingEntity, slot: EquipmentSlot, item: ItemStack, ticks: Int) {
+            if (!humanoidRegistry.containsKey(entity)) {
+                debug("Cannot temporary equip: Entity ${entity.entityId} is not a registered humanoid.")
                 return
             }
-        }
 
-        val equipPacket = WrapperPlayServerEntityEquipment(
-            entity.entityId,
-            listOf(Equipment(peSlot, SpigotConversionUtil.fromBukkitItemStack(item)))
-        )
+            val provider = humanoidRegistry[entity]!!
+            val originalItem = entity.equipment?.getItem(slot) ?: ItemStack(Material.AIR)
 
-        provider.subscribers.forEach { subscriber ->
-            subscriber.sendPacket(equipPacket)
-        }
+            val peSlot = when (slot) {
+                EquipmentSlot.HAND -> com.github.retrooper.packetevents.protocol.player.EquipmentSlot.MAIN_HAND
+                EquipmentSlot.OFF_HAND -> com.github.retrooper.packetevents.protocol.player.EquipmentSlot.OFF_HAND
+                else -> {
+                    debug("Temporary equip only supports hand slots.")
+                    return
+                }
+            }
 
-        plugin.server.scheduler.runTaskLater(plugin, { _ ->
-            val resetPacket = WrapperPlayServerEntityEquipment(
+            val equipPacket = WrapperPlayServerEntityEquipment(
                 entity.entityId,
-                listOf(Equipment(peSlot, SpigotConversionUtil.fromBukkitItemStack(originalItem)))
+                listOf(Equipment(peSlot, SpigotConversionUtil.fromBukkitItemStack(item)))
             )
 
-            provider.subscribers.toList().forEach { subscriber ->
-                subscriber.sendPacket(resetPacket)
+            provider.subscribers.forEach { subscriber ->
+                subscriber.sendPacket(equipPacket)
             }
-        }, ticks.toLong())
+
+            plugin.server.scheduler.runTaskLater(plugin, { _ ->
+                val resetPacket = WrapperPlayServerEntityEquipment(
+                    entity.entityId,
+                    listOf(Equipment(peSlot, SpigotConversionUtil.fromBukkitItemStack(originalItem)))
+                )
+
+                provider.subscribers.toList().forEach { subscriber ->
+                    subscriber.sendPacket(resetPacket)
+                }
+            }, ticks.toLong())
+        }
     }
 
 }

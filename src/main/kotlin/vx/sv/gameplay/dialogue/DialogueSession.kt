@@ -101,7 +101,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
                 entity.addItemToQuillInventory(event.itemDrop.itemStack)
                 this.cooldown()
                 this.generateGiftReaction(player, entity, event.itemDrop.itemStack.clone(), dialogueHistory)
-                plugin.gameplayManager.humanoidManager.protocolListener.temporaryEquip(entity, EquipmentSlot.HAND, event.itemDrop.itemStack, 60)
+                plugin.gameplayManager.humanoidManager.protocolListener.actionController.temporaryEquip(entity, EquipmentSlot.HAND, event.itemDrop.itemStack, 60)
                 giftAwaiting = false
                 readyToSend = false
                 lastMessageTime = System.currentTimeMillis()
