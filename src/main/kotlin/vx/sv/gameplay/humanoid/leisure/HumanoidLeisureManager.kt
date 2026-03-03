@@ -15,20 +15,32 @@ import vx.sv.Souverainete.Companion.plugin
 import kotlin.math.abs
 import kotlin.random.Random
 
+/**
+ * Manages leisure activities for Humanoid NPCs, allowing them to dynamically search for
+ * seating areas (benches, sofas), socialize with friends, and consume food or drinks.
+ */
 class HumanoidLeisureManager : Listener {
 
-    // Стейты досуга
+    /**
+     * Represents the current phase of the NPC's leisure activity.
+     */
     enum class LeisureState { PATHING, SITTING }
+
+    /**
+     * Represents the NPC's desired environment for their leisure activity.
+     */
     enum class Preference { INDOOR, OUTDOOR }
 
-    // Дата-класс для хранения информации о текущей сессии отдыха
+    /**
+     * Data class holding the properties of an ongoing leisure session.
+     */
     data class LeisureSession(
         val villager: Villager,
         val targetSeat: Location,
         val preference: Preference,
         var state: LeisureState = LeisureState.PATHING,
         val startTime: Long = System.currentTimeMillis(),
-        val maxDuration: Long = Random.nextLong(30000, 120000) // От 30 сек до 2 мин
+        val maxDuration: Long = Random.nextLong(30000, 120000) // Ranges from 30 seconds to 2 minutes
     )
 
     private val activeSessions = mutableMapOf<Villager, LeisureSession>()
@@ -37,13 +49,13 @@ class HumanoidLeisureManager : Listener {
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
 
-        // Глобальный тикер поиска кандидатов на отдых
+        // Global ticker: searches for idle NPCs that can start a leisure session.
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
-            if (activeSessions.size > 20) return@runTaskTimer // Лимит отдыхающих
+            if (activeSessions.size > 20) return@runTaskTimer // Hard limit for active leisure sessions
 
             val candidate = plugin.server.worlds
                 .filter { plugin.gameplayManager.allowedWorlds.contains(it) }
-                // 1. Не ищем места вечером и ночью (когда надо спать)
+                // Restrict leisure search during the night (13000-23500), as NPCs should be sleeping.
                 .filter { it.time !in 13000..23500 }
                 .flatMap { it.entities }
                 .filterIsInstance<Villager>()
@@ -51,16 +63,16 @@ class HumanoidLeisureManager : Listener {
                     it.isValid &&
                             !activeSessions.containsKey(it) &&
                             it.vehicle == null &&
-                            // 2. Игнорируем тех, кто уже в процессе сна или лежит на кровати
+                            // Ignore NPCs that are currently sleeping or getting into bed.
                             it.pose != org.bukkit.entity.Pose.SLEEPING &&
                             !it.isSleeping
                 }
                 .randomOrNull() ?: return@runTaskTimer
 
             startLeisureSearch(candidate)
-        }, 200L, 200L) // Раз в 10 секунд
+        }, 200L, 200L) // Runs every 10 seconds
 
-        // Тикер контроля уже отдыхающих (патфайндинг, перекусы, лимиты времени)
+        // Session control ticker: manages pathfinding, session timeouts, and eating/drinking chances.
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
             val iterator = activeSessions.values.iterator()
             val time = System.currentTimeMillis()
@@ -69,14 +81,14 @@ class HumanoidLeisureManager : Listener {
                 val session = iterator.next()
                 val npc = session.villager
 
-                // Валидация
+                // Invalidate session if the NPC is dead or no longer valid
                 if (!npc.isValid || npc.isDead) {
                     freeSeat(session)
                     iterator.remove()
                     continue
                 }
 
-                // Проверка ночи для тех, кто сидит на улице
+                // Force NPCs sitting outdoors to stand up and go home when night falls
                 val isNight = npc.world.time in 13000..23000
                 if (isNight && session.preference == Preference.OUTDOOR) {
                     standUp(npc, session)
@@ -84,28 +96,31 @@ class HumanoidLeisureManager : Listener {
                     continue
                 }
 
-                // Проверка времени сессии
+                // Terminate session if the maximum duration has been reached
                 if (time - session.startTime > session.maxDuration) {
                     standUp(npc, session)
                     iterator.remove()
                     continue
                 }
 
+                // Process the current state of the session
                 when (session.state) {
                     LeisureState.PATHING -> handlePathing(session)
                     LeisureState.SITTING -> handleSitting(session)
                 }
             }
-        }, 20L, 20L) // Проверка каждую секунду
+        }, 20L, 20L) // Runs every second
     }
 
     // =======================================================================================
-    // ОСНОВНАЯ ЛОГИКА
+    // CORE LOGIC
     // =======================================================================================
 
-    // Функция проверки дистанции (чтобы не сидели вплотную друг к другу)
+    /**
+     * Checks if the 3x3 area around a potential seat is already occupied.
+     * Enforces a personal space rule so NPCs do not sit shoulder-to-shoulder.
+     */
     private fun isPersonalSpaceInvaded(loc: Location, occupiedSet: Set<Location> = occupiedSeats): Boolean {
-        // Проверяем 8 блоков вокруг (квадрат 3x3 на одном Y-уровне)
         for (dx in -1..1) {
             for (dz in -1..1) {
                 if (dx == 0 && dz == 0) continue
@@ -116,15 +131,18 @@ class HumanoidLeisureManager : Listener {
         return false
     }
 
+    /**
+     * Initiates an asynchronous search for the best seating block around the NPC.
+     */
     private fun startLeisureSearch(npc: Villager) {
         val centerChunk = npc.location.chunk
         val world = npc.world
 
-        // Выбираем изначальное желание NPC: 80% дом, 20% улица
+        // Determine NPC's environmental preference: 80% chance for indoor, 20% for outdoor.
         val desiredPreference = if (Random.nextDouble() < 0.8) Preference.INDOOR else Preference.OUTDOOR
         val isSocial = Random.nextBoolean()
 
-        // Собираем слепки 3x3 чанков вокруг синхронно
+        // Synchronously collect snapshots of a 3x3 chunk area to allow safe async block reading.
         val snapshots = mutableListOf<org.bukkit.ChunkSnapshot>()
         for (dx in -1..1) {
             for (dz in -1..1) {
@@ -134,13 +152,13 @@ class HumanoidLeisureManager : Listener {
             }
         }
 
-        // Уходим в асинхрон для поиска идеального блока
+        // Shift to async thread to perform the heavy block evaluation
         plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
             val npcY = npc.location.blockY
-            val candidates = mutableListOf<Pair<Location, Int>>() // Location to Score
-            val campfires = mutableListOf<Triple<Int, Int, Int>>() // worldX, y, worldZ
+            val candidates = mutableListOf<Pair<Location, Int>>() // Maps a Location to its calculated Score
+            val campfires = mutableListOf<Triple<Int, Int, Int>>() // Stores campfire coordinates: worldX, y, worldZ
 
-            // Функция для безопасного и быстрого получения материала из слепков (cross-chunk)
+            // Lambda for fast, cross-chunk block material retrieval
             val getMat = { wx: Int, wy: Int, wz: Int ->
                 val cx = wx shr 4
                 val cz = wz shr 4
@@ -148,7 +166,8 @@ class HumanoidLeisureManager : Listener {
                 snap?.getBlockType(wx and 15, wy, wz and 15) ?: Material.AIR
             }
 
-            // Пре-пасс: ищем костры (ищем чуть шире по высоте, чтобы точно захватить)
+            // Pre-pass: Scan for campfires to potentially boost outdoor seating priority.
+            // A slightly larger vertical range is used to ensure ground-level campfires are found.
             for (snapshot in snapshots) {
                 for (y in (npcY - 4)..(npcY + 4)) {
                     for (x in 0..15) {
@@ -162,6 +181,7 @@ class HumanoidLeisureManager : Listener {
                 }
             }
 
+            // Main pass: Evaluate blocks for seating suitability
             for (snapshot in snapshots) {
                 for (y in (npcY - 3)..(npcY + 2)) {
                     for (x in 0..15) {
@@ -171,16 +191,16 @@ class HumanoidLeisureManager : Listener {
 
                             val isStairs = material.name.endsWith("STAIRS")
 
-                            // Мировые координаты
                             val worldX = (snapshot.x shl 4) + x
                             val worldZ = (snapshot.z shl 4) + z
 
                             if (isStairs) {
                                 val blockData = snapshot.getBlockData(x, y, z)
-                                // Игнорируем перевернутые ступеньки
+                                // Ignore upside-down stairs as they are invalid seats
                                 if (blockData is org.bukkit.block.data.type.Stairs && blockData.half == org.bukkit.block.data.Bisected.Half.TOP) continue
 
-                                // === ФИЛЬТР ЛЕСТНИЧНЫХ ПРОЛЁТОВ ===
+                                // Staircase filter: Check Y+1 and Y-1 to differentiate a bench from an actual staircase.
+                                // If adjacent stairs are detected vertically, it indicates an elevation structure.
                                 var isStaircase = false
                                 for (dx in -1..1) {
                                     for (dz in -1..1) {
@@ -193,7 +213,6 @@ class HumanoidLeisureManager : Listener {
                                     }
                                     if (isStaircase) break
                                 }
-                                // Если это лестница - бракуем блок и идём дальше
                                 if (isStaircase) continue
                             }
 
@@ -202,32 +221,32 @@ class HumanoidLeisureManager : Listener {
                             if (isStairs || isSolid) {
                                 val loc = Location(world, worldX.toDouble(), y.toDouble(), worldZ.toDouble())
 
-                                // Если место уже занято — скипаем
+                                // Skip if the seat is already reserved
                                 if (occupiedSeats.contains(loc)) continue
 
-                                // СТРОГАЯ МУЖСКАЯ ДИСТАНЦИЯ: Никто не сидит на соседних блоках
+                                // Enforce personal space to prevent overlapping or intimately close NPCs
                                 if (isPersonalSpaceInvaded(loc)) continue
 
-                                // Проверка, что сверху 2 блока воздуха
+                                // Ensure there are at least 2 empty blocks above the seat to prevent head collision
                                 if (!snapshot.getBlockType(x, y + 1, z).isAir || !snapshot.getBlockType(x, y + 2, z).isAir) {
                                     continue
                                 }
 
                                 var score = 0
 
-                                // Определение: улица или помещение?
+                                // Determine if the seat is indoor or outdoor based on the highest block Y
                                 val highestY = snapshot.getHighestBlockYAt(x, z)
                                 val isIndoor = highestY > y + 2
                                 val actualPreference = if (isIndoor) Preference.INDOOR else Preference.OUTDOOR
 
-                                // Накидываем очки за соответствие желанию
+                                // Add score for matching the NPC's desired preference
                                 if (actualPreference == desiredPreference) score += 50
-                                // Дома сидеть приоритетнее в любом случае
+                                // Provide a base priority for indoor environments to encourage home usage
                                 if (isIndoor) score += 30
-                                // Очки за ступеньки
+                                // Prioritize proper stair blocks over raw solid blocks
                                 if (isStairs) score += 100
 
-                                // Социальный интеллект: ищем соседние ступеньки (лавочка)
+                                // Social intelligence check: if this is a stair block with adjacent stairs, it's a bench.
                                 if (isStairs) {
                                     val neighbors = listOf(
                                         Pair(worldX + 1, worldZ), Pair(worldX - 1, worldZ),
@@ -236,20 +255,20 @@ class HumanoidLeisureManager : Listener {
                                     for (n in neighbors) {
                                         val neighborMat = getMat(n.first, y, n.second)
                                         if (neighborMat.name.endsWith("STAIRS")) {
-                                            score += 150 // Огромный приоритет за настоящую скамейку
+                                            score += 150 // Massive priority for actual benches/sofas
                                             break
                                         }
                                     }
                                 }
 
-                                // Уютный костёр: если ищем место на улице, места у костра в приоритете
+                                // Campfire priority: If looking for an outdoor seat, prioritize locations near fire.
                                 if (desiredPreference == Preference.OUTDOOR && actualPreference == Preference.OUTDOOR) {
                                     val nearCampfire = campfires.any { cf ->
-                                        // Проверяем радиус: 6 блоков в стороны, 2 блока вверх/вниз
+                                        // Detection radius: 6 blocks horizontally, 2 blocks vertically
                                         abs(cf.first - worldX) <= 6 && abs(cf.second - y) <= 2 && abs(cf.third - worldZ) <= 6
                                     }
                                     if (nearCampfire) {
-                                        score += 350 // Даём мощный буст (перебивает даже крутые домашние диваны)
+                                        score += 350 // Overrides almost all other indoor/bench priorities
                                     }
                                 }
 
@@ -260,22 +279,22 @@ class HumanoidLeisureManager : Listener {
                 }
             }
 
-            // Выбираем лучшее место
+            // Select the highest-scoring seat
             val bestSeat = candidates.maxByOrNull { it.second } ?: return@Runnable
 
-            // Возвращаемся в основной поток для назначения задачи
+            // Return to the main thread to assign the seat and handle entities
             plugin.server.scheduler.runTask(plugin, Runnable {
                 assignSeat(npc, bestSeat.first, desiredPreference)
 
-                // Если социальный настрой и найдена скамейка - зовём корешей!
+                // If the NPC is social and found a high-value bench, invite nearby friends
                 if (isSocial && bestSeat.second >= 250) {
                     val friends = npc.getNearbyEntities(10.0, 5.0, 10.0)
                         .filterIsInstance<Villager>()
                         .filter { it.isValid && !activeSessions.containsKey(it) && it.vehicle == null }
                         .shuffled()
-                        .take(Random.nextInt(1, 3)) // Зовём 1 или 2 друга
+                        .take(Random.nextInt(1, 3))
 
-                    // Рассаживаем друзей на свободные блоки рядом с основным сиденьем
+                    // Attempt to seat friends on valid adjacent blocks
                     val friendSeats = getAdjacentFreeSeats(bestSeat.first, friends.size)
                     friends.forEachIndexed { index, friend ->
                         friendSeats.getOrNull(index)?.let { fLoc ->
@@ -297,14 +316,14 @@ class HumanoidLeisureManager : Listener {
         val npc = session.villager
         val target = session.targetSeat
 
+        // Switch to sitting state once the NPC is close enough to the target
         if (npc.location.distanceSquared(target) < 2.5) {
-            // Дошли! Садимся
             session.state = LeisureState.SITTING
             plugin.gameplayManager.humanoidManager.protocolListener.actionController.toggleSitting(npc, true, target.block)
             return
         }
 
-        // Контролируем патфайндинг (используется Paper API)
+        // Manage pathfinding through the Paper API
         val pathfinder: Pathfinder = npc.pathfinder
         if (!pathfinder.hasPath() || pathfinder.currentPath?.finalPoint?.distanceSquared(target)!! > 2.0) {
             pathfinder.moveTo(target, 0.6)
@@ -314,12 +333,15 @@ class HumanoidLeisureManager : Listener {
     private fun handleSitting(session: LeisureSession) {
         val npc = session.villager
 
-        // 5% шанс перекусить каждую секунду
+        // 5% chance per second to consume a random visual food or drink item
         if (Random.nextDouble() < 0.05) {
             triggerRandomConsumption(npc)
         }
     }
 
+    /**
+     * Creates a visual-only consumption effect (eating or drinking) for the NPC.
+     */
     private fun triggerRandomConsumption(npc: Villager) {
         val humanoid = plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(npc)
 
@@ -338,12 +360,11 @@ class HumanoidLeisureManager : Listener {
         val sound = if (isDrink) Sound.ENTITY_GENERIC_DRINK else Sound.ENTITY_GENERIC_EAT
 
         humanoid.consume(npc.world, item, sound, 7, npc.location, 7) {
-            // Никаких эффектов не накладываем, просто визуальная трапеза
+            // Visual consumption completed; no status effects are applied.
         }
     }
 
     private fun standUp(npc: Villager, session: LeisureSession) {
-        // Поднимаем жопу
         plugin.gameplayManager.humanoidManager.protocolListener.actionController.toggleSitting(npc, false)
         freeSeat(session)
     }
@@ -352,16 +373,18 @@ class HumanoidLeisureManager : Listener {
         occupiedSeats.remove(session.targetSeat)
     }
 
-    // Поиск соседних свободных мест для социального интерактива
+    /**
+     * Evaluates seating availability for friends around a central location, enforcing a strict personal distance.
+     */
     private fun getAdjacentFreeSeats(center: Location, count: Int): List<Location> {
         val seats = mutableListOf<Location>()
-        val tempOccupied = occupiedSeats.toMutableSet() // Локальная копия, чтобы друзья не сели вплотную друг к другу
+        val tempOccupied = occupiedSeats.toMutableSet() // Local copy to prevent friends from sitting next to each other
 
-        // Ищем места с зазором минимум в 1 блок. То есть дистанция 2 и 3.
+        // Offsets represent a minimum of 1 empty block gap (i.e., distance of 2 or 3 blocks).
         val offsets = listOf(
-            Pair(2, 0), Pair(-2, 0), Pair(0, 2), Pair(0, -2), // Через 1 блок по прямой
-            Pair(2, 2), Pair(-2, -2), Pair(2, -2), Pair(-2, 2), // Через 1 блок по диагонали
-            Pair(3, 0), Pair(-3, 0), Pair(0, 3), Pair(0, -3) // И чуть дальше для длинных лавочек
+            Pair(2, 0), Pair(-2, 0), Pair(0, 2), Pair(0, -2), // 1 block gap straight
+            Pair(2, 2), Pair(-2, -2), Pair(2, -2), Pair(-2, 2), // 1 block gap diagonally
+            Pair(3, 0), Pair(-3, 0), Pair(0, 3), Pair(0, -3) // Further check for longer benches
         )
         val world = center.world
 
@@ -376,7 +399,7 @@ class HumanoidLeisureManager : Listener {
                 val bData = block.blockData
                 if (bData is org.bukkit.block.data.type.Stairs && bData.half == org.bukkit.block.data.Bisected.Half.TOP) isSeat = false
 
-                // Проверка на лестничный пролёт
+                // Re-apply the staircase elevation filter for friend seating
                 if (isSeat) {
                     var isStaircase = false
                     for (dx in -1..1) {
@@ -395,13 +418,13 @@ class HumanoidLeisureManager : Listener {
             }
 
             if (isSeat && !tempOccupied.contains(checkLoc)) {
-                // Строгая проверка личного пространства (проверяем по локальному списку)
+                // Ensure the friend respects the personal space constraint based on the local occupied map
                 if (isPersonalSpaceInvaded(checkLoc, tempOccupied)) continue
 
-                // Проверка высоты (чтоб там было свободно)
+                // Check for head clearance
                 if (checkLoc.clone().add(0.0, 1.0, 0.0).block.type.isAir) {
                     seats.add(checkLoc)
-                    tempOccupied.add(checkLoc) // Бронируем место, чтобы следующий друг не сел на соседний блок
+                    tempOccupied.add(checkLoc) // Reserve locally to maintain spacing for the next friend
                 }
             }
         }
@@ -409,7 +432,7 @@ class HumanoidLeisureManager : Listener {
     }
 
     // =======================================================================================
-    // ИВЕНТЫ
+    // EVENTS
     // =======================================================================================
 
     @EventHandler
@@ -417,7 +440,7 @@ class HumanoidLeisureManager : Listener {
         val npc = event.entity as? Villager ?: return
         val session = activeSessions[npc] ?: return
 
-        // Любой урон заставляет прервать отдых
+        // Interrupt leisure session upon taking any damage
         standUp(npc, session)
         activeSessions.remove(npc)
     }

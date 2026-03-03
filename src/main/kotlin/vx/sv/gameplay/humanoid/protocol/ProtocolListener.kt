@@ -458,10 +458,6 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
     // ACTION CONTROLLER
     // Handles specific visual actions for humanoid entities like sitting, equipping, etc.
     // =======================================================================================
-    // =======================================================================================
-    // ACTION CONTROLLER
-    // Handles specific visual actions for humanoid entities like sitting, equipping, etc.
-    // =======================================================================================
     inner class HumanoidActionController {
 
         val sittingMounts = hashMapOf<LivingEntity, Int>()
