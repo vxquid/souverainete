@@ -74,7 +74,7 @@ class Souverainete : JavaPlugin(), Listener {
     private var latestVersion: String? = null
 
     override fun onEnable() {
-
+        return
         ScoreCalculator.init()
         RainbowColorTicker.init()
         this.providerManager = ProviderManager()
