@@ -1,4 +1,5 @@
-# In this file you can customize (or even create new) races.
+# In this file, you can customize existing races or create new ones.
+# I HIGHLY recommend using the web editor to customize races: https://vxquid.github.io/souverainete-race-editor/
 
 # Dwarves are the first race added. Why? Because dwarves rules!
 dwarf:

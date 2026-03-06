@@ -58,7 +58,7 @@ class CerebrasClient(
     }.build()
 
     private val lang  = config.language
-    private val rules = "[Rules: `Use $lang language.`, `Generate content in ${config.setting} setting.`, `Use ${config.namingStyle} naming style.`] "
+    private val rules = "[Rules: `You must use $lang language in generated content.`, `Generate content in ${config.setting} setting.`, `Use ${config.namingStyle} naming style.`] "
     private val temp  = config.temperature
 
     override fun <T : Any> sendPromptWithSchema(
