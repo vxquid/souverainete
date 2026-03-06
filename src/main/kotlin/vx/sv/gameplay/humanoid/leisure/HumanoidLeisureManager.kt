@@ -9,9 +9,13 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.EntityDeathEvent
+import org.bukkit.event.server.PluginDisableEvent
+import org.bukkit.event.world.ChunkUnloadEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.PotionMeta
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.dialogue.DialogueSession
+import vx.sv.gameplay.dialogue.menu.InteractionHandler
 import kotlin.math.abs
 import kotlin.random.Random
 
@@ -65,7 +69,11 @@ class HumanoidLeisureManager : Listener {
                             it.vehicle == null &&
                             // Ignore NPCs that are currently sleeping or getting into bed.
                             it.pose != org.bukkit.entity.Pose.SLEEPING &&
-                            !it.isSleeping
+                            !it.isSleeping &&
+                            // Ignore NPCs that are in an active dialogue session.
+                            DialogueSession.activeDialogueSessions.none { session -> session.entity == it } &&
+                            // Ignore NPCs that are interacting via a menu.
+                            InteractionHandler.openedMenuList.none { menu -> menu.villager == it }
                 }
                 .randomOrNull() ?: return@runTaskTimer
 
@@ -81,9 +89,9 @@ class HumanoidLeisureManager : Listener {
                 val session = iterator.next()
                 val npc = session.villager
 
-                // Invalidate session if the NPC is dead or no longer valid
+                // Invalidate session if the NPC is dead or no longer valid (e.g. chunk unexpectedly unloaded)
                 if (!npc.isValid || npc.isDead) {
-                    freeSeat(session)
+                    standUp(npc, session) // Ensures attributes are safely reset
                     iterator.remove()
                     continue
                 }
@@ -105,7 +113,17 @@ class HumanoidLeisureManager : Listener {
 
                 // Process the current state of the session
                 when (session.state) {
-                    LeisureState.PATHING -> handlePathing(session)
+                    LeisureState.PATHING -> {
+                        // Cancel leisure pathing if the player suddenly engages the NPC in a dialogue or menu
+                        val inDialogue = DialogueSession.activeDialogueSessions.any { it.entity == npc }
+                        val inMenu = InteractionHandler.openedMenuList.any { it.villager == npc }
+                        if (inDialogue || inMenu) {
+                            standUp(npc, session)
+                            iterator.remove()
+                            continue
+                        }
+                        handlePathing(session)
+                    }
                     LeisureState.SITTING -> handleSitting(session)
                 }
             }
@@ -434,6 +452,38 @@ class HumanoidLeisureManager : Listener {
     // =======================================================================================
     // EVENTS
     // =======================================================================================
+    @EventHandler
+    fun onPluginDisable(event: PluginDisableEvent) {
+        if (event.plugin == plugin) {
+            // Force all NPCs to stand up before the server stops or the plugin reloads.
+            // This prevents their sitting attributes from being permanently stuck in their NBT data.
+            val iterator = activeSessions.values.iterator()
+            while (iterator.hasNext()) {
+                val session = iterator.next()
+                try {
+                    standUp(session.villager, session)
+                } catch (_: Exception) {
+                    // Fail silently during shutdown sequence if entities are already invalidated
+                }
+                iterator.remove()
+            }
+            occupiedSeats.clear()
+        }
+    }
+
+    @EventHandler
+    fun onChunkUnload(event: ChunkUnloadEvent) {
+        val chunk = event.chunk
+        // Prevent attributes from getting stuck when the chunk they are in gets unloaded
+        val iterator = activeSessions.values.iterator()
+        while (iterator.hasNext()) {
+            val session = iterator.next()
+            if (session.villager.location.chunk == chunk) {
+                standUp(session.villager, session)
+                iterator.remove()
+            }
+        }
+    }
 
     @EventHandler
     fun onNpcDamage(event: EntityDamageEvent) {
@@ -449,7 +499,8 @@ class HumanoidLeisureManager : Listener {
     fun onNpcDeath(event: EntityDeathEvent) {
         val npc = event.entity as? Villager ?: return
         activeSessions.remove(npc)?.let { session ->
-            freeSeat(session)
+            // Use standUp to ensure sitting attributes are fully cleared before the entity is destroyed
+            standUp(npc, session)
         }
     }
 }

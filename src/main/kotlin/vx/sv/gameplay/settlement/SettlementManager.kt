@@ -130,6 +130,22 @@ class SettlementManager : Listener {
 
     private fun startSettlementDetectionTask(world: World) {
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
+
+            // 1. Maintain Leaders: Ensure every active settlement has a valid living leader
+            settlements[world]?.forEach { settlement ->
+                if (settlement.villagers.isNotEmpty()) {
+                    val hasActiveLeader = settlement.villagers.any {
+                        it.uniqueId == settlement.data.leaderId && it.isValid
+                    }
+                    if (!hasActiveLeader) {
+                        settlement.electLeader()
+                        // Save changes since the leader ID was updated
+                        saveSettlements(world)
+                    }
+                }
+            }
+
+            // 2. Detect homeless villagers and group them
             val homelessVillagers = world.entities
                 .filterIsInstance<Villager>()
                 .filter { it.settlement == null }
@@ -210,9 +226,6 @@ class SettlementManager : Listener {
         val client = plugin.providerManager.client
 
         // 1. Calculate dominant race in advance
-        val dominantRace = getDominantRace(settlement) // Fixed: Now returns Race object via helper in companion if needed, but logic below was using string from data?
-        // Wait, getDominantRace companion returns String, instance private method returns Race.
-        // Let's use the local private method which returns Race for the generator.
         val raceEnum = getDominantRaceEnum(settlement)
 
         if (client is DummyClient) {
@@ -254,7 +267,6 @@ class SettlementManager : Listener {
         applySettlementCreation(settlement, finalName)
     }
 
-    // Renamed local helper to avoid confusion with Companion.getDominantRace(String)
     private fun getDominantRaceEnum(settlement: Settlement): Race {
         return settlement.villagers
             .groupingBy { it.race }
@@ -266,6 +278,9 @@ class SettlementManager : Listener {
     private fun applySettlementCreation(settlement: Settlement, name: String) {
         settlement.data.settlementName = name
         settlement.villagers.forEach { it.settlement = settlement }
+
+        // Elect the initial leader for the newly founded settlement
+        settlement.electLeader()
 
         val world = settlement.world
         val worldSettlements = settlements.computeIfAbsent(world) { mutableListOf() }
@@ -326,7 +341,7 @@ class SettlementManager : Listener {
     class SettlementNameGenerator(settlement: Settlement, race: Race) {
         private val basePrompt = """
             Answer only in JSON. Generate 5 creative settlement names.
-            Schema: {"settlementName": ["Name1", "Name2", ...]}
+            Schema: {"settlementName":["Name1", "Name2", ...]}
             
             Context:
             - Dominant Race: {dominantRace} (CRITICAL: The names must strictly reflect the language, culture, and lore of this race).

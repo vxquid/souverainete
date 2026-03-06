@@ -17,7 +17,6 @@ import vx.sv.gameplay.event.PlayerAcceptQuestEvent
 import vx.sv.gameplay.party.PartyManager.CombatTactic
 import vx.sv.gameplay.party.PartyManager.PartyState
 import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
-import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
 
@@ -72,20 +71,7 @@ class GeyserSupportProvider {
 
             val quest = villager.quests().find { it.name == buttonName } ?: return@validResultHandler
 
-            val questDescriptionRaw = villager.let { npc ->
-                when (npc.opinionOn(player)) {
-                    Reputation.EXALTED -> quest.data.reputationBasedQuestDescriptions.getOrNull(0)
-                    Reputation.REVERED -> quest.data.reputationBasedQuestDescriptions.getOrNull(1)
-                    Reputation.HONORED -> quest.data.reputationBasedQuestDescriptions.getOrNull(2)
-                    Reputation.FRIENDLY -> quest.data.reputationBasedQuestDescriptions.getOrNull(3)
-                    Reputation.NEUTRAL -> quest.data.reputationBasedQuestDescriptions.getOrNull(4)
-                    Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestDescriptions.getOrNull(5)
-                    Reputation.HOSTILE -> quest.data.reputationBasedQuestDescriptions.getOrNull(6)
-                    Reputation.EXILED -> quest.data.reputationBasedQuestDescriptions.getOrNull(7)
-                }
-            } ?: (plugin.language.getString("quest.description-missing") ?: "Quest description missing.")
-
-            val questDescription = questDescriptionRaw.replace("%playerName%", player.name)
+            val questDescription = quest.data.questDescription.replace("%playerName%", player.name)
 
             // Markdown parsing
             val formattedQuestDescription = dialogueBoxTextBaseColor + questDescription.replace(Regex("\\*\\*(.*?)\\*\\*")) { matchResult ->

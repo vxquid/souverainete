@@ -46,7 +46,7 @@ class TranslateCommand : BaseCommand(), Listener {
         const val STEP_PREFIX = "§e[Step {n}/4] "
 
         const val MSG_START = "$SETUP_PREFIX§7Select your provider: §e/s provider <type>"
-        const val MSG_LIST = "§7Available: §fGROQ (recommended), GEMINI, OPENROUTER, DEEPSEEK, CHATGPT, ANYTHINGLLM"
+        const val MSG_LIST = "§7Available: §fCEREBRAS (recommended), GROQ, GEMINI, OPENROUTER, DEEPSEEK, CHATGPT, ANYTHINGLLM"
         const val MSG_INVALID = "§cInvalid provider type!"
         const val MSG_CANCELLED = "§c[AI Setup] Setup cancelled."
 
@@ -122,6 +122,7 @@ class TranslateCommand : BaseCommand(), Listener {
 
         // Configuration and URL mapping
         val (url, defaultModel) = when (providerType) {
+            ProviderType.CEREBRAS -> "https://cloud.cerebras.ai" to "gpt-oss-120b"
             ProviderType.GEMINI -> "https://aistudio.google.com/app/apikey" to "google/gemini-2.5-flash-lite"
             ProviderType.GROQ -> "https://console.groq.com/keys" to "openai/gpt-oss-120b"
             ProviderType.OPENROUTER -> "https://openrouter.ai/keys" to "deepseek/deepseek-r1-0528:free"

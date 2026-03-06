@@ -47,6 +47,7 @@ class ProviderManager : Listener {
             ProviderType.DEEPSEEK -> DeepSeekClient(DeepSeekClient.KeyManager(apiKey), config)
             ProviderType.CHATGPT -> ChatGPTClient(ChatGPTClient.KeyManager(apiKey), config)
             ProviderType.ANYTHINGLLM -> AnythingLLMClient(AnythingLLMClient.KeyManager(apiKey), config)
+            ProviderType.CEREBRAS -> CerebrasClient(CerebrasClient.KeyManager(apiKey), config)
         }
     }
 

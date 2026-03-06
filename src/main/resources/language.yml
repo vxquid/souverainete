@@ -128,7 +128,6 @@ reputation:
     revered: "Revered"
     exalted: "Exalted"
 
-# Villager profession names.
 villager-professions:
   armorer: "Armorer"
   butcher: "Butcher"
@@ -148,7 +147,6 @@ villager-professions:
   raider: "Raider"
   guard: "Guard"
 
-# Hunger status names.
 hunger-status:
   hungry: "🍗 Hungry"
   starving: "☠ Starving"
@@ -157,7 +155,6 @@ npc-state:
   annoyed: "⚠ Annoyed"
   aggressive: "☠ Aggressive"
 
-# Command output messages.
 command-message:
   translate:
     warning: "§7You are about to translate §e{count} §7race files. This will use multiple AI requests."
@@ -207,7 +204,6 @@ info-messages:
     already-raided: "§cSettlement {settlement} is already under attack!"
     raid-started: "§aSuccessfully started a raid! Attacker: {attacker}, Defender: {defender}."
 
-# Interaction menu buttons (GUI).
 interaction-menu:
   quests-button: "Quests"
   trade-button: "Trade"
@@ -223,21 +219,31 @@ interaction-menu:
   party-control-button: "§bManage Companion"
   party-kick-button: "§4Dismiss"
 
-# Error messages.
 command-error-message:
   player-not-found: "§cError! Player not found: §e{playerName} §c(online only)."
   status-not-found: "§cError! Non-existent reputation status: §с{status}."
   settlement-not-found: "§cError! Non-existent settlement: §с{settlementName}."
 
-# Update checker messages.
 update:
   new-version-available: "§7A new version is available: §6{newVersion}§7. Please consider updating."
   check-failed: "§7Failed to check for updates: {errorMessage}."
 
-# Death messages.
 death-messages:
   permanent-death: "§c{villagerName} has succumbed to their wounds and perished."
   returned-home: "§e{villagerName} §7sustained critical injuries and was evacuated back to §6{settlementName}§7."
   carry-start: "You are carrying {villagerName}"
   needs-revive-item: "Needs a Golden Apple or Potion to revive!"
   revived: "You revived {villagerName}!"
+
+# Politics System messages.
+politics:
+  first-contact:
+    critical-success: "§a📜 Historic Event! §6{settlementA} §aand §6{settlementB} §ahave discovered each other and instantly formed an §bALLIANCE§a!"
+    success: "§a📜 First Contact! §6{settlementA} §aand §6{settlementB} §ahave met peacefully. Their relations are §eWARM§a."
+    neutral: "§e📜 First Contact! Scouts from §6{settlementA} §eand §6{settlementB} §eestablished cautious communication. Relations are §fNEUTRAL§e."
+    failure: "§c⚠ Border Clash! The first meeting between §6{settlementA} §cand §6{settlementB} §cended in blood. Relations are highly §6TENSE§c!"
+    critical-failure: "§4☠ Declaration of War! §cDiplomacy failed instantly. §6{settlementA} §cand §6{settlementB} §care now at §4WAR§c!"
+  relation-shift: "§e📜 Diplomatic update: Relations between §6{settlementA} §eand §6{settlementB} §eare now §b{relation}§e."
+  war-declared: "§c⚔ WAR! §6{attacker} §chas formally declared war on §6{defender}§c!"
+  alliance-gifts: "§a🎁 §6{sender} §ahas sent a caravan of diplomatic gifts to their ally, §6{receiver}§a."
+  diplomatic-incident: "§c⚠ Diplomatic Incident! Relations between §6{settlementA} §cand §6{settlementB} §care severely damaged and are now tense."

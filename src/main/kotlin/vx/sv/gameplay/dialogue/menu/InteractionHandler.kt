@@ -30,12 +30,13 @@ import vx.sv.gameplay.dialogue.DialogueManager.Companion.talk
 import vx.sv.gameplay.dialogue.DialogueSession
 import vx.sv.gameplay.dialogue.DialogueSession.Companion.getActiveDialogueSession
 import vx.sv.gameplay.event.PlayerAcceptQuestEvent
+import vx.sv.gameplay.event.QuestInvalidationEvent
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.party.PartyManager.CombatTactic
 import vx.sv.gameplay.party.PartyManager.PartyState
+import vx.sv.gameplay.quest.QuestManager.Companion.removeQuest
 import vx.sv.gameplay.quest.QuestManager.Quest
 import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
-import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
 
@@ -119,6 +120,19 @@ class InteractionHandler : Listener {
 
         if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
         if (event.isCancelled || !villager.isAware) return
+
+        // Clean up outdated quests (where new JSON fields are missing due to old format)
+        val outdatedQuests = villager.quests().filter { quest ->
+            @Suppress("SENSELESS_COMPARISON")
+            quest.data.questDescription == null || quest.data.questFinisherDialogue == null
+        }
+
+        if (outdatedQuests.isNotEmpty()) {
+            outdatedQuests.forEach { oldQuest ->
+                plugin.gameplayManager.questManager.invalidateQuest(oldQuest, QuestInvalidationEvent.Reason.NOT_ACTUAL)
+                villager.removeQuest(oldQuest)
+            }
+        }
 
         val player: Player = event.player
         val time = System.currentTimeMillis()
@@ -359,19 +373,7 @@ class InteractionHandler : Listener {
         quests.forEach { quest ->
             val useRainbow = false
             builder.button(quest.name, isRainbow = useRainbow) {
-                val description = (villager.let { npc ->
-                    return@let when (npc.opinionOn(player)) {
-                        Reputation.EXALTED -> quest.data.reputationBasedQuestDescriptions.getOrNull(0)
-                        Reputation.REVERED -> quest.data.reputationBasedQuestDescriptions.getOrNull(1)
-                        Reputation.HONORED -> quest.data.reputationBasedQuestDescriptions.getOrNull(2)
-                        Reputation.FRIENDLY -> quest.data.reputationBasedQuestDescriptions.getOrNull(3)
-                        Reputation.NEUTRAL -> quest.data.reputationBasedQuestDescriptions.getOrNull(4)
-                        Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestDescriptions.getOrNull(5)
-                        Reputation.HOSTILE -> quest.data.reputationBasedQuestDescriptions.getOrNull(6)
-                        Reputation.EXILED -> quest.data.reputationBasedQuestDescriptions.getOrNull(7)
-                    }
-                } ?: (plugin.language.getString("quest.description-missing") ?: "Quest description missing."))
-                    .replace("%playerName%", player.name)
+                val description = quest.data.questDescription.replace("%playerName%", player.name)
 
                 villager.talk(player, description) {
                     this.showQuestSuggestionMenu(player, villager, quest)

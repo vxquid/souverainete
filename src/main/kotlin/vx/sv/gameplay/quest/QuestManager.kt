@@ -35,8 +35,6 @@ import vx.sv.gameplay.quest.QuestManager.Quest.QuestItem
 import vx.sv.gameplay.quest.pragma.QuestItemStrategy
 import vx.sv.gameplay.quest.pragma.strategy.*
 import vx.sv.gameplay.quest.pragma.strategy.TreasureHuntQuestItemStrategy.Companion.treasureItems
-import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
-import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.trade.ScoreCalculator.getBasicScore
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
 import vx.sv.persistent.LivingEntityExtend.hasEdibleItem
@@ -51,7 +49,7 @@ class QuestManager : Listener {
 
     val progressTracker = ProgressTracker()
 
-    // ID квестов помогает отслеживать актуальные квесты и те, которые уже не имеют смысла.
+    // Quest IDs help to track actual quests and invalidate outdated ones.
     val questCountKey = NamespacedKey(plugin, "TotalQuestCount")
     val totalQuestAmount: Long
         get() = Bukkit.getWorlds()[0]!!.persistentDataContainer.get(questCountKey, PersistentDataType.LONG) ?: 0
@@ -64,7 +62,7 @@ class QuestManager : Listener {
         plugin.server.pluginManager.registerEvents(this, plugin)
         plugin.server.scheduler.runTaskTimer(plugin, { _ -> tick() }, 0, plugin.gameplayManager.config.quest.intervalTicks)
 
-        // Загружаем описания и allowed из prompts.yml
+        // Load descriptions and allowed status from prompts.yml
         gatheringDescription = plugin.prompts.getString("quest-family.gathering.quest-description")
             ?: "To complete the quest, the player will need to obtain an item `{questItem}` in the amount of {questItemAmount} and bring it to the NPC. The NPC promises a reward ({rewardItem}) for the assistance, without specifying what exactly it will be. When generating the quest, be sure to thoughtfully consider this information. In addition to the previous requirements, follow these guidelines during the generation: {taskDescription}."
 
@@ -132,7 +130,7 @@ class QuestManager : Listener {
 
     }
 
-    // Выбираем случайного жителя, предварительно отчистив старые квесты.
+    // Select a random villager, cleaning up old quests beforehand.
     private fun selectRandomVillager(world: World) : Villager? {
         return world.entities.filterIsInstance<Villager>().onEach { villager: Villager ->
             villager.quests().forEach { quest ->
@@ -180,7 +178,7 @@ class QuestManager : Listener {
         return questCount
     }
 
-    /* Общий метод инвалидации квеста. Указанный квест будет удалён из списка актуальных квестов, и у всех игроков онлайн. */
+    /* General method for quest invalidation. The quest will be removed from the actual quests list and from all online players. */
     fun invalidateQuest(quest: Quest, reason: QuestInvalidationEvent.Reason) {
         plugin.gameplayManager.actualQuests.remove(quest.id)
         Bukkit.getOnlinePlayers().forEach { onlinePlayer ->
@@ -207,27 +205,18 @@ class QuestManager : Listener {
         questGiver.removeQuest(quest)
         player.removeQuest(quest)
 
-        /* Обновляем статистику. */
+        /* Update statistics. */
         player.questsCompleted += 1
         player.experienceEarnedByQuests += playerExperience
 
         onFinish.invoke()
         this.invalidateQuest(quest, QuestInvalidationEvent.Reason.FINISHED_BY_SOMEONE_ELSE)
-        questGiver.talk(player, this.determineFinishingDialogue(player, questGiver, quest))
+        questGiver.talk(player, this.determineFinishingDialogue(player, quest))
     }
 
-    /* Определяем текст после завершения квеста на основании репутации игрока. */
-    private fun determineFinishingDialogue(player: Player, entity: LivingEntity, quest: Quest) : String {
-        return when (entity.opinionOn(player)) {
-            Reputation.EXALTED    -> quest.data.reputationBasedQuestFinishingDialogues[0]
-            Reputation.REVERED    -> quest.data.reputationBasedQuestFinishingDialogues[1]
-            Reputation.HONORED    -> quest.data.reputationBasedQuestFinishingDialogues[2]
-            Reputation.FRIENDLY   -> quest.data.reputationBasedQuestFinishingDialogues[3]
-            Reputation.NEUTRAL    -> quest.data.reputationBasedQuestFinishingDialogues[4]
-            Reputation.UNFRIENDLY -> quest.data.reputationBasedQuestFinishingDialogues[5]
-            Reputation.HOSTILE    -> quest.data.reputationBasedQuestFinishingDialogues[6]
-            Reputation.EXILED     -> quest.data.reputationBasedQuestFinishingDialogues[7]
-        }.replace("%playerName%", player.name)
+    /* Determine the finishing dialogue based on the single generated high-quality string. */
+    private fun determineFinishingDialogue(player: Player, quest: Quest): String {
+        return quest.data.questFinisherDialogue.replace("%playerName%", player.name)
     }
 
     @EventHandler
@@ -246,9 +235,9 @@ class QuestManager : Listener {
 
                     fun getSoundKeyFromMaterial(material: Material): String? {
                         val name = material.name
-                        if (!name.startsWith("MUSIC_DISC_")) return null  // Не disc — игнор
+                        if (!name.startsWith("MUSIC_DISC_")) return null  // Not a disc - ignore
                         val suffix = name.removePrefix("MUSIC_DISC_").lowercase()  // "CAT" → "cat"; "CREATOR_MUSIC" → "creator_music"
-                        return "music_disc.$suffix"  // Готовый key для Adventure Sound
+                        return "music_disc.$suffix"  // Ready key for Adventure Sound
                     }
 
                     val recordKey = getSoundKeyFromMaterial(quest.questItem.getItemStack().type)!!
@@ -313,7 +302,7 @@ class QuestManager : Listener {
 
         val player = event.player
 
-        /* Обязательно удаляем активный квест-трэкер, если он есть. */
+        /* Always remove the active quest tracker if it exists. */
         progressTracker.stopTracking(player, event.quest)
 
         val message = when (event.reason) {
@@ -335,7 +324,7 @@ class QuestManager : Listener {
         val npc    = event.questGiver
         val quest  = event.quest
 
-        // Если у игрока есть квест с таким же ID, значит он уже взят!
+        // If the player has a quest with the same ID, it means it's already accepted!
         if (player.quests().any { it.id == quest.id }) {
             player.sendFormattedMessage(plugin.language.getString("quest.already-accepted")!!)
             return
@@ -347,12 +336,12 @@ class QuestManager : Listener {
             return
         }
 
-        // Отправляем информацию о новом квесте игроку.
+        // Send information about the new quest to the player.
         player.sendFormattedMessage(plugin.language.getString("quest.accepted")!!.replace("{quest}", quest.name))
         player.sendFormattedMessage(plugin.language.getString("info-messages.quest-chat-info.quest-giver")!!.replace("{npcName}", npc.customName!!).replace("%playerName%", player.name))
         player.sendFormattedMessage(plugin.language.getString("info-messages.quest-chat-info.task-description")!!.replace("{desc}", quest.data.extraShortTaskDescription).replace("%playerName%", player.name))
 
-        // Только один квест может быть активен.
+        // Only one quest can be active at a time.
         if (questTracker[player] == null) {
             questTracker[player] = quest to progressTracker.startTracking(player, quest)
         }
@@ -375,20 +364,13 @@ class QuestManager : Listener {
               ],
               "extraShortTaskDescription": "Extremely short description of the task (Goal, Quest Giver Name, Amount).",
               "shortRequiredQuestItemDescription": "Literally one sentence describing the item in the context of the quest (written in third-person perspective).",
-              "reputationBasedQuestDescriptions":[
-                // Array of exactly 8 strings (Written in FIRST-PERSON perspective).
-                // Order strictly from worst to best reputation: 1. Exiled, 2. Hostile, 3. Unfriendly, 4. Neutral, 5. Friendly, 6. Honored, 7. Revered, 8. Exalted.
-                // Do NOT mention the reputation name directly, reflect the attitude in the tone. Do not shorten phrases.
-              ],
-              "reputationBasedQuestFinishingDialogues":[
-                // Array of exactly 8 strings (Written in FIRST-PERSON perspective).
-                // Same 8 reputation stages and rules as above.
-              ]
+              "questDescription": "A highly immersive, deeply personal first-person dialogue where the NPC explains what they need and why.",
+              "questFinisherDialogue": "A highly immersive, deeply personal first-person dialogue where the NPC thanks the player for completing the quest."
             }
         
             ### WRITING STYLE & RULES:
-            1. Deep Roleplay: Fully embody the NPC. Tone, vocabulary, and worldview MUST be heavily influenced by the following priority: Global Setting > Personality > Race > Biome > Profession > Gender.
-            2. Personal Connection: In the dialogue arrays (QuestDescriptions and FinishingDialogues), the NPC must communicate with the player in a highly personal, expressive, and engaging manner tailored to the current reputation level.
+            1. Deep Roleplay: Fully embody the NPC. Tone, vocabulary, and worldview MUST be heavily influenced by the following priority: Global Setting > Personality & Race > Biome > Profession > Gender.
+            2. Personal Connection: The NPC must communicate with the player in a highly personal, expressive, and engaging manner in the dialogues.
             3. Clear Requests & Motives: In the dialogue, the NPC must explicitly state WHAT they need the player to do and explain WHY they need it done (their underlying motive/reason). Only omit the "why" if the NPC's specific personality (e.g., highly secretive, arrogant, mindless) strictly forbids explaining themselves.
             4. Player Placeholder: Whenever the NPC addresses the player directly, use exactly "%playerName%".
         
@@ -491,8 +473,8 @@ class QuestManager : Listener {
     data class GeneratedCharacterDataContainer(val questNames: List<String>,
                                                val extraShortTaskDescription: String,
                                                val shortRequiredQuestItemDescription: String,
-                                               val reputationBasedQuestDescriptions: List<String>,
-                                               val reputationBasedQuestFinishingDialogues: List<String>)
+                                               val questDescription: String,
+                                               val questFinisherDialogue: String)
 
     enum class QuestFamily {
         GATHERING

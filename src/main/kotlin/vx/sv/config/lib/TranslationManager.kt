@@ -3,6 +3,7 @@ package vx.sv.config.lib
 import org.bukkit.configuration.file.YamlConfiguration
 import vx.sv.Souverainete
 import vx.sv.ai.base.AIClient
+import vx.sv.ai.base.DummyClient
 import java.io.File
 import java.io.InputStreamReader
 import java.security.MessageDigest
@@ -39,6 +40,11 @@ class TranslationManager(
             }
         }
 
+        if (client is DummyClient) {
+            plugin.logger.info("Language.yml translation attempt failed. AI features is DISABLED in provider.yml!")
+            return YamlConfiguration.loadConfiguration(originalFile)
+        }
+
         val originalHash = computeHash(originalFile.readText())
         val cacheFile = cacheDir.resolve("translations/language_${targetLanguage}.yml")
         val hashFile = cacheDir.resolve("translations/language_${targetLanguage}_hash.txt")
@@ -48,6 +54,7 @@ class TranslationManager(
             return YamlConfiguration.loadConfiguration(cacheFile)
         }
 
+        plugin.logger.info("Trying to translate language.yml.")
         // Попытка перевода ИИ.
         // Если используется DummyClient (или лимит исчерпан), translated будет null
         val translated = client.translate(YamlConfiguration.loadConfiguration(originalFile))
@@ -58,6 +65,7 @@ class TranslationManager(
             return translated
         }
 
+        plugin.logger.info("Language.yml translation attempt failed. Result is null. Default localization will be used.")
         // Если ИИ отключен или недоступен (возвращен null) — просто возвращаем
         // локальный файл, в который УЖЕ добавлены все новые ключи на предыдущем шаге.
         return YamlConfiguration.loadConfiguration(originalFile)

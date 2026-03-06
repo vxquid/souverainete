@@ -19,6 +19,8 @@ import org.bukkit.event.Listener
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.scheduler.BukkitRunnable
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
+import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.persistent.LivingEntityExtend.hunger
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
@@ -48,6 +50,7 @@ class NametagDisplayManager : Listener {
         val isCeilingLow: Boolean,
         val name: String,
         val professionName: String,
+        val customProfessionDisplay: String?, // Stores the racial leader title, if applicable
         val level: Int,
         val isRaider: Boolean,
         val settlementName: String?,
@@ -138,12 +141,16 @@ class NametagDisplayManager : Listener {
                             val profName = npc.profession.key.key.lowercase()
                             val settlementData = npc.settlement?.data
 
+                            // Override profession display with leader title if they rule a settlement
+                            val customProf = if (npc.isSettlementLeader()) npc.race.leaderTitle else null
+
                             NpcSnapshot(
                                 entityId = npc.entityId,
                                 uuid = npc.uniqueId,
                                 isCeilingLow = isCeilingLow,
                                 name = npc.customName ?: "Unknown",
                                 professionName = profName,
+                                customProfessionDisplay = customProf,
                                 level = npc.villagerLevel,
                                 isRaider = isRaider,
                                 settlementName = settlementData?.settlementName,
@@ -163,7 +170,7 @@ class NametagDisplayManager : Listener {
                             PlayerViewData(
                                 snapshot = snapshot,
                                 personalRep = personalRep,
-                                stateName = npcState?.translationKey, // <-- ИСПРАВЛЕНИЕ: берем ключ перевода, а не имя Enum
+                                stateName = npcState?.translationKey,
                                 stateColor = npcState?.color,
                                 focusScore = focusScore,
                                 distanceSq = distSq,
@@ -205,7 +212,6 @@ class NametagDisplayManager : Listener {
                 val isFocused = (snapshot.entityId == bestFocusId) || view.isSingleClose
                 currentVisibleIds.add(snapshot.entityId)
 
-                // Прокидываем UUID игрока для корректного получения репутации
                 val text = buildText(view, isFocused, player.uniqueId)
 
                 val targetBgColor = determineBackgroundColor(snapshot, player.uniqueId, baseConfigColor, isFocused)
@@ -280,10 +286,12 @@ class NametagDisplayManager : Listener {
         val snap = view.snapshot
 
         val settlementLine = if (snap.settlementName != null) "&6«${snap.settlementName}»\n" else ""
-        val profession = if (snap.isRaider) {
-            plugin.language.getString("villager-professions.raider") ?: "&cRaider"
-        } else {
-            (plugin.language.getString("villager-professions.${snap.professionName}") ?: "ERR").replace("_", " ").capitalizeWords()
+
+        // Priority: Raider -> Custom Title (Leader) -> Standard Profession
+        val profession = when {
+            snap.isRaider -> plugin.language.getString("villager-professions.raider") ?: "&cRaider"
+            snap.customProfessionDisplay != null -> snap.customProfessionDisplay
+            else -> (plugin.language.getString("villager-professions.${snap.professionName}") ?: "ERR").replace("_", " ").capitalizeWords()
         }
 
         val line1 = String.format(java.util.Locale.US, config.nametag.nameProfessionLevelTemplate, snap.name, profession, snap.level)
@@ -306,7 +314,6 @@ class NametagDisplayManager : Listener {
                 val statusKey = if (snap.hungerValue <= config.hunger.starvationThreshold) "starving" else "hungry"
                 val status = plugin.language.getString("hunger-status.$statusKey")!!
 
-                // FIX: Cast integer values to Double to satisfy the %f format specifiers in the config template
                 val hungerStr = String.format(
                     Locale.US,
                     config.nametag.hungerTemplate,
@@ -344,6 +351,8 @@ class NametagDisplayManager : Listener {
         val baseAlpha = configColor[0]
         val targetAlpha = if (isFocused) baseAlpha else max(20, baseAlpha - 130)
 
+        // The background color still evaluates the base vanilla profession name
+        // to keep logic intact even if a custom profession (like Mayor) is displayed.
         val color = when {
             snap.isRaider -> Color.fromARGB(targetAlpha, 130, 20, 20)
             snap.partyLeaderUuid == playerUUID -> Color.fromARGB(targetAlpha, 20, 130, 20)
@@ -394,8 +403,6 @@ class NametagDisplayManager : Listener {
     ) {
         val user = PacketEvents.getAPI().playerManager.getUser(player) ?: return
 
-        // ИСПРАВЛЕНИЕ: Чтобы Kyori не сыпал варнингами из-за LegacyFormattingCodes
-        // безопасно меняем все параграфы на амперсанды и скармливаем парсеру.
         val safeText = text.replace('§', '&')
         val component = LegacyComponentSerializer.legacyAmpersand().deserialize(safeText)
 

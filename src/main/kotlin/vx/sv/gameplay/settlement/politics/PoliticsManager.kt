@@ -15,7 +15,11 @@ import kotlin.random.Random
 class PoliticsManager : Listener {
 
     private val tickInterval = 6000L // 5 minutes in ticks
-    private val searchRadius = 1000.0
+    private val searchRadius = 2000.0
+    private val notificationRadius = 150.0
+
+    // Tracks contacts made during this server session
+    private val establishedContacts = mutableSetOf<String>()
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
@@ -28,12 +32,29 @@ class PoliticsManager : Listener {
         }, tickInterval, tickInterval)
     }
 
+    private fun getContactPairKey(id1: Any, id2: Any): String {
+        val s1 = id1.toString()
+        val s2 = id2.toString()
+        return if (s1 < s2) "${s1}_${s2}" else "${s2}_${s1}"
+    }
+
+    private fun notifyLocalPlayers(settlement: Settlement, message: String) {
+        val center = settlement.data.center
+        val world = center.world ?: return
+
+        world.players.forEach { player ->
+            if (player.location.distance(center) <= notificationRadius) {
+                player.sendMessage(message)
+            }
+        }
+    }
+
     private fun simulatePolitics() {
         val worlds = plugin.gameplayManager.allowedWorlds
         if (worlds.isEmpty()) return
 
         val world = worlds.random()
-        val worldSettlements = SettlementManager.Companion.settlements[world] ?: return
+        val worldSettlements = SettlementManager.settlements[world] ?: return
         if (worldSettlements.size < 2) return
 
         val initiator = worldSettlements.random()
@@ -45,6 +66,18 @@ class PoliticsManager : Listener {
         if (neighbors.isEmpty()) return
         val target = neighbors.random()
 
+        // --- 1. First Contact Logic (Dice roll mechanic) ---
+        val contactKey = getContactPairKey(initiator.data.id, target.data.id)
+        val knownRelation = initiator.data.relations.containsKey(target.data.id)
+
+        // If they aren't in each other's maps and haven't met this session, it's first contact!
+        if (!knownRelation && !establishedContacts.contains(contactKey)) {
+            establishedContacts.add(contactKey)
+            handleFirstContact(initiator, target)
+            return // Skip standard shift for this tick
+        }
+
+        // --- 2. Standard Daily Politics ---
         val roll = Random.nextInt(100)
         when {
             roll < 30 -> return // 30% chance: Nothing happens
@@ -54,12 +87,46 @@ class PoliticsManager : Listener {
     }
 
     /**
+     * Handles the dice roll for the First Contact between two settlements.
+     */
+    private fun handleFirstContact(initiator: Settlement, target: Settlement) {
+        val sameRace = initiator.data.dominantRace == target.data.dominantRace
+        var roll = Random.nextInt(100) + 1 // Dice 1 to 100
+
+        // If settlements have the same dominant race, they are highly favored to become allies
+        if (sameRace) {
+            roll += 25
+        }
+
+        val (newRelation, messageKey, defaultMessage) = when {
+            roll >= 90 -> Triple(Settlement.RelationLevel.ALLIANCE, "politics.first-contact.critical-success", "§a📜 Historic Event! §6{settlementA} §aand §6{settlementB} §ahave discovered each other and instantly formed an §bALLIANCE§a!")
+            roll >= 70 -> Triple(Settlement.RelationLevel.WARM, "politics.first-contact.success", "§a📜 First Contact! §6{settlementA} §aand §6{settlementB} §ahave met peacefully. Their relations are §eWARM§a.")
+            roll >= 40 -> Triple(Settlement.RelationLevel.NEUTRAL, "politics.first-contact.neutral", "§e📜 First Contact! Scouts from §6{settlementA} §eand §6{settlementB} §eestablished cautious communication. Relations are §fNEUTRAL§e.")
+            roll >= 20 -> Triple(Settlement.RelationLevel.TENSE, "politics.first-contact.failure", "§c⚠ Border Clash! The first meeting between §6{settlementA} §cand §6{settlementB} §cended in blood. Relations are highly §6TENSE§c!")
+            else -> Triple(Settlement.RelationLevel.WAR, "politics.first-contact.critical-failure", "§4☠ Declaration of War! §cDiplomacy failed instantly. §6{settlementA} §cand §6{settlementB} §care now at §4WAR§c!")
+        }
+
+        SettlementManager.setRelation(initiator, target, newRelation)
+
+        val message = plugin.language.getString(messageKey)
+            ?.replace("{settlementA}", initiator.data.settlementName)
+            ?.replace("{settlementB}", target.data.settlementName)
+            ?: defaultMessage
+                .replace("{settlementA}", initiator.data.settlementName)
+                .replace("{settlementB}", target.data.settlementName)
+
+        notifyLocalPlayers(initiator, message)
+        notifyLocalPlayers(target, message)
+
+        plugin.logger.info("[Politics] First Contact between ${initiator.data.settlementName} and ${target.data.settlementName}. Roll: $roll (Same Race Bonus: $sameRace). Result: $newRelation")
+    }
+
+    /**
      * Shifts the relationship up or down strictly by one level.
-     * Prevents jumping straight from ALLIANCE to WAR.
      */
     private fun shiftRelation(settlementA: Settlement, settlementB: Settlement) {
-        val currentRelation = SettlementManager.Companion.getRelation(settlementA, settlementB)
-        val values = Settlement.RelationLevel.values()
+        val currentRelation = SettlementManager.getRelation(settlementA, settlementB)
+        val values = Settlement.RelationLevel.entries.toTypedArray()
         val currentIndex = currentRelation.ordinal
 
         val moveUp = Random.nextBoolean()
@@ -72,8 +139,17 @@ class PoliticsManager : Listener {
         val newRelation = values[newIndex]
 
         if (newRelation != currentRelation) {
-            SettlementManager.Companion.setRelation(settlementA, settlementB, newRelation)
+            SettlementManager.setRelation(settlementA, settlementB, newRelation)
             plugin.logger.info("[Politics] Relation shift: ${settlementA.data.settlementName} and ${settlementB.data.settlementName} are now $newRelation.")
+
+            val shiftMsg = plugin.language.getString("politics.relation-shift")
+                ?.replace("{settlementA}", settlementA.data.settlementName)
+                ?.replace("{settlementB}", settlementB.data.settlementName)
+                ?.replace("{relation}", newRelation.name)
+                ?: "§e📜 Diplomatic update: Relations between §6${settlementA.data.settlementName} §eand §6${settlementB.data.settlementName} §eare now §b$newRelation§e."
+
+            notifyLocalPlayers(settlementA, shiftMsg)
+            notifyLocalPlayers(settlementB, shiftMsg)
         }
     }
 
@@ -81,7 +157,7 @@ class PoliticsManager : Listener {
      * Contextual critical events. Allies won't betray each other instantly.
      */
     private fun triggerCriticalEvent(initiator: Settlement, target: Settlement) {
-        val currentRelation = SettlementManager.Companion.getRelation(initiator, target)
+        val currentRelation = SettlementManager.getRelation(initiator, target)
 
         when (currentRelation) {
             Settlement.RelationLevel.WAR -> {
@@ -89,7 +165,6 @@ class PoliticsManager : Listener {
                 if (target.data.activeRaid == null) {
                     plugin.gameplayManager.raidManager.startRaid(initiator, target)
 
-                    // Broadcast to all players in the world about the raid starting
                     val world = target.data.center.world
                     val broadcastMessage = plugin.language.getString("raid.chat.started-broadcast")
                         ?.replace("{attacker}", initiator.data.settlementName)
@@ -102,18 +177,39 @@ class PoliticsManager : Listener {
                 }
             }
             Settlement.RelationLevel.TENSE -> {
-                // Tense situations erupt into war
-                SettlementManager.Companion.setRelation(initiator, target, Settlement.RelationLevel.WAR)
+                SettlementManager.setRelation(initiator, target, Settlement.RelationLevel.WAR)
                 plugin.logger.info("[Politics] Critical Event: ${initiator.data.settlementName} declared WAR on ${target.data.settlementName}!")
+
+                val warMsg = plugin.language.getString("politics.war-declared")
+                    ?.replace("{attacker}", initiator.data.settlementName)
+                    ?.replace("{defender}", target.data.settlementName)
+                    ?: "§c⚔ WAR! §6${initiator.data.settlementName} §chas formally declared war on §6${target.data.settlementName}§c!"
+
+                notifyLocalPlayers(initiator, warMsg)
+                notifyLocalPlayers(target, warMsg)
             }
             Settlement.RelationLevel.ALLIANCE -> {
-                // Allies strengthen their bond (Placeholder for resource sharing / rep boost)
                 plugin.logger.info("[Politics] Event: ${initiator.data.settlementName} sent gifts to their ally, ${target.data.settlementName}.")
+
+                val giftMsg = plugin.language.getString("politics.alliance-gifts")
+                    ?.replace("{sender}", initiator.data.settlementName)
+                    ?.replace("{receiver}", target.data.settlementName)
+                    ?: "§a🎁 §6${initiator.data.settlementName} §ahas sent a caravan of diplomatic gifts to their ally, §6${target.data.settlementName}§a."
+
+                notifyLocalPlayers(initiator, giftMsg)
+                notifyLocalPlayers(target, giftMsg)
             }
             else -> {
-                // Neutral/Warm suffer a sudden diplomatic incident resulting in tension
-                SettlementManager.Companion.setRelation(initiator, target, Settlement.RelationLevel.TENSE)
+                SettlementManager.setRelation(initiator, target, Settlement.RelationLevel.TENSE)
                 plugin.logger.info("[Politics] Critical Event: Diplomatic incident! ${initiator.data.settlementName} and ${target.data.settlementName} are now TENSE.")
+
+                val incidentMsg = plugin.language.getString("politics.diplomatic-incident")
+                    ?.replace("{settlementA}", initiator.data.settlementName)
+                    ?.replace("{settlementB}", target.data.settlementName)
+                    ?: "§c⚠ Diplomatic Incident! Relations between §6${initiator.data.settlementName} §cand §6${target.data.settlementName} §care severely damaged and are now tense."
+
+                notifyLocalPlayers(initiator, incidentMsg)
+                notifyLocalPlayers(target, incidentMsg)
             }
         }
     }
@@ -122,9 +218,7 @@ class PoliticsManager : Listener {
     // Events to notify players about active raids when they spawn in a world.
     // ========================================================================
     private fun notifyAboutActiveRaids(player: Player, world: World) {
-        val worldSettlements = SettlementManager.Companion.settlements[world] ?: return
-
-        // Find all settlements in this world that are currently being raided
+        val worldSettlements = SettlementManager.settlements[world] ?: return
         val raidedSettlements = worldSettlements.filter { it.data.activeRaid != null }
 
         if (raidedSettlements.isNotEmpty()) {
@@ -140,7 +234,6 @@ class PoliticsManager : Listener {
                     append(item).append("\n")
                 }
             }
-            // A slight 1-tick delay ensures the player is fully loaded in the world before receiving the message
             plugin.server.scheduler.runTaskLater(plugin, Runnable {
                 if (player.isOnline && player.world == world) {
                     player.sendMessage(message)
@@ -161,7 +254,6 @@ class PoliticsManager : Listener {
 
     @EventHandler
     fun onPlayerRespawn(event: PlayerRespawnEvent) {
-        // Get the world of the respawn location
         val world = event.respawnLocation.world ?: return
         notifyAboutActiveRaids(event.player, world)
     }

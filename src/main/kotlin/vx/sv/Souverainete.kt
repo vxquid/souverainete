@@ -74,7 +74,6 @@ class Souverainete : JavaPlugin(), Listener {
     private var latestVersion: String? = null
 
     override fun onEnable() {
-        return
         ScoreCalculator.init()
         RainbowColorTicker.init()
         this.providerManager = ProviderManager()
@@ -87,8 +86,50 @@ class Souverainete : JavaPlugin(), Listener {
             language = translationManager.getTranslated(languageFile)
         }
 
-        // Metrics!
-        Metrics(this, 27976)
+        // --- УСТАНОВКА МЕТРИК BSTATS ---
+        val metrics = Metrics(this, 27976)
+
+        // 1. Наиболее используемый ИИ провайдер (Твой запрос)
+        metrics.addCustomChart(Metrics.SimplePie("ai_provider") {
+            providerManager.config.providerType.name
+        })
+
+        // 2. Используемый язык генерации контента
+        metrics.addCustomChart(Metrics.SimplePie("ai_language") {
+            providerManager.config.language
+        })
+
+        // 3. Формат диалогов (Интересно узнать, любят ли игроки голограммы или классический чат)
+        metrics.addCustomChart(Metrics.SimplePie("dialogue_format") {
+            if (::gameplayManager.isInitialized) gameplayManager.config.dialogue.dialogueFormat.name else "Unknown"
+        })
+
+        // 4. Стратегия смерти компаньонов (Покажет, насколько хардкорны сервера: FATALISM, RESPAWN или KNOCKOUT)
+        metrics.addCustomChart(Metrics.SimplePie("death_strategy") {
+            if (::gameplayManager.isInitialized) gameplayManager.config.party.deathHandleStrategy else "Unknown"
+        })
+
+        // 5. Статус кастомных скинов (Используют ли люди гуманоидных NPC или играют с ванильными жителями)
+        metrics.addCustomChart(Metrics.SimplePie("humanoid_npcs") {
+            if (::gameplayManager.isInitialized) {
+                if (gameplayManager.config.humanoid.humanoidVillagers) "Enabled" else "Disabled"
+            } else "Unknown"
+        })
+
+        // 6. Статус ванильной торговли (Включен ли детерминизм/ванильная экономика)
+        metrics.addCustomChart(Metrics.SimplePie("vanilla_trading") {
+            if (::gameplayManager.isInitialized) {
+                if (gameplayManager.config.general.vanillaTrading) "Enabled" else "Disabled"
+            } else "Unknown"
+        })
+
+        // 7. Общее количество поселений на сервере (График-линия, показывает масштаб использования плагина)
+        metrics.addCustomChart(Metrics.SingleLineChart("total_settlements") {
+            if (::gameplayManager.isInitialized) {
+                settlements.values.sumOf { it.size }
+            } else 0
+        })
+        // --- КОНЕЦ БЛОКА МЕТРИК ---
 
         // Update checking.
         UpdateChecker(121059).getVersion { remoteVersion ->
@@ -156,7 +197,7 @@ class Souverainete : JavaPlugin(), Listener {
 
     companion object {
 
-        val premium: Boolean = false
+        val premium: Boolean = true
         lateinit var plugin: Souverainete
         lateinit var gson: Gson
 

@@ -28,6 +28,7 @@ import vx.sv.gameplay.memory.MemoryManager.Companion.getEmotionalMemory
 import vx.sv.gameplay.party.PartyManager.Companion.partyLeaderUUID
 import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Companion.getPersonality
+import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
@@ -165,6 +166,9 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.toString() }.toString()
 
+        // Provide the racial leader title if the NPC is the settlement leader
+        val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
+
         val placeholders = mapOf(
             "playerName"         to player.name,
             "opinionOnPlayer"    to opinionOnPlayer,
@@ -173,7 +177,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "raceLore"           to raceDesc,
             "npcGender"          to villager.gender.toString(),
             "npcPersonality"     to villager.getPersonality().toString(),
-            "npcProfession"      to villager.profession.key.key,
+            "npcProfession"      to actualProfession,
             "npcProfessionLevel" to villager.professionLevelName,
             "playerReputation"   to playerReputation.toString(),
             "settlementName"     to (villager.settlement?.data?.settlementName ?: "[NPC is homeless.]"),
@@ -225,6 +229,9 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.key.key }.toString()
 
+        // Provide the racial leader title if the NPC is the settlement leader
+        val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
+
         val placeholders = mapOf(
             "playerName"         to player.name,
             "opinionOnPlayer"    to opinionOnPlayer,
@@ -233,7 +240,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "raceLore"           to raceDesc,
             "npcGender"          to villager.gender.toString(),
             "npcPersonality"     to villager.getPersonality().toString(),
-            "npcProfession"      to villager.profession.key.key,
+            "npcProfession"      to actualProfession,
             "npcProfessionLevel" to villager.professionLevelName,
             "playerReputation"   to playerReputation.toString(),
             "currentBiome"       to currentBiome,
