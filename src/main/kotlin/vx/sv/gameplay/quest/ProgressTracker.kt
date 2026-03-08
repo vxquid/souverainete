@@ -29,14 +29,14 @@ class ProgressTracker : Listener {
         }, 0L, progressTickerPauseDuration)
     }
 
-    /* Обновление боссбаров происходит тут. Логика обновления зависит от типа квеста. */
     private fun tick() {
-        questTracker.forEach { player, (quest, bar) ->
+        questTracker.forEach { (player, data) ->
+            val (quest, bar) = data
             when (quest.family) {
                 QuestManager.QuestFamily.GATHERING -> {
                     val questItem = quest.questItem.getItemStack()
                     val requiredAmount = questItem.amount
-                    val currentAmount  = player.inventory.contents.filterNotNull().filter { it.isSimilar(questItem) }.sumOf { it.amount }
+                    val currentAmount = player.inventory.contents.filterNotNull().filter { it.isSimilar(questItem) }.sumOf { it.amount }
                     val step = 1.0 / requiredAmount
                     bar.progress = (currentAmount * step).coerceAtMost(1.0)
                     quest.progress = bar.progress
@@ -44,6 +44,29 @@ class ProgressTracker : Listener {
                         if (bar.color != BarColor.GREEN) player.playSound(player, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0F, 1.0F)
                         bar.color = BarColor.GREEN
                     } else bar.color = BarColor.RED
+                }
+                QuestManager.QuestFamily.DELIVERY -> {
+                    val remaining = quest.deadline - System.currentTimeMillis()
+                    if (remaining <= 0) {
+                        plugin.server.scheduler.runTask(plugin, Runnable {
+                            plugin.gameplayManager.questManager.invalidateQuest(quest, QuestInvalidationEvent.Reason.TIME_EXPIRATION)
+                        })
+                    } else {
+                        val progress = (remaining.toDouble() / quest.timeLimit.toDouble()).coerceIn(0.0, 1.0)
+                        bar.progress = progress
+                        quest.progress = progress
+
+                        val totalSeconds = remaining / 1000
+                        val minutes = totalSeconds / 60
+                        val seconds = totalSeconds % 60
+
+                        val timeStr = String.format("%02d:%02d", minutes, seconds)
+                        bar.setTitle("§6${quest.name}§f: §e⏳ $timeStr §f- ${quest.data.extraShortTaskDescription.replace("%playerName%", player.name)}")
+
+                        if (progress < 0.2) bar.color = BarColor.RED
+                        else if (progress < 0.5) bar.color = BarColor.YELLOW
+                        else bar.color = BarColor.GREEN
+                    }
                 }
             }
         }
@@ -53,11 +76,11 @@ class ProgressTracker : Listener {
     fun onPlayerJoin(event: PlayerJoinEvent) {
         val player = event.player
         player.quests().forEach { quest ->
-            if (!plugin.gameplayManager.actualQuests.contains(quest.id)) {
+            if (quest.type != QuestManager.QuestType.MESSAGE_DELIVERY && !plugin.gameplayManager.actualQuests.contains(quest.id)) {
                 plugin.gameplayManager.questManager.invalidateQuest(quest, QuestInvalidationEvent.Reason.NOT_ACTUAL)
                 return@forEach
             }
-            if (plugin.gameplayManager.actualQuests.contains(quest.id) && quest.tracking) {
+            if ((plugin.gameplayManager.actualQuests.contains(quest.id) || quest.type == QuestManager.QuestType.MESSAGE_DELIVERY) && quest.tracking) {
                 questTracker[player] = quest to this.startTracking(player, quest)
             }
         }
@@ -92,7 +115,6 @@ class ProgressTracker : Listener {
     }
 
     companion object {
-
         val questTracker = mutableMapOf<Player, Pair<QuestManager.Quest, BossBar>>()
         fun Player.getTrackedQuest() : Pair<QuestManager.Quest, BossBar>? = questTracker[this]
 
@@ -111,7 +133,5 @@ class ProgressTracker : Listener {
         private val questCompletedKey = NamespacedKey(plugin, "QuestsCompleted")
         private val questFailedKey = NamespacedKey(plugin, "QuestsFailed")
         private val experienceEarnedKey = NamespacedKey(plugin, "ExperienceEarned")
-
     }
-
 }

@@ -2,10 +2,7 @@ package vx.sv.gameplay.settlement
 
 import com.google.gson.reflect.TypeToken
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
-import org.bukkit.Location
-import org.bukkit.Material
-import org.bukkit.NamespacedKey
-import org.bukkit.World
+import org.bukkit.*
 import org.bukkit.block.Bell
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
@@ -14,9 +11,11 @@ import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.world.ChunkLoadEvent
+import org.bukkit.inventory.meta.CompassMeta
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.Souverainete.Companion.sendFormattedMessage
 import vx.sv.ai.base.DummyClient
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.humanoid.race.RaceManager.Race
@@ -40,7 +39,6 @@ class SettlementManager : Listener {
         settlements[world] = mutableListOf()
         this.loadSettlements(world)
 
-        // FIX: Restore active raids for the loaded settlements
         val worldSettlements = settlements[world] ?: emptyList()
         plugin.gameplayManager.raidManager.restoreRaidsFromData(worldSettlements)
 
@@ -67,24 +65,20 @@ class SettlementManager : Listener {
         val playerLocation = player.location.toVector()
         val currentWorldSettlements = settlements[world] ?: return
 
-        // Find the settlement in whose territory the player is located
         val activeSettlement = currentWorldSettlements.find { it.territory.contains(playerLocation) }
         val lastSettlementName = player.currentSettlement
 
         if (activeSettlement != null) {
             val name = activeSettlement.data.settlementName
 
-            // 1. Title logic (Region entry) - triggers once upon entry
             if (lastSettlementName == null && name != config.defaultName) {
                 player.sendTitle("${config.titleColor}$name", enterMsg, config.titleFadeIn, config.titleStay, config.titleFadeOut)
                 player.currentSettlement = name
             }
 
-            // 2. Action Bar logic (Reputation status) - updates every check tick
             sendReputationActionBar(player, activeSettlement)
         }
 
-        // Region exit logic
         if (activeSettlement == null && lastSettlementName != null) {
             val leavingName = currentWorldSettlements.find { it.data.settlementName == lastSettlementName }?.data?.settlementName
                 ?: lastSettlementName
@@ -98,23 +92,18 @@ class SettlementManager : Listener {
         val status = getReputationStatus(score)
         val statusName = status.getLocalizedName()
 
-        // Select color based on reputation relations
         val colorCode = when (status) {
-            Reputation.EXILED, Reputation.HOSTILE -> "§c"      // Red
-            Reputation.UNFRIENDLY -> "§6"                      // Gold/Orange
-            Reputation.NEUTRAL -> "§f"                         // White
-            Reputation.FRIENDLY, Reputation.HONORED -> "§a"    // Green
-            Reputation.REVERED, Reputation.EXALTED -> "§b"     // Aqua/Light Blue
+            Reputation.EXILED, Reputation.HOSTILE -> "§c"
+            Reputation.UNFRIENDLY -> "§6"
+            Reputation.NEUTRAL -> "§f"
+            Reputation.FRIENDLY, Reputation.HONORED -> "§a"
+            Reputation.REVERED, Reputation.EXALTED -> "§b"
         }
 
-        // Format string: "Name: Status (Score)"
-        // Example: "Outpost: Hostile (-600)"
         val message = "§7${settlement.data.settlementName}: $colorCode$statusName ($score)"
-
         player.sendActionBar(LegacyComponentSerializer.legacySection().deserialize(message))
     }
 
-    // Duplicating threshold logic since ReputationManager requires an Entity, and we have a raw Int here
     private fun getReputationStatus(score: Int): Reputation {
         return when {
             score >= repConfig.exaltedRequired -> Reputation.EXALTED
@@ -131,7 +120,6 @@ class SettlementManager : Listener {
     private fun startSettlementDetectionTask(world: World) {
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
 
-            // 1. Maintain Leaders: Ensure every active settlement has a valid living leader
             settlements[world]?.forEach { settlement ->
                 if (settlement.villagers.isNotEmpty()) {
                     val hasActiveLeader = settlement.villagers.any {
@@ -139,13 +127,11 @@ class SettlementManager : Listener {
                     }
                     if (!hasActiveLeader) {
                         settlement.electLeader()
-                        // Save changes since the leader ID was updated
                         saveSettlements(world)
                     }
                 }
             }
 
-            // 2. Detect homeless villagers and group them
             val homelessVillagers = world.entities
                 .filterIsInstance<Villager>()
                 .filter { it.settlement == null }
@@ -224,20 +210,16 @@ class SettlementManager : Listener {
 
     fun generateSettlementName(settlement: Settlement) {
         val client = plugin.providerManager.client
-
-        // 1. Calculate dominant race in advance
         val raceEnum = getDominantRaceEnum(settlement)
 
         if (client is DummyClient) {
-            pickRaceName(settlement) // Fallback to legacy logic
+            pickRaceName(settlement)
             return
         }
 
         CompletableFuture.runAsync {
             try {
-                // 2. Pass race to the generator
                 val generator = SettlementNameGenerator(settlement, raceEnum)
-
                 val response = client.sendPromptWithSchema(generator.prompt, SettlementData::class)
                     ?: throw IllegalStateException("Empty response from AI")
 
@@ -279,7 +261,6 @@ class SettlementManager : Listener {
         settlement.data.settlementName = name
         settlement.villagers.forEach { it.settlement = settlement }
 
-        // Elect the initial leader for the newly founded settlement
         settlement.electLeader()
 
         val world = settlement.world
@@ -325,12 +306,28 @@ class SettlementManager : Listener {
         val world = block.world
         val blockVector = block.location.toVector()
 
-        // Get the list of settlements in this world
         val worldSettlements = settlements[world] ?: return
-
-        // Find the settlement whose territory contains the clicked bell.
-        // This allows using any bell inside the region, not just the central one.
         val settlement = worldSettlements.find { it.territory.contains(blockVector) } ?: return
+
+        // NEW MECHANIC: If the player clicks the bell holding a compass, attune it instead of opening menu!
+        val itemInHand = event.item
+        if (itemInHand != null && itemInHand.type == Material.COMPASS) {
+            event.isCancelled = true
+
+            val meta = itemInHand.itemMeta as CompassMeta
+            meta.lodestone = settlement.data.center
+            meta.isLodestoneTracked = false
+            meta.setDisplayName("§6Compass: ${settlement.data.settlementName}")
+            meta.lore = listOf("§7Points to the heart of ${settlement.data.settlementName}.")
+            itemInHand.itemMeta = meta
+
+            player.playSound(player.location, Sound.BLOCK_ENCHANTMENT_TABLE_USE, 1.0f, 1.0f)
+
+            val msg = plugin.language.getString("settlement.compass-attuned")?.replace("{settlementName}", settlement.data.settlementName)
+                ?: "§aCompass attuned to ${settlement.data.settlementName}!"
+            player.sendFormattedMessage(msg)
+            return
+        }
 
         event.isCancelled = true
         SettlementMenus.openMainMenu(player, settlement)
@@ -358,7 +355,7 @@ class SettlementManager : Listener {
         private val biomeName = settlement.world.getBiome(settlement.data.center).key.key.replace("_", " ").lowercase()
 
         val prompt = basePrompt.replaceMap(mapOf(
-            "dominantRace" to race.name, // Pass the race name (e.g. "DWARF", "ELF", "HUMAN")
+            "dominantRace" to race.name,
             "currentBiome" to biomeName,
             "setting" to plugin.providerManager.config.setting,
             "namingStyle" to plugin.providerManager.config.namingStyle,
@@ -371,51 +368,31 @@ class SettlementManager : Listener {
         val settlementsWorldKey = NamespacedKey(plugin, "SettlementList")
         val currentSettlementKey = NamespacedKey(plugin, "CurrentSettlement")
 
-        /** Get dominant race for a settlement (String version). */
         fun getDominantRace(settlement: Settlement): String {
             return settlement.data.dominantRace
         }
 
-        /**
-         * Save settlements data for a specific world.
-         */
         fun saveSettlements(world: World) {
             val data = settlements[world]?.map { it.data } ?: return
             world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.STRING, gson.toJson(data))
         }
 
-        /**
-         * Find settlement by its unique UUID. Primary method.
-         */
         fun getById(id: UUID): Settlement? {
             return settlements.values.flatten().find { it.data.id == id }
         }
 
-        /**
-         * Find settlement by its name. Used as a fallback for legacy data
-         * and possibly for command-based searches.
-         */
         fun getByName(name: String): Settlement? {
             return settlements.values.flatten().find { it.data.settlementName == name }
         }
 
-        /**
-         * Retrieve relationship level between two settlements.
-         * Default to NEUTRAL if no distinct relation is established.
-         */
         fun getRelation(settlementA: Settlement, settlementB: Settlement): Settlement.RelationLevel {
             return settlementA.data.relations[settlementB.data.id] ?: Settlement.RelationLevel.NEUTRAL
         }
 
-        /**
-         * Establish or change the relationship level between two settlements.
-         * Modifies both settlements to maintain symmetry.
-         */
         fun setRelation(settlementA: Settlement, settlementB: Settlement, level: Settlement.RelationLevel) {
-            if (settlementA.data.id == settlementB.data.id) return // Avoid self-relations
+            if (settlementA.data.id == settlementB.data.id) return
 
             if (level == Settlement.RelationLevel.NEUTRAL) {
-                // Remove map entries to keep memory footprint low
                 settlementA.data.relations.remove(settlementB.data.id)
                 settlementB.data.relations.remove(settlementA.data.id)
             } else {
@@ -423,16 +400,12 @@ class SettlementManager : Listener {
                 settlementB.data.relations[settlementA.data.id] = level
             }
 
-            // Persist changes
             saveSettlements(settlementA.world)
             if (settlementA.world != settlementB.world) {
                 saveSettlements(settlementB.world)
             }
         }
 
-        /**
-         * Action Bar info: Current settlement name the player is standing in.
-         */
         var Player.currentSettlement: String?
             get() = this.persistentDataContainer.get(currentSettlementKey, PersistentDataType.STRING)
             set(value) {
@@ -440,5 +413,4 @@ class SettlementManager : Listener {
                 else this.persistentDataContainer.remove(currentSettlementKey)
             }
     }
-
 }

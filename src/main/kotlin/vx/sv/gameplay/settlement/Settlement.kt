@@ -18,6 +18,7 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         val creationTime: Long,
         var dominantRace: String,
         var leaderId: UUID? = null, // Stores the elected leader's UUID
+        var leaderName: String? = null, // Stores the elected leader's string name for quick access
         val reputation: MutableMap<UUID, Int> = mutableMapOf(),
         val relations: MutableMap<UUID, RelationLevel> = mutableMapOf(),
         var activeRaid: RaidData? = null
@@ -52,6 +53,7 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         // 2. Elect a new random leader
         val newLeader = villagers.random()
         data.leaderId = newLeader.uniqueId
+        data.leaderName = newLeader.customName ?: "Leader" // Save string name
 
         // 3. Set PDC tag to identify the leader (storing settlement UUID)
         newLeader.persistentDataContainer.set(LEADER_KEY, PersistentDataType.STRING, data.id.toString())

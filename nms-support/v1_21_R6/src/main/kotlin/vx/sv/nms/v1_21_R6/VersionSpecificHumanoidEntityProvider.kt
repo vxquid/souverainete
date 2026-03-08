@@ -19,7 +19,7 @@ class VersionSpecificHumanoidEntityProvider(override val plugin: JavaPlugin) : E
     }
 
     override fun asHumanoid(entity: LivingEntity): Humanoid {
-        return ((entity as CraftLivingEntity).handle as HumanoidVillager) as? Humanoid ?: run {
+        return ((entity as CraftLivingEntity).handle as? HumanoidVillager) as? Humanoid ?: run {
             throw ClassCastException("Entity ${entity.type} is not humanoid instance!")
         }
     }

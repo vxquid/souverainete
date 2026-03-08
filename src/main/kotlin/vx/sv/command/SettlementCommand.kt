@@ -7,10 +7,15 @@ import co.aikar.commands.annotation.CommandPermission
 import co.aikar.commands.annotation.Subcommand
 import org.bukkit.Bukkit
 import org.bukkit.entity.Player
+import org.bukkit.entity.Villager
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.sendFormattedMessage
+import vx.sv.gameplay.quest.QuestManager
+import vx.sv.gameplay.quest.QuestManager.Companion.addQuest
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
+import vx.sv.gameplay.settlement.isSettlementLeader
+import vx.sv.persistent.LivingEntityExtend.settlement
 
 @CommandAlias("settlement|s")
 class SettlementCommand : BaseCommand() {
@@ -190,6 +195,70 @@ class SettlementCommand : BaseCommand() {
         player.world.players.forEach { player ->
             player.sendMessage(broadcastRaidMessage)
         }
+    }
+
+    @Subcommand("forcequest")
+    @CommandPermission("sv.settlement.forcequest")
+    fun onForceQuest(player: Player) {
+        // Получаем сущность на которую смотрит игрок в радиусе 10 блоков
+        val targetEntity = player.getTargetEntity(10)
+
+        if (targetEntity !is Villager) {
+            player.sendFormattedMessage("§cYou must be looking directly at a Villager.")
+            return
+        }
+
+        if (!targetEntity.isSettlementLeader()) {
+            player.sendFormattedMessage("§cThe villager you are looking at is not a settlement leader.")
+            return
+        }
+
+        val giverSettlement = targetEntity.settlement ?: run {
+            player.sendFormattedMessage("§cThis leader does not belong to a valid settlement.")
+            return
+        }
+
+        // Ищем ближайшее другое поселение с лидером
+        val worldSettlements = SettlementManager.settlements[player.world] ?: emptyList()
+        val targetSettlement = worldSettlements
+            .filter { it.data.id != giverSettlement.data.id && it.data.leaderId != null }
+            .minByOrNull { it.data.center.distance(giverSettlement.data.center) }
+
+        if (targetSettlement == null) {
+            player.sendFormattedMessage("§cNo other settlements with a leader found to send the message to.")
+            return
+        }
+
+        val leaderName = targetEntity.customName ?: "Leader"
+        player.sendFormattedMessage("§eGenerating a political quest for $leaderName... Please wait, AI is processing.")
+
+        // Генерируем квест асинхронно
+        plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+            try {
+                val quest = plugin.gameplayManager.questManager.generateQuest(
+                    QuestManager.QuestType.MESSAGE_DELIVERY,
+                    targetEntity,
+                    targetSettlement.data.leaderId,
+                    targetSettlement.data.leaderName,
+                    targetSettlement.data.id,
+                    giverSettlement.data.id
+                )
+
+                if (quest != null) {
+                    // Возвращаемся в главный поток для изменения данных Bukkit
+                    plugin.server.scheduler.runTask(plugin, Runnable {
+                        plugin.gameplayManager.actualQuests.add(quest.id)
+                        targetEntity.addQuest(quest)
+                        player.sendFormattedMessage("§aSuccessfully generated a political quest targeting ${targetSettlement.data.settlementName}!")
+                    })
+                } else {
+                    player.sendFormattedMessage("§cFailed to generate the quest (AI returned null).")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                player.sendFormattedMessage("§cAn error occurred while generating the quest. Check console for details.")
+            }
+        })
     }
 
 }
