@@ -25,6 +25,8 @@ import kotlin.random.Random
  */
 class HumanoidLeisureManager : Listener {
 
+    private val config get() = plugin.gameplayManager.config.leisure
+
     /**
      * Represents the current phase of the NPC's leisure activity.
      */
@@ -42,9 +44,9 @@ class HumanoidLeisureManager : Listener {
         val villager: Villager,
         val targetSeat: Location,
         val preference: Preference,
+        val maxDuration: Long,
         var state: LeisureState = LeisureState.PATHING,
-        val startTime: Long = System.currentTimeMillis(),
-        val maxDuration: Long = Random.nextLong(30000, 120000) // Ranges from 30 seconds to 2 minutes
+        val startTime: Long = System.currentTimeMillis()
     )
 
     private val activeSessions = mutableMapOf<Villager, LeisureSession>()
@@ -55,12 +57,12 @@ class HumanoidLeisureManager : Listener {
 
         // Global ticker: searches for idle NPCs that can start a leisure session.
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
-            if (activeSessions.size > 20) return@runTaskTimer // Hard limit for active leisure sessions
+            if (activeSessions.size > config.maxActiveSessions) return@runTaskTimer
 
             val candidate = plugin.server.worlds
                 .filter { plugin.gameplayManager.allowedWorlds.contains(it) }
-                // Restrict leisure search during the night (13000-23500), as NPCs should be sleeping.
-                .filter { it.time !in 13000..23500 }
+                // Restrict leisure search during the night, as NPCs should be sleeping.
+                .filter { it.time !in config.time.nightStart..config.time.nightEnd }
                 .flatMap { it.entities }
                 .filterIsInstance<Villager>()
                 .filter {
@@ -78,7 +80,7 @@ class HumanoidLeisureManager : Listener {
                 .randomOrNull() ?: return@runTaskTimer
 
             startLeisureSearch(candidate)
-        }, 200L, 200L) // Runs every 10 seconds
+        }, 200L, config.globalTickerInterval)
 
         // Session control ticker: manages pathfinding, session timeouts, and eating/drinking chances.
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
@@ -97,7 +99,7 @@ class HumanoidLeisureManager : Listener {
                 }
 
                 // Force NPCs sitting outdoors to stand up and go home when night falls
-                val isNight = npc.world.time in 13000..23000
+                val isNight = npc.world.time in config.time.nightStart..config.time.nightEnd
                 if (isNight && session.preference == Preference.OUTDOOR) {
                     standUp(npc, session)
                     iterator.remove()
@@ -127,7 +129,7 @@ class HumanoidLeisureManager : Listener {
                     LeisureState.SITTING -> handleSitting(session)
                 }
             }
-        }, 20L, 20L) // Runs every second
+        }, 20L, config.sessionTickerInterval)
     }
 
     // =======================================================================================
@@ -156,8 +158,8 @@ class HumanoidLeisureManager : Listener {
         val centerChunk = npc.location.chunk
         val world = npc.world
 
-        // Determine NPC's environmental preference: 80% chance for indoor, 20% for outdoor.
-        val desiredPreference = if (Random.nextDouble() < 0.8) Preference.INDOOR else Preference.OUTDOOR
+        // Determine NPC's environmental preference based on configuration
+        val desiredPreference = if (Random.nextDouble() < config.interaction.indoorPreferenceChance) Preference.INDOOR else Preference.OUTDOOR
         val isSocial = Random.nextBoolean()
 
         // Synchronously collect snapshots of a 3x3 chunk area to allow safe async block reading.
@@ -258,11 +260,11 @@ class HumanoidLeisureManager : Listener {
                                 val actualPreference = if (isIndoor) Preference.INDOOR else Preference.OUTDOOR
 
                                 // Add score for matching the NPC's desired preference
-                                if (actualPreference == desiredPreference) score += 50
+                                if (actualPreference == desiredPreference) score += config.scoring.preferenceMatchBonus
                                 // Provide a base priority for indoor environments to encourage home usage
-                                if (isIndoor) score += 30
+                                if (isIndoor) score += config.scoring.indoorBaseBonus
                                 // Prioritize proper stair blocks over raw solid blocks
-                                if (isStairs) score += 100
+                                if (isStairs) score += config.scoring.stairBonus
 
                                 // Social intelligence check: if this is a stair block with adjacent stairs, it's a bench.
                                 if (isStairs) {
@@ -273,7 +275,7 @@ class HumanoidLeisureManager : Listener {
                                     for (n in neighbors) {
                                         val neighborMat = getMat(n.first, y, n.second)
                                         if (neighborMat.name.endsWith("STAIRS")) {
-                                            score += 150 // Massive priority for actual benches/sofas
+                                            score += config.scoring.benchBonus
                                             break
                                         }
                                     }
@@ -286,7 +288,7 @@ class HumanoidLeisureManager : Listener {
                                         abs(cf.first - worldX) <= 6 && abs(cf.second - y) <= 2 && abs(cf.third - worldZ) <= 6
                                     }
                                     if (nearCampfire) {
-                                        score += 350 // Overrides almost all other indoor/bench priorities
+                                        score += config.scoring.campfireBonus
                                     }
                                 }
 
@@ -305,12 +307,12 @@ class HumanoidLeisureManager : Listener {
                 assignSeat(npc, bestSeat.first, desiredPreference)
 
                 // If the NPC is social and found a high-value bench, invite nearby friends
-                if (isSocial && bestSeat.second >= 250) {
-                    val friends = npc.getNearbyEntities(10.0, 5.0, 10.0)
+                if (isSocial && bestSeat.second >= config.scoring.minScoreForSocialInvite) {
+                    val friends = npc.getNearbyEntities(config.interaction.socialInviteRadiusX, config.interaction.socialInviteRadiusY, config.interaction.socialInviteRadiusZ)
                         .filterIsInstance<Villager>()
                         .filter { it.isValid && !activeSessions.containsKey(it) && it.vehicle == null }
                         .shuffled()
-                        .take(Random.nextInt(1, 3))
+                        .take(Random.nextInt(1, config.interaction.maxFriendsToInvite + 1))
 
                     // Attempt to seat friends on valid adjacent blocks
                     val friendSeats = getAdjacentFreeSeats(bestSeat.first, friends.size)
@@ -327,7 +329,12 @@ class HumanoidLeisureManager : Listener {
     private fun assignSeat(npc: Villager, loc: Location, pref: Preference) {
         if (occupiedSeats.contains(loc)) return
         occupiedSeats.add(loc)
-        activeSessions[npc] = LeisureSession(npc, loc, pref)
+        activeSessions[npc] = LeisureSession(
+            villager = npc,
+            targetSeat = loc,
+            preference = pref,
+            maxDuration = Random.nextLong(config.duration.minDurationMs, config.duration.maxDurationMs)
+        )
     }
 
     private fun handlePathing(session: LeisureSession) {
@@ -335,7 +342,7 @@ class HumanoidLeisureManager : Listener {
         val target = session.targetSeat
 
         // Switch to sitting state once the NPC is close enough to the target
-        if (npc.location.distanceSquared(target) < 2.5) {
+        if (npc.location.distanceSquared(target) < config.pathing.sitDistanceSquared) {
             session.state = LeisureState.SITTING
             plugin.gameplayManager.humanoidManager.protocolListener.actionController.toggleSitting(npc, true, target.block)
             return
@@ -343,16 +350,16 @@ class HumanoidLeisureManager : Listener {
 
         // Manage pathfinding through the Paper API
         val pathfinder: Pathfinder = npc.pathfinder
-        if (!pathfinder.hasPath() || pathfinder.currentPath?.finalPoint?.distanceSquared(target)!! > 2.0) {
-            pathfinder.moveTo(target, 0.6)
+        if (!pathfinder.hasPath() || pathfinder.currentPath?.finalPoint?.distanceSquared(target)!! > config.pathing.repathDistanceSquared) {
+            pathfinder.moveTo(target, config.pathing.walkSpeed)
         }
     }
 
     private fun handleSitting(session: LeisureSession) {
         val npc = session.villager
 
-        // 5% chance per second to consume a random visual food or drink item
-        if (Random.nextDouble() < 0.05) {
+        // Chance per second to consume a random visual food or drink item
+        if (Random.nextDouble() < config.interaction.consumptionChancePerSecond) {
             triggerRandomConsumption(npc)
         }
     }

@@ -22,6 +22,7 @@ class GameplayConfiguration {
     val profession = ProfessionConfig()
     val uniqueItem = UniqueItemConfig()
     val party      = PartyConfig()
+    val leisure    = LeisureConfig()
 
     class GeneralConfig {
         @Comment("Message prefix.")
@@ -141,7 +142,6 @@ class GameplayConfiguration {
         val titleFadeOut: Int = 20
     }
 
-    // --- ДОБАВЛЕНО ДЛЯ РЕЙДОВ ---
     class RaidConfig {
         @Comment("Time in seconds before stuck raiders start glowing to help players find them.")
         var glowThreshold: Long = 45L
@@ -306,6 +306,86 @@ class GameplayConfiguration {
             "KNOCKOUT: Villagers fall down and bleed out. Can be revived with GAP or carried. Bleeding out triggers RESPAWN logic."
         )
         var deathHandleStrategy: String = "KNOCKOUT"
+    }
+
+    class LeisureConfig {
+        @Comment("Maximum number of active leisure sessions allowed globally.")
+        var maxActiveSessions: Int = 20
+
+        @Comment("Global ticker interval in ticks for searching idle NPCs (default: 1200 = 1 minute).")
+        var globalTickerInterval: Long = 1200L
+
+        @Comment("Session ticker interval in ticks for managing ongoing leisure sessions (default: 20 = 1 second).")
+        var sessionTickerInterval: Long = 20L
+
+        val time        = TimeConfig()
+        val duration    = DurationConfig()
+        val pathing     = PathingConfig()
+        val interaction = InteractionConfig()
+        val scoring     = ScoringConfig()
+
+        class TimeConfig {
+            @Comment("Start of the night (world time) when NPCs should stop leisure activities and go to sleep.")
+            var nightStart: Long = 13000L
+
+            @Comment("End of the night (world time) when NPCs can resume leisure activities.")
+            var nightEnd: Long = 23500L
+        }
+
+        class DurationConfig {
+            @Comment("Minimum duration of a leisure session in milliseconds.")
+            var minDurationMs: Long = 30000L
+
+            @Comment("Maximum duration of a leisure session in milliseconds.")
+            var maxDurationMs: Long = 120000L
+        }
+
+        class PathingConfig {
+            @Comment("Walking speed multiplier when an NPC is pathing to a seat.")
+            var walkSpeed: Double = 0.6
+
+            @Comment("Distance squared to the seat before the NPC transitions into the sitting state.")
+            var sitDistanceSquared: Double = 2.5
+
+            @Comment("Distance squared threshold to trigger pathfinder repathing if NPC moves away.")
+            var repathDistanceSquared: Double = 2.0
+        }
+
+        class InteractionConfig {
+            @Comment("Probability (0.0 to 1.0) of an NPC preferring an indoor seat.")
+            var indoorPreferenceChance: Double = 0.8
+
+            @Comment("Probability (0.0 to 1.0) per second of an NPC consuming food or drink while sitting.")
+            var consumptionChancePerSecond: Double = 0.05
+
+            @Comment("Radius (X, Y, Z axis) to look for friends when a social NPC finds an open bench.")
+            var socialInviteRadiusX: Double = 10.0
+            var socialInviteRadiusY: Double = 5.0
+            var socialInviteRadiusZ: Double = 10.0
+
+            @Comment("Maximum number of friends to invite to a seating area.")
+            var maxFriendsToInvite: Int = 3
+        }
+
+        class ScoringConfig {
+            @Comment("Score bonus if the seat matches the NPC's environment preference (indoor/outdoor).")
+            var preferenceMatchBonus: Int = 50
+
+            @Comment("Base score bonus for indoor seats to encourage home usage.")
+            var indoorBaseBonus: Int = 30
+
+            @Comment("Score bonus for proper stair blocks (benches) over raw solid blocks.")
+            var stairBonus: Int = 100
+
+            @Comment("Score bonus if adjacent blocks are also stairs, indicating an actual bench/sofa.")
+            var benchBonus: Int = 150
+
+            @Comment("Score bonus for outdoor seats near a campfire.")
+            var campfireBonus: Int = 350
+
+            @Comment("Minimum seat score required for an NPC to invite friends.")
+            var minScoreForSocialInvite: Int = 250
+        }
     }
 
 }
