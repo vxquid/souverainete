@@ -49,8 +49,7 @@ class VersionBridge(val plugin: JavaPlugin) {
         fun LivingEntity.asHumanoid() : Humanoid? {
             return try {
                 entityProvider.asHumanoid(this)
-            } catch (exception: ClassCastException) {
-                exception.printStackTrace()
+            } catch (_: ClassCastException) {
                 return null
             }
 

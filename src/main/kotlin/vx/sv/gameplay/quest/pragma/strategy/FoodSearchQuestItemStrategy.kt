@@ -24,7 +24,7 @@ class FoodSearchQuestItemStrategy : QuestItemStrategy() {
     }
 
     companion object {
-        val allowedFood = plugin.prompts.getStringList("food-quest.allowed-types").map {
+        val allowedFood = plugin.prompts.getStringList("food-search-quest.allowed-types").map {
             val parts = it.split("~")
             val material = Material.valueOf(parts[0])
             val amountRange: Pair<Int, Int> = if (parts.size > 1) {

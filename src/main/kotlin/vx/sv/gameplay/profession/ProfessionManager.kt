@@ -100,7 +100,7 @@ class ProfessionManager : Listener {
                 }
             }
 
-            plugin.logger.info("Brewing a potion. Villager: ${villager.customName}, potion is ${potion.itemMeta?.let { (it as PotionMeta).basePotionType }}.")
+            //plugin.logger.info("Brewing a potion. Villager: ${villager.customName}, potion is ${potion.itemMeta?.let { (it as PotionMeta).basePotionType }}.")
             plugin.server.scheduler.runTask(plugin, Runnable {
                 plugin.server.pluginManager.callEvent(VillagerProduceItemEvent(villager, potion))
                 villager.world.playSound(villager, Sound.ENTITY_VILLAGER_WORK_CLERIC, 1F, 1F)

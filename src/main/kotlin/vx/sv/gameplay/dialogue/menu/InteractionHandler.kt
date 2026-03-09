@@ -13,7 +13,10 @@ import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDeathEvent
-import org.bukkit.event.player.*
+import org.bukkit.event.player.PlayerInteractEntityEvent
+import org.bukkit.event.player.PlayerInteractEvent
+import org.bukkit.event.player.PlayerJoinEvent
+import org.bukkit.event.player.PlayerQuitEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
@@ -56,6 +59,7 @@ class InteractionHandler : Listener {
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
+            // Копируем список во избежание ConcurrentModificationException
             openedMenuList.toList().forEach(Menu::relocate)
         }, 0L, 1L)
     }
@@ -134,6 +138,7 @@ class InteractionHandler : Listener {
         if (time - last <= 200) return else lastInteraction[player] = time
         event.isCancelled = true
 
+        // Если меню уже открыто - игрок нажимает на выбранную в данный момент кнопку
         openedMenuList.find { it.viewer == player }?.let { menu ->
             menu.invokeSelected()
             menu.destroy()
@@ -211,14 +216,12 @@ class InteractionHandler : Listener {
                     player.inventory.remove(itemInInv)
                     plugin.gameplayManager.questManager.finishQuest(player, villager, activeDelivery) {
 
-                        // Доп. репутация исходному поселению
                         val giverSet = activeDelivery.giverSettlementId?.let { SettlementManager.getById(it) }
                         if (giverSet != null) {
                             val originalRepBoost = (activeDelivery.score * plugin.gameplayManager.config.quest.reputationMultiplier * 2).toInt()
                             giverSet.data.reputation[player.uniqueId] = (giverSet.data.reputation[player.uniqueId] ?: 0) + originalRepBoost
                         }
 
-                        // Улучшаем отношения
                         val targetSet = activeDelivery.targetSettlementId?.let { SettlementManager.getById(it) }
                         if (giverSet != null && targetSet != null) {
                             SettlementManager.setRelation(giverSet, targetSet, Settlement.RelationLevel.WARM)
@@ -390,21 +393,6 @@ class InteractionHandler : Listener {
             this.showDefaultMenu(player, villager)
         }
         builder.build()
-    }
-
-    @EventHandler
-    private fun onPlayerItemHeld(event: PlayerItemHeldEvent) {
-        val player = event.player
-        val menu = openedMenuList.find { it.viewer == player } ?: return
-        event.isCancelled = true
-
-        if (System.currentTimeMillis() - menu.lastScrollTime > 250) {
-            menu.lastScrollTime = System.currentTimeMillis()
-            player.playSound(player.location, Sound.UI_BUTTON_CLICK, 1F, 2F)
-            if (event.previousSlot < event.newSlot) {
-                menu.index += 1
-            } else menu.index -= 1
-        }
     }
 
     @EventHandler
