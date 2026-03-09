@@ -4,6 +4,7 @@ import com.destroystokyo.paper.entity.Pathfinder
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.Sound
+import org.bukkit.block.BlockFace
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
@@ -216,8 +217,22 @@ class HumanoidLeisureManager : Listener {
 
                             if (isStairs) {
                                 val blockData = snapshot.getBlockData(x, y, z)
-                                // Ignore upside-down stairs as they are invalid seats
-                                if (blockData is org.bukkit.block.data.type.Stairs && blockData.half == org.bukkit.block.data.Bisected.Half.TOP) continue
+                                if (blockData is org.bukkit.block.data.type.Stairs) {
+                                    // Ignore upside-down stairs as they are invalid seats
+                                    if (blockData.half == org.bukkit.block.data.Bisected.Half.TOP) continue
+
+                                    // Directional check: ensure there is no solid block directly in front of the seat.
+                                    // In Bukkit, the 'facing' of stairs is the back of the chair, so opposite is the front.
+                                    val frontFace = blockData.facing.oppositeFace
+                                    val frontX = worldX + frontFace.modX
+                                    val frontZ = worldZ + frontFace.modZ
+
+                                    val frontMat = getMat(frontX, y, frontZ)
+                                    val frontMatUp = getMat(frontX, y + 1, frontZ)
+
+                                    // Skip if the legs or torso area in front of the stair is blocked
+                                    if (frontMat.isSolid || frontMatUp.isSolid) continue
+                                }
 
                                 // Staircase filter: Check Y+1 and Y-1 to differentiate a bench from an actual staircase.
                                 // If adjacent stairs are detected vertically, it indicates an elevation structure.
@@ -422,7 +437,20 @@ class HumanoidLeisureManager : Listener {
 
             if (isSeat) {
                 val bData = block.blockData
-                if (bData is org.bukkit.block.data.type.Stairs && bData.half == org.bukkit.block.data.Bisected.Half.TOP) isSeat = false
+                if (bData is org.bukkit.block.data.type.Stairs) {
+                    if (bData.half == org.bukkit.block.data.Bisected.Half.TOP) {
+                        isSeat = false
+                    } else {
+                        // Ensure the space in front of the friend's seat is not blocked
+                        val frontFace = bData.facing.oppositeFace
+                        val frontBlock = block.getRelative(frontFace)
+                        val frontBlockUp = frontBlock.getRelative(BlockFace.UP)
+
+                        if (frontBlock.type.isSolid || frontBlockUp.type.isSolid) {
+                            isSeat = false
+                        }
+                    }
+                }
 
                 // Re-apply the staircase elevation filter for friend seating
                 if (isSeat) {

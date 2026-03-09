@@ -8,7 +8,7 @@ class ProviderConfiguration {
 
     @Comment(
         "The provider type for content generation. Choose between CEREBRAS, GEMINI, OPENROUTER, GROQ, DEEPSEEK, CHATGPT, ANYTHINGLLM.",
-        "CEREBRAS (cloud.cerebras.ai) provides blazing fast inference for open-source models (like Llama 3) and offers a generous free tier.",
+        "CEREBRAS (cloud.cerebras.ai) provides blazing fast inference for open-source models (like Llama 3) and offers a generous free tier. Recommended, used by default.",
         "GEMINI (aistudio.google.com) have a free tier, but since December 7 (2025), it's unusable because of too low request limitation (20 RPD).",
         "OPENROUTER (openrouter.ai) requires payment (with competitive pricing; however trial is available). The best option, but paid.",
         "GROQ (console.groq.com) is free but limited. Suitable for testing, but may be too limited for production (if we are talking about a free plan and large servers).",
