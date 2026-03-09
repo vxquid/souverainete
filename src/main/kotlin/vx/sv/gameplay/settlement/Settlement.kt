@@ -102,7 +102,6 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
 // =========================================
 // Extensions for quick leader checking
 // =========================================
-
 /**
  * Checks if this NPC (Villager) is currently a settlement leader.
  */

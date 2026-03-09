@@ -445,8 +445,7 @@ class TradeManager : Listener {
             meta.mapView = view
             meta.setDisplayName("§6Map: ${origin.data.settlementName} ➔ ${target.data.settlementName}")
             meta.lore = listOf(
-                "§7Shows the trading route between",
-                "§7${origin.data.settlementName} and ${target.data.settlementName}.",
+                "§7Shows the trading route between ${origin.data.settlementName} and ${target.data.settlementName}.",
                 "§8Cartographer's exact copy."
             )
             mapItem.itemMeta = meta

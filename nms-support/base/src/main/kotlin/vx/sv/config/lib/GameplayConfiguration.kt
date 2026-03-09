@@ -211,7 +211,7 @@ class GameplayConfiguration {
         var reputationTemplate: String = "§e🏆 %d §f(%s)"
 
         @Comment("Text template for the health line. Use %.1f placeholders for current and max health.")
-        var healthTemplate: String = "§с❤%.1f§f/§a%.1f"
+        var healthTemplate: String = "§4❤§c%.1f§7|§c%.1f"
 
         @Comment("Text template for the hunger status line when NPC is starving or hungry. Use %s for status, %.1f for hunger.")
         var hungerTemplate: String = "§c%s (%.1f / %.1f)"
