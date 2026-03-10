@@ -20,8 +20,6 @@ import vx.sv.gameplay.personality.PersonalityManager.Gender
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
-import vx.sv.gameplay.settlement.SettlementManager.Companion.currentSettlement
-import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import kotlin.random.Random
@@ -62,7 +60,8 @@ class ReputationTracker : Listener {
     fun getNPCState(npc: LivingEntity, player: Player): NPCState? {
         if (isIgnored(player)) return null
 
-        val finalStatus = getFinalStatus(npc, player)
+        // This uses our unified manager method that properly sums up Personal + Settlement reputation
+        val finalStatus = repManager.getPlayerReputationStatus(npc, player)
 
         if (finalStatus.ordinal >= Reputation.HOSTILE.ordinal) {
             return NPCState.AGGRESSIVE
@@ -73,16 +72,6 @@ class ReputationTracker : Listener {
         }
 
         return null
-    }
-
-    private fun getFinalScore(entity: LivingEntity, player: Player): Int {
-        val personalScore = repManager.getReputationMap(entity)[player.uniqueId] ?: 0
-        val settlementScore = entity.settlement?.data?.reputation?.get(player.uniqueId) ?: 0
-        return personalScore + settlementScore
-    }
-
-    private fun getFinalStatus(entity: LivingEntity, player: Player): Reputation {
-        return repManager.getReputationStatusFromScore(getFinalScore(entity, player))
     }
 
     /**
@@ -105,8 +94,6 @@ class ReputationTracker : Listener {
             for (player in plugin.server.onlinePlayers) {
                 if (isIgnored(player)) continue
 
-                val playerSettlement = player.currentSettlement
-
                 // Limiting bounding box entities fetching
                 val npcs = player.getNearbyEntities(config.aggressionRadius, config.aggressionRadius, config.aggressionRadius)
                     .filterIsInstance<LivingEntity>()
@@ -116,13 +103,9 @@ class ReputationTracker : Listener {
                 for (npc in npcs) {
                     val pair = npc.uniqueId to player.uniqueId
 
-                    // If player is not in a settlement or in a different settlement
-                    if (playerSettlement == null || npc.settlement?.data?.settlementName != playerSettlement) {
-                        if (annoyanceTimers.containsKey(pair)) resetAggro(npc, player)
-                        continue
-                    }
+                    // Unified status check: ALWAYS considers the SUM of personal + town reputation!
+                    val finalStatus = repManager.getPlayerReputationStatus(npc, player)
 
-                    val finalStatus = getFinalStatus(npc, player)
                     // PERFORMANCE: Use distanceSquared to avoid Math.sqrt()
                     val distanceSq = npc.location.distanceSquared(player.location)
 
@@ -139,7 +122,7 @@ class ReputationTracker : Listener {
                                 }
                             } else {
                                 // Player backed off or hid behind a wall -> remove annoyance
-                                annoyanceTimers.remove(pair)
+                                if (annoyanceTimers.containsKey(pair)) resetAggro(npc, player)
                             }
                         }
                         finalStatus.ordinal >= Reputation.HOSTILE.ordinal -> {
@@ -148,7 +131,10 @@ class ReputationTracker : Listener {
                                 callForHelp(npc, player)
                             }
                         }
-                        else -> annoyanceTimers.remove(pair)
+                        else -> {
+                            // If player is Neutral or better, clear annoyance immediately
+                            if (annoyanceTimers.containsKey(pair)) resetAggro(npc, player)
+                        }
                     }
                 }
 
@@ -194,9 +180,19 @@ class ReputationTracker : Listener {
         if (victim !is Villager && victim !is IronGolem) return
 
         val penalty = (event.damage * config.damageReputationMultiplier).toInt()
-        if (penalty > 0) repManager.addReputation(victim, attacker, -penalty)
+        if (penalty > 0) {
+            val settlement = victim.settlement
+            if (settlement != null) {
+                // Apply penalty globally to the settlement
+                repManager.addReputation(settlement, attacker, -penalty)
+            } else {
+                // Independent NPC fallback
+                repManager.addReputation(victim, attacker, -penalty)
+            }
+        }
 
-        val finalStatus = getFinalStatus(victim, attacker)
+        // Properly fetch final combined sum
+        val finalStatus = repManager.getPlayerReputationStatus(victim, attacker)
         if (finalStatus.ordinal >= Reputation.UNFRIENDLY.ordinal) {
             triggerAggression(victim, attacker, isFullCombat = finalStatus.ordinal >= Reputation.HOSTILE.ordinal)
         }
@@ -214,15 +210,8 @@ class ReputationTracker : Listener {
             if (isIgnored(killerEntity)) return
             val settlement = victim.settlement ?: return
 
-            val currentSettlementRep = settlement.data.reputation.getOrDefault(killerEntity.uniqueId, 0)
-            settlement.data.reputation[killerEntity.uniqueId] = currentSettlementRep - config.killSettlementPenalty
-
-            if (config.chatNotification) {
-                val msg = plugin.language.getString("settlement-reputation.decrease")!!
-                    .replace("{entity}", settlement.data.settlementName)
-                    .replace("{amount}", config.killSettlementPenalty.toString())
-                killerEntity.sendMessage(msg)
-            }
+            // Let the global unified ReputationManager handle the global settlement penalty and save properly
+            repManager.addReputation(settlement, killerEntity, -config.killSettlementPenalty)
 
             triggerSettlementAlarm(settlement)
 
@@ -244,19 +233,12 @@ class ReputationTracker : Listener {
         val repGain = config.monsterKillReputation[victim.type.name] ?: return
         if (repGain <= 0) return
 
-        val worldSettlements = settlements[victim.world] ?: return
+        val worldSettlements = SettlementManager.settlements[victim.world] ?: return
         // Only run territory.contains() if we are 100% sure it's a valid monster that yields reputation
         val activeSettlement = worldSettlements.find { it.territory.contains(victim.location.toVector()) } ?: return
 
-        val currentRep = activeSettlement.data.reputation.getOrDefault(killerEntity.uniqueId, 0)
-        activeSettlement.data.reputation[killerEntity.uniqueId] = currentRep + repGain
-
-        if (config.chatNotification) {
-            val msg = plugin.language.getString("settlement-reputation.increase")!!
-                .replace("{entity}", activeSettlement.data.settlementName)
-                .replace("{amount}", repGain.toString())
-            killerEntity.sendMessage(msg)
-        }
+        // Global unified ReputationManager takes care of rewarding the player!
+        repManager.addReputation(activeSettlement, killerEntity, repGain)
     }
 
     @EventHandler
