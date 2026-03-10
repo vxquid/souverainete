@@ -5,12 +5,17 @@ import org.bukkit.entity.LivingEntity
 import org.bukkit.entity.Player
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.settlement.Settlement
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import kotlin.math.abs
 
 class ReputationManager {
 
+    // ==========================================
+    // PERSONAL REPUTATION METHODS (NPC specific)
+    // ==========================================
     fun getReputationMap(entity: LivingEntity): MutableMap<UUID, Int> {
         val pdc = entity.persistentDataContainer
         if (pdc.has(REP_KEY, PersistentDataType.STRING)) {
@@ -34,7 +39,6 @@ class ReputationManager {
     }
 
     fun addReputation(entity: LivingEntity, player: Player, value: Int) {
-
         val statusUpdateMessage = plugin.language.getString("settlement-reputation.status-update")!!
 
         val map = getReputationMap(entity)
@@ -44,7 +48,6 @@ class ReputationManager {
         setReputationMap(entity, map)
         val newStatus = getPlayerReputationStatus(entity, player)
 
-        // Уведомление об изменении репутации
         if (plugin.gameplayManager.config.reputation.chatNotification && value != 0) {
             val entityDescription = entity.customName ?: "NPC"
             notifyReputationChange(player, value, entityDescription)
@@ -56,17 +59,6 @@ class ReputationManager {
             player.sendMessage(statusChangeMessage)
             player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
         }
-
-    }
-
-    private fun notifyReputationChange(player: Player, aggregatedValue: Int, entityDescription: String) {
-        val increaseMessage = plugin.language.getString("settlement-reputation.increase")!!
-        val decreaseMessage = plugin.language.getString("settlement-reputation.decrease")!!
-
-        val reputationChangeMessage = (if (aggregatedValue > 0) increaseMessage else decreaseMessage)
-            .replace("{entity}", entityDescription)
-            .replace("{amount}", abs(aggregatedValue).toString())
-        player.sendMessage(reputationChangeMessage)
     }
 
     fun setReputation(entity: LivingEntity, player: Player, value: Int) {
@@ -79,20 +71,95 @@ class ReputationManager {
         setReputationMap(entity, map)
         val newStatus = getPlayerReputationStatus(entity, player)
 
-        // Уведомление об изменении репутации (аналогично addReputation, если значение изменилось)
         if (plugin.gameplayManager.config.reputation.chatNotification && value != previousRep) {
-            val entityDescription = entity.customName ?: entity.type.name.lowercase().capitalize()
+            val entityDescription = entity.customName ?: entity.type.name.lowercase().replaceFirstChar { it.titlecase() }
             val changeValue = value - previousRep
             notifyReputationChange(player, changeValue, entityDescription)
         }
 
         if (previousStatus != newStatus && plugin.gameplayManager.config.reputation.chatNotification) {
-            val entityName = entity.customName ?: entity.type.name.lowercase().capitalize()
+            val entityName = entity.customName ?: entity.type.name.lowercase().replaceFirstChar { it.titlecase() }
             val statusChangeMessage = statusUpdateMessage.replace("{entity}", entityName).replace("{status}", newStatus.getLocalizedName())
             player.sendMessage(statusChangeMessage)
             player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
         }
+    }
 
+    // ==========================================
+    // SETTLEMENT REPUTATION METHODS (Global)
+    // ==========================================
+    /**
+     * Adds reputation directly to the entire Settlement and safely saves it.
+     */
+    fun addReputation(settlement: Settlement, player: Player, value: Int) {
+        val statusUpdateMessage = plugin.language.getString("settlement-reputation.status-update")!!
+
+        val previousRep = settlement.data.reputation[player.uniqueId] ?: 0
+        val previousStatus = getPlayerReputationStatus(settlement, player)
+
+        // Modify and save
+        settlement.data.reputation[player.uniqueId] = previousRep + value
+        SettlementManager.saveSettlements(settlement.world)
+
+        val newStatus = getPlayerReputationStatus(settlement, player)
+
+        if (plugin.gameplayManager.config.reputation.chatNotification && value != 0) {
+            notifyReputationChange(player, value, settlement.data.settlementName)
+        }
+
+        if (previousStatus != newStatus && plugin.gameplayManager.config.reputation.chatNotification) {
+            val statusChangeMessage = statusUpdateMessage.replace("{entity}", settlement.data.settlementName).replace("{status}", newStatus.getLocalizedName())
+            player.sendMessage(statusChangeMessage)
+            player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
+        }
+    }
+
+    /**
+     * Sets exact reputation value for the entire Settlement and safely saves it.
+     */
+    fun setReputation(settlement: Settlement, player: Player, value: Int) {
+        val statusUpdateMessage = plugin.language.getString("settlement-reputation.status-update")!!
+
+        val previousRep = settlement.data.reputation[player.uniqueId] ?: 0
+        val previousStatus = getPlayerReputationStatus(settlement, player)
+
+        // Modify and save
+        settlement.data.reputation[player.uniqueId] = value
+        SettlementManager.saveSettlements(settlement.world)
+
+        val newStatus = getPlayerReputationStatus(settlement, player)
+
+        if (plugin.gameplayManager.config.reputation.chatNotification && value != previousRep) {
+            val changeValue = value - previousRep
+            notifyReputationChange(player, changeValue, settlement.data.settlementName)
+        }
+
+        if (previousStatus != newStatus && plugin.gameplayManager.config.reputation.chatNotification) {
+            val statusChangeMessage = statusUpdateMessage.replace("{entity}", settlement.data.settlementName).replace("{status}", newStatus.getLocalizedName())
+            player.sendMessage(statusChangeMessage)
+            player.playSound(player.eyeLocation, plugin.gameplayManager.config.reputation.statusUpdateSound, 1F, 1F)
+        }
+    }
+
+    /**
+     * Extracts reputation status by only looking at the settlement's reputation data.
+     */
+    fun getPlayerReputationStatus(settlement: Settlement, player: Player): Reputation {
+        val reputation = settlement.data.reputation[player.uniqueId] ?: 0
+        return getReputationStatusFromScore(reputation)
+    }
+
+    // ==========================================
+    // UTILITIES
+    // ==========================================
+    private fun notifyReputationChange(player: Player, aggregatedValue: Int, entityDescription: String) {
+        val increaseMessage = plugin.language.getString("settlement-reputation.increase")!!
+        val decreaseMessage = plugin.language.getString("settlement-reputation.decrease")!!
+
+        val reputationChangeMessage = (if (aggregatedValue > 0) increaseMessage else decreaseMessage)
+            .replace("{entity}", entityDescription)
+            .replace("{amount}", abs(aggregatedValue).toString())
+        player.sendMessage(reputationChangeMessage)
     }
 
     enum class Reputation(val priceMultiplier: Double) {
@@ -108,7 +175,6 @@ class ReputationManager {
         fun getLocalizedName(): String {
             return plugin.language.getString("reputation.status.${this.name.lowercase()}")!!
         }
-
     }
 
     /* Counts personal AND town reputation together. */
@@ -144,13 +210,10 @@ class ReputationManager {
     }
 
     companion object {
-
         val REP_KEY = NamespacedKey(plugin, "ReputationData")
 
         fun LivingEntity.opinionOn(player: Player): Reputation {
             return plugin.gameplayManager.reputationManager.getPlayerReputationStatus(this, player)
         }
-
     }
-
 }

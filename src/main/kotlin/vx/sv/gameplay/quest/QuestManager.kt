@@ -79,9 +79,10 @@ class QuestManager : Listener {
         gatheringDescription = plugin.prompts.getString("quest-family.gathering.quest-description")
             ?: "To complete the quest, the player will need to obtain an item `{questItem}` in the amount of {questItemAmount} and bring it to the NPC. The NPC promises a reward ({rewardItem}) for the assistance, without specifying what exactly it will be. When generating the quest, be sure to thoughtfully consider this information. In addition to the previous requirements, follow these guidelines during the generation: {taskDescription}."
 
-        // UPDATED: Removed hardcoded "{targetLeader}" reference to avoid AI inventing non-existent names.
+        // Added {targetLeader} explicitly so AI knows WHO the receiver is in the base text.
+        // Diplomatic info is moved exclusively to the DIPLOMATIC CONTEXT block to prevent redundancy.
         deliveryDescription = plugin.prompts.getString("quest-family.delivery.quest-description")
-            ?: "The player must deliver a highly important sealed political package to the leader of {targetSettlement}. CURRENT DIPLOMATIC RELATION: {relationLevel}. RECENT HISTORY BETWEEN THEM: {diplomaticHistory}. Based STRICTLY on this relation and history, create a logical continuation of their ongoing story. The NPC promises a reward ({rewardItem}) upon delivery. {taskDescription}."
+            ?: "The player must deliver a highly important sealed political package to {targetLeader}, the leader of {targetSettlement}. The NPC promises a reward ({rewardItem}) upon delivery. {taskDescription}."
 
         QuestType.entries.forEach { type ->
             val key = type.name.lowercase().replace("_", "-") + "-quest"
@@ -156,7 +157,12 @@ class QuestManager : Listener {
         if (giverLeader.quests().size > plugin.gameplayManager.config.quest.npcQuestBase + giverLeader.villagerLevel) return
 
         val targetLeaderId = targetSettlement.data.leaderId ?: return
-        val targetLeaderName = targetSettlement.data.leaderName ?: "Leader"
+
+        // Robust fallback: Check actual entity name if string is null (backward compatibility for old saves)
+        val targetLeaderName = targetSettlement.data.leaderName
+            ?: targetSettlement.villagers.find { it.uniqueId == targetLeaderId }?.customName
+            ?: "Unknown Leader"
+
         val targetSettlementId = targetSettlement.data.id
         val giverSettlementId = giverSettlement.data.id
 
@@ -198,7 +204,7 @@ class QuestManager : Listener {
         targetSettlementId: UUID? = null,
         giverSettlementId: UUID? = null
     ): Quest? {
-        val generator = QuestGenerationController(type, questGiver, targetLeaderName, targetSettlementId)
+        val generator = QuestGenerationController(type, questGiver, targetLeaderName, targetSettlementId, giverSettlementId)
 
         return plugin.providerManager.client.sendPromptWithSchema(generator.prompt, GeneratedCharacterDataContainer::class)?.let { data ->
 
@@ -324,6 +330,19 @@ class QuestManager : Listener {
                 val quest = player.quests().find { it.id == questId }
                 if (quest != null) {
                     quest.progress = -2.0 // -2.0 specifically indicates Betrayal / Seal Broken
+
+                    // SEVERE PENALTY: Check if broken in sender's territory
+                    val giverSettlementId = quest.giverSettlementId
+                    if (giverSettlementId != null) {
+                        val giverSettlement = SettlementManager.getById(giverSettlementId)
+                        if (giverSettlement != null && giverSettlement.territory.contains(player.location.toVector())) {
+                            player.sendFormattedMessage("§4[!] §cYou were caught breaking the seal within ${giverSettlement.data.settlementName}'s territory! They are outraged!")
+
+                            // Change settlement-wide reputation properly using ReputationManager overloaded method
+                            plugin.gameplayManager.reputationManager.addReputation(giverSettlement, player, -1000)
+                        }
+                    }
+
                     plugin.server.scheduler.runTask(plugin, Runnable {
                         invalidateQuest(quest, QuestInvalidationEvent.Reason.NOT_ACTUAL)
                     })
@@ -360,7 +379,16 @@ class QuestManager : Listener {
 
         if (questGiver is Villager) questGiver.villagerExperience += villagerExperience
         player.giveExp(playerExperience)
-        plugin.gameplayManager.reputationManager.addReputation(questGiver, player, playerReputation)
+
+        // UPDATE REPUTATION GLOBALLY FOR THE SETTLEMENT
+        val settlement = questGiver.settlement
+        if (settlement != null) {
+            // This safely adds the reputation and triggers standard notifications & UI
+            plugin.gameplayManager.reputationManager.addReputation(settlement, player, playerReputation)
+        } else {
+            // Fallback for homeless/independent NPCs
+            plugin.gameplayManager.reputationManager.addReputation(questGiver, player, playerReputation)
+        }
 
         val finishMessage = plugin.language.getString("quest.finished")!!.replace("{quest}", quest.name)
         player.sendFormattedMessage(finishMessage)
@@ -373,9 +401,17 @@ class QuestManager : Listener {
             val giverSettlement = SettlementManager.getById(quest.giverSettlementId!!)
             val targetSettlement = SettlementManager.getById(quest.targetSettlementId!!)
             if (giverSettlement != null && targetSettlement != null) {
+
+                // SIGNIFICANT POLITICAL SHIFT ON SUCCESS (Shift UP by 1 Relation Level)
+                val currentRelation = SettlementManager.getRelation(giverSettlement, targetSettlement)
+                val levels = Settlement.RelationLevel.entries.toTypedArray()
+                val newLevel = levels[minOf(levels.size - 1, currentRelation.ordinal + 1)]
+
+                SettlementManager.setRelation(giverSettlement, targetSettlement, newLevel)
+
                 val defaultItemName = plugin.language.getString("quest.delivery.default-item-name") ?: "Sealed Package"
                 val itemName = quest.data.questItemName ?: defaultItemName
-                val record = "SUCCESS: Player '${player.name}' successfully delivered '$itemName' from ${giverSettlement.data.leaderName} to ${targetSettlement.data.leaderName}."
+                val record = "SUCCESS: Player '${player.name}' successfully delivered '$itemName'. Relations improved to ${newLevel.name}."
                 SettlementManager.recordDiplomaticEvent(giverSettlement, targetSettlement, record)
 
                 // NOTIFY PLAYER OF DIPLOMATIC IMPACT (SUCCESS)
@@ -515,22 +551,24 @@ class QuestManager : Listener {
                 val defaultItemName = plugin.language.getString("quest.delivery.default-item-name") ?: "Sealed Package"
                 val itemName = event.quest.data.questItemName ?: defaultItemName
 
+                // SIGNIFICANT POLITICAL SHIFT ON FAILURE (Shift DOWN strictly by 1 Relation Level)
+                val currentRelation = SettlementManager.getRelation(giverSettlement, targetSettlement)
+                val levels = Settlement.RelationLevel.entries.toTypedArray()
+
+                val newLevel = levels[maxOf(0, currentRelation.ordinal - 1)]
+
+                SettlementManager.setRelation(giverSettlement, targetSettlement, newLevel)
+
                 // Record the failure in Diplomatic History
-                val record = "FAILURE: Player '${player.name}' failed to deliver '$itemName'. Reason: $reasonStr."
+                val record = "FAILURE: Player '${player.name}' failed to deliver '$itemName' ($reasonStr). Relations worsened to ${newLevel.name}."
                 SettlementManager.recordDiplomaticEvent(giverSettlement, targetSettlement, record)
 
-                // ALWAYS degrade relations on Time Out, Destruction, or Betrayal (Seal Broken)
-                if (event.reason == QuestInvalidationEvent.Reason.TIME_EXPIRATION || event.quest.progress == -1.0 || event.quest.progress == -2.0) {
-                    SettlementManager.setRelation(giverSettlement, targetSettlement, Settlement.RelationLevel.TENSE)
-                    SettlementManager.recordDiplomaticEvent(giverSettlement, targetSettlement, "RELATION CHANGED: Dropped to TENSE due to failed delivery ($reasonStr).")
-
-                    // NOTIFY PLAYER OF DIPLOMATIC IMPACT (FAILURE)
-                    val impactMsg = plugin.language.getString("quest.diplomatic-fail")
-                        ?.replace("{settlementA}", giverSettlement.data.settlementName)
-                        ?.replace("{settlementB}", targetSettlement.data.settlementName)
-                        ?: "§4[Diplomacy] §cYour actions have worsened the relations between §b${giverSettlement.data.settlementName} §cand §b${targetSettlement.data.settlementName}§c."
-                    player.sendFormattedMessage(impactMsg)
-                }
+                // NOTIFY PLAYER OF DIPLOMATIC IMPACT (FAILURE)
+                val impactMsg = plugin.language.getString("quest.diplomatic-fail")
+                    ?.replace("{settlementA}", giverSettlement.data.settlementName)
+                    ?.replace("{settlementB}", targetSettlement.data.settlementName)
+                    ?: "§4[Diplomacy] §cYour actions have worsened the relations between §b${giverSettlement.data.settlementName} §cand §b${targetSettlement.data.settlementName}§c."
+                player.sendFormattedMessage(impactMsg)
             }
         }
 
@@ -581,15 +619,41 @@ class QuestManager : Listener {
         player.addQuest(quest)
     }
 
-    class QuestGenerationController(questType: QuestType, private val questGiver: LivingEntity, targetLeaderName: String? = null, targetSettlementId: UUID? = null) {
+    class QuestGenerationController(
+        questType: QuestType,
+        private val questGiver: LivingEntity,
+        targetLeaderName: String? = null,
+        targetSettlementId: UUID? = null,
+        giverSettlementId: UUID? = null
+    ) {
 
         private val isDelivery = questType.questFamily == QuestFamily.DELIVERY
         private val baseInfo = if (isDelivery) plugin.gameplayManager.questManager.deliveryDescription else plugin.gameplayManager.questManager.gatheringDescription
         private val questInfo = baseInfo.replace("{taskDescription}", plugin.gameplayManager.questManager.taskDescriptions[questType]!!)
 
-        // NEW FIELD IN SCHEMA: "letterContent" for the secret message inside the box
+        // EXPLICIT DIPLOMATIC CONTEXT INJECTION FOR DELIVERY QUESTS
+        private val diplomaticContext = if (isDelivery) {
+            """
+            
+            ### DIPLOMATIC CONTEXT (HIGHEST PRIORITY):
+            - Sender Settlement (Quest Giver's Home): {giverSettlement}
+            - Sender Leader (Quest Giver): {npcName}
+            - Receiver Settlement (Target Destination): {targetSettlement}
+            - Receiver Leader (Target Leader): {targetLeader}
+            - Current Diplomatic Relation: {relationLevel}
+            - Diplomatic History: {diplomaticHistory}
+            
+            CRITICAL INSTRUCTION 1: This is a diplomatic interaction between {giverSettlement} and {targetSettlement}. You MUST explicitly address the receiving leader by their actual name: "{targetLeader}". Do NOT invent a random name for the receiver. The dialogue and letter content MUST be heavily driven by their 'Diplomatic History' and 'Current Diplomatic Relation'. This history takes absolute precedence over all other factors.
+            CRITICAL INSTRUCTION 2: The 'questDescription' is spoken by {npcName} (Sender). BUT the 'questFinisherDialogue' MUST be written from the perspective of {targetLeader} (Receiver) reacting to the letter!
+            """.trimIndent()
+        } else ""
+
+        // Adjust roleplay priority based on quest type
+        private val roleplayPriority = if (isDelivery) "Diplomatic History & Relations > Global Setting" else "Global Setting"
+
+        // NEW FIELD IN SCHEMA: "letterContent" explicitly instructs to write to {targetLeader}
         private val schemaAdditions = if (isDelivery) {
-            ",\n  \"questItemName\": \"Creative name for the sealed package (e.g. 'Sealed Diplomatic Pouch', 'Suspicious Lockbox').\",\n  \"questItemDescription\": \"Short lore description of the package.\",\n  \"letterContent\": \"The actual text of the secret letter inside the package (written in 1st person from the sender to the receiver. Be expressive!)\""
+            ",\n  \"questItemName\": \"Creative name for the sealed package (e.g. 'Sealed Diplomatic Pouch').\",\n  \"questItemDescription\": \"Short lore description of the package.\",\n  \"letterContent\": \"The actual text of the secret letter inside the package (written in 1st person from {npcName} to {targetLeader}. Be expressive!)\""
         } else ""
 
         private val questPrompt = """
@@ -604,14 +668,14 @@ class QuestManager : Listener {
               "extraShortTaskDescription": "Extremely short description of the task (Goal, Quest Giver Name, Amount).",
               "shortRequiredQuestItemDescription": "Literally one sentence describing the item in the context of the quest (written in third-person perspective).",
               "questDescription": "A highly immersive, deeply personal first-person dialogue where the NPC explains what they need and why.",
-              "questFinisherDialogue": "A highly immersive, deeply personal first-person dialogue where the NPC thanks the player for completing the quest."{schemaAdditions}
+              "questFinisherDialogue": "A highly immersive, deeply personal first-person dialogue where the TARGET LEADER ({targetLeader}) reads the letter and thanks the player."{schemaAdditions}
             }
         
             ### WRITING STYLE & RULES:
-            1. Deep Roleplay: Fully embody the NPC. Tone, vocabulary, and worldview MUST be heavily influenced by the following priority: Global Setting > Personality & Race > Biome > Profession > Gender.
+            1. Deep Roleplay: Fully embody the NPC. Tone, vocabulary, and worldview MUST be heavily influenced by the following priority: {roleplayPriority} > Personality & Race > Biome > Profession > Gender.
             2. Personal Connection: The NPC must communicate with the player in a highly personal, expressive, and engaging manner in the dialogues.
             3. Clear Requests & Motives: In the dialogue, the NPC must explicitly state WHAT they need the player to do and explain WHY they need it done.
-            4. Player Placeholder: Whenever the NPC addresses the player directly, use exactly "%playerName%".
+            4. Player Placeholder: Whenever the NPC addresses the player directly, use exactly "%playerName%".{diplomaticContext}
         
             ### NPC & QUEST CONTEXT:
             - Global Setting: {globalSetting}
@@ -631,6 +695,7 @@ class QuestManager : Listener {
         val score     = (if (questItem.score < currency.getBasicScore()) currency.getBasicScore() * 10 else questItem.score).toLong()
 
         private val placeholders  = mutableMapOf<String, String>().also { it ->
+            it["globalSetting"]   = plugin.prompts.getString("global-setting") ?: "A medieval fantasy world."
             it["npcPersonality"]  = "${questGiver.getPersonality()}"
             it["npcName"]         = questGiver.customName.toString()
             it["npcGender"]       = questGiver.gender.toString()
@@ -638,26 +703,35 @@ class QuestManager : Listener {
             it["raceDescription"] = questGiver.race.description
             it["currentBiome"]    = questGiver.location.block.biome.key.key
 
-            val giverSettlement = questGiver.settlement
+            // Get settlements safely
+            val giverSettlementObj = giverSettlementId?.let { id -> SettlementManager.getById(id) } ?: questGiver.settlement
             val targetSettlementObj = targetSettlementId?.let { id -> SettlementManager.getById(id) }
 
+            val giverNameStr = giverSettlementObj?.data?.settlementName ?: "Unknown Town"
+            val targetNameStr = targetSettlementObj?.data?.settlementName ?: "Unknown Town"
+
             var relationLevel = "NEUTRAL"
-            var historyStr = "No significant past events. This is their first major interaction."
 
-            if (giverSettlement != null && targetSettlementObj != null) {
-                relationLevel = SettlementManager.getRelation(giverSettlement, targetSettlementObj).name
+            // INITIALIZE HISTORY PROPERLY IF EMPTY
+            var historyStr = "This is the beginning of diplomatic relations between $giverNameStr and $targetNameStr."
 
-                // FIXED: Using safe call '?.' to avoid NPE on older saves
-                val rawHistory = giverSettlement.data.diplomaticHistory?.get(targetSettlementId!!)
+            if (giverSettlementObj != null && targetSettlementObj != null) {
+                relationLevel = SettlementManager.getRelation(giverSettlementObj, targetSettlementObj).name
+
+                val rawHistory = giverSettlementObj.data.diplomaticHistory?.get(targetSettlementId!!)
                 if (!rawHistory.isNullOrEmpty()) {
                     historyStr = rawHistory.joinToString("\n- ", prefix = "- ")
                 }
             }
 
-            it["targetSettlement"] = targetSettlementObj?.data?.settlementName ?: "Unknown Town"
+            // Bind values required by the new Diplomatic Context block
+            it["giverSettlement"] = giverNameStr
+            it["targetSettlement"] = targetNameStr
             it["targetLeader"] = targetLeaderName ?: "Another Leader"
             it["relationLevel"] = relationLevel
             it["diplomaticHistory"] = historyStr
+            it["roleplayPriority"] = roleplayPriority
+            it["diplomaticContext"] = diplomaticContext // This string itself contains placeholders which replaceMap will process naturally
 
             (questGiver as? Villager)?.let { villager ->
                 it["npcProfession"]      = villager.profession.key.key
