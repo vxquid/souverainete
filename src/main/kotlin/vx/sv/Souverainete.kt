@@ -197,7 +197,7 @@ class Souverainete : JavaPlugin(), Listener {
 
     companion object {
 
-        val premium: Boolean = false
+        val premium: Boolean = true
         lateinit var plugin: Souverainete
         lateinit var gson: Gson
 

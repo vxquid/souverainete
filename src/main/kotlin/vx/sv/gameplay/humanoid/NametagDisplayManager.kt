@@ -537,20 +537,7 @@ class NametagDisplayManager : Listener {
         scale: PEVector3f, translation: PEVector3f, interpDuration: Int, interpDelay: Int
     ) {
         val user = PacketEvents.getAPI().playerManager.getUser(player) ?: return
-
-        // Replace section signs with ampersands, and convert accidentally typed Cyrillic layout characters
-        // in color codes back to Latin (protection against typos in configuration files).
         val safeText = text.replace('§', '&')
-            .replace("&а", "&a")
-            .replace("&в", "&b")
-            .replace("&с", "&c")
-            .replace("&е", "&e")
-            .replace("&к", "&k")
-            .replace("&л", "&l")
-            .replace("&м", "&m")
-            .replace("&н", "&n")
-            .replace("&о", "&o")
-            .replace("&р", "&r")
 
         val component = LegacyComponentSerializer.builder()
             .character('&')

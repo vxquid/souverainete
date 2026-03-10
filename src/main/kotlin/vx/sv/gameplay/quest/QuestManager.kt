@@ -7,15 +7,16 @@ import org.bukkit.entity.*
 import org.bukkit.entity.Villager.Profession
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.block.Action
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.event.entity.ItemDespawnEvent
+import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.inventory.ItemStack
-import org.bukkit.inventory.meta.BookMeta
-import org.bukkit.inventory.meta.BundleMeta
-import org.bukkit.inventory.meta.EnchantmentStorageMeta
-import org.bukkit.inventory.meta.PotionMeta
+import org.bukkit.inventory.meta.*
 import org.bukkit.persistence.PersistentDataType
+import org.bukkit.util.io.BukkitObjectInputStream
+import org.bukkit.util.io.BukkitObjectOutputStream
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.sendFormattedMessage
@@ -37,7 +38,6 @@ import vx.sv.gameplay.quest.pragma.strategy.*
 import vx.sv.gameplay.quest.pragma.strategy.TreasureHuntQuestItemStrategy.Companion.treasureItems
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
-import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.gameplay.trade.ScoreCalculator.getBasicScore
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
 import vx.sv.persistent.LivingEntityExtend.hasEdibleItem
@@ -47,6 +47,9 @@ import vx.sv.persistent.LivingEntityExtend.quests
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import vx.sv.persistent.VillagerExtend.professionLevelName
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.net.URL
 import java.util.*
 
 /**
@@ -56,35 +59,30 @@ import java.util.*
 class QuestManager : Listener {
 
     val progressTracker = ProgressTracker()
-
-    // Key used to store and retrieve the total number of quests ever generated on the server
     val questCountKey = NamespacedKey(plugin, "TotalQuestCount")
 
-    // Retrieves the global quest counter from the primary world's persistent data container
     val totalQuestAmount: Long
         get() = Bukkit.getWorlds()[0]!!.persistentDataContainer.get(questCountKey, PersistentDataType.LONG) ?: 0
 
-    // Prompts for the AI to generate quest lore
     private var gatheringDescription: String
     private var deliveryDescription: String
     private val taskDescriptions = mutableMapOf<QuestType, String>()
     private val allowedQuestTypes = mutableSetOf<QuestType>()
 
     init {
-        // Register this class to listen for Bukkit events
         plugin.server.pluginManager.registerEvents(this, plugin)
 
-        // Start a recurring task to generate new quests periodically
-        plugin.server.scheduler.runTaskTimer(plugin, { _ -> tick() }, 0, plugin.gameplayManager.config.quest.intervalTicks)
+        // TODO; Don't forget to enable quest tick. I don't need it right now.
+        // plugin.server.scheduler.runTaskTimer(plugin, Runnable { tick() }, 0, plugin.gameplayManager.config.quest.intervalTicks)
+        plugin.server.scheduler.runTaskTimer(plugin, Runnable { politicalTick() }, 100L, plugin.gameplayManager.config.quest.intervalTicks)
 
-        // Load AI prompt templates from the configuration, falling back to defaults if not found
         gatheringDescription = plugin.prompts.getString("quest-family.gathering.quest-description")
             ?: "To complete the quest, the player will need to obtain an item `{questItem}` in the amount of {questItemAmount} and bring it to the NPC. The NPC promises a reward ({rewardItem}) for the assistance, without specifying what exactly it will be. When generating the quest, be sure to thoughtfully consider this information. In addition to the previous requirements, follow these guidelines during the generation: {taskDescription}."
 
+        // UPDATED: Removed hardcoded "{targetLeader}" reference to avoid AI inventing non-existent names.
         deliveryDescription = plugin.prompts.getString("quest-family.delivery.quest-description")
-            ?: "The player must deliver a highly important political `{questItem}` to {targetLeader}, the leader of {targetSettlement}. The quest has a strict time limit. If the letter is lost or time runs out, relations between the settlements will deteriorate. The NPC promises a generous reward ({rewardItem}) upon successful delivery. {taskDescription}."
+            ?: "The player must deliver a highly important sealed political package to the leader of {targetSettlement}. CURRENT DIPLOMATIC RELATION: {relationLevel}. RECENT HISTORY BETWEEN THEM: {diplomaticHistory}. Based STRICTLY on this relation and history, create a logical continuation of their ongoing story. The NPC promises a reward ({rewardItem}) upon delivery. {taskDescription}."
 
-        // Load enabled quest types and their specific task descriptions
         QuestType.entries.forEach { type ->
             val key = type.name.lowercase().replace("_", "-") + "-quest"
             if (plugin.prompts.getBoolean("$key.allowed", true)) {
@@ -95,39 +93,16 @@ class QuestManager : Listener {
         }
     }
 
-    /**
-     * Called periodically to handle background quest logic.
-     * Selects a random eligible villager and attempts to generate a new quest for them.
-     */
     fun tick() {
         val world = plugin.gameplayManager.allowedWorlds.filter { it.entities.filterIsInstance<Villager>().isNotEmpty() }.randomOrNull() ?: return
         val villager = this.selectRandomVillager(world) ?: return
 
-        // Skip villagers with no profession or those who have reached their max quest limit
         if (villager.profession == Profession.NONE) return
         if (villager.quests().size > plugin.gameplayManager.config.quest.npcQuestBase + villager.villagerLevel) return
 
         val allowedQuests = mutableListOf(QuestType.PROFESSION_ITEM_GATHERING, QuestType.BOOZE, QuestType.MUSIC_DISC)
             .filter { it in allowedQuestTypes }.toMutableList()
 
-        var targetLeaderId: UUID? = null
-        var targetLeaderName: String? = null
-        var targetSettlementId: UUID? = null
-        var giverSettlementId: UUID? = null
-        val villagerSettlement = villager.settlement
-
-        // If the villager is a settlement leader, they can give delivery quests to other settlements
-        if (villager.isSettlementLeader() && villagerSettlement != null && QuestType.MESSAGE_DELIVERY in allowedQuestTypes) {
-            val otherSettlements = SettlementManager.settlements[world]?.filter {
-                it.data.id != villagerSettlement.data.id && it.data.leaderId != null &&
-                        it.villagers.any { v -> v.uniqueId == it.data.leaderId && v.isValid }
-            }
-            if (!otherSettlements.isNullOrEmpty()) {
-                allowedQuests.add(QuestType.MESSAGE_DELIVERY)
-            }
-        }
-
-        // Determine the type of quest to generate based on the villager's needs (e.g., hunger) or profession
         val questType = if (villager.hunger <= plugin.gameplayManager.config.hunger.questThreshold && !villager.hasEdibleItem() && QuestType.FOOD_SEARCH in allowedQuestTypes) {
             QuestType.FOOD_SEARCH
         } else {
@@ -144,24 +119,10 @@ class QuestManager : Listener {
             }.randomOrNull() ?: return
         }
 
-        // Setup parameters for delivery quests
-        if (questType == QuestType.MESSAGE_DELIVERY) {
-            val target = SettlementManager.settlements[world]?.filter {
-                it.data.id != villagerSettlement!!.data.id && it.data.leaderId != null
-            }?.randomOrNull()
-            if (target != null) {
-                targetLeaderId = target.data.leaderId
-                targetLeaderName = target.data.leaderName
-                targetSettlementId = target.data.id
-                giverSettlementId = villagerSettlement?.data?.id
-            } else return
-        }
-
-        // Run the actual AI generation asynchronously to avoid freezing the main server thread
-        plugin.server.scheduler.runTaskAsynchronously(plugin, { _ ->
+        plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
             try {
                 plugin.gameplayManager.questManager.generateQuest(
-                    questType, villager, targetLeaderId, targetLeaderName, targetSettlementId, giverSettlementId
+                    questType, villager, null, null, null, null
                 )?.let { quest ->
                     plugin.gameplayManager.actualQuests.add(quest.id)
                     villager.addQuest(quest)
@@ -172,14 +133,55 @@ class QuestManager : Listener {
         })
     }
 
-    /**
-     * Selects a random eligible villager to receive a new quest.
-     * Also cleans up (invalidates) any expired quests from villagers during the iteration.
-     */
+    fun politicalTick() {
+        if (QuestType.MESSAGE_DELIVERY !in allowedQuestTypes) return
+
+        val world = plugin.gameplayManager.allowedWorlds.filter {
+            !SettlementManager.settlements[it].isNullOrEmpty()
+        }.randomOrNull() ?: return
+
+        val worldSettlements = SettlementManager.settlements[world] ?: return
+
+        val validSettlements = worldSettlements.filter { settlement ->
+            settlement.data.leaderId != null &&
+                    settlement.villagers.any { v -> v.uniqueId == settlement.data.leaderId && v.isValid }
+        }
+
+        if (validSettlements.size < 2) return
+
+        val giverSettlement = validSettlements.random()
+        val targetSettlement = validSettlements.filter { it.data.id != giverSettlement.data.id }.randomOrNull() ?: return
+        val giverLeader = giverSettlement.villagers.find { it.uniqueId == giverSettlement.data.leaderId && it.isValid } ?: return
+
+        if (giverLeader.quests().size > plugin.gameplayManager.config.quest.npcQuestBase + giverLeader.villagerLevel) return
+
+        val targetLeaderId = targetSettlement.data.leaderId ?: return
+        val targetLeaderName = targetSettlement.data.leaderName ?: "Leader"
+        val targetSettlementId = targetSettlement.data.id
+        val giverSettlementId = giverSettlement.data.id
+
+        plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+            try {
+                plugin.gameplayManager.questManager.generateQuest(
+                    QuestType.MESSAGE_DELIVERY,
+                    giverLeader,
+                    targetLeaderId,
+                    targetLeaderName,
+                    targetSettlementId,
+                    giverSettlementId
+                )?.let { quest ->
+                    plugin.gameplayManager.actualQuests.add(quest.id)
+                    giverLeader.addQuest(quest)
+                }
+            } catch (exception: Exception) {
+                exception.printStackTrace()
+            }
+        })
+    }
+
     private fun selectRandomVillager(world: World): Villager? {
         return world.entities.filterIsInstance<Villager>().onEach { villager ->
             villager.quests().forEach { quest ->
-                // Check if the quest has lived past its lifetime duration
                 if ((System.currentTimeMillis() - quest.timeCreated) / 1000 * 20 > plugin.gameplayManager.config.quest.lifetimeDuration) {
                     this.invalidateQuest(quest, QuestInvalidationEvent.Reason.TIME_EXPIRATION)
                     villager.removeQuest(quest)
@@ -188,10 +190,6 @@ class QuestManager : Listener {
         }.filter { it.quests().size < it.villagerLevel + plugin.gameplayManager.config.quest.npcQuestBase }.randomOrNull()
     }
 
-    /**
-     * Generates a brand new quest by interacting with the AI prompt schema.
-     * Creates custom items for delivery quests based on the AI response.
-     */
     fun generateQuest(
         type: QuestType,
         questGiver: LivingEntity,
@@ -202,31 +200,73 @@ class QuestManager : Listener {
     ): Quest? {
         val generator = QuestGenerationController(type, questGiver, targetLeaderName, targetSettlementId)
 
-        // Send the prompt to the AI and parse it into our data container
         return plugin.providerManager.client.sendPromptWithSchema(generator.prompt, GeneratedCharacterDataContainer::class)?.let { data ->
 
             val finalItem = generator.questItem.item.clone()
 
-            // If it's a delivery quest, dynamically create the lore and name of the item from the AI's response
+            // If it's a delivery quest, dynamically create the sealed package
             if (type == QuestType.MESSAGE_DELIVERY) {
-                val meta = finalItem.itemMeta
+                val meta = finalItem.itemMeta as? SkullMeta
                 if (meta != null) {
-                    val itemName = data.questItemName ?: "Important Package"
-                    val itemLore = data.questItemDescription ?: "A sealed political item."
+                    val defaultItemName = plugin.language.getString("quest.delivery.default-item-name") ?: "Sealed Package"
+                    val defaultItemLore = plugin.language.getString("quest.delivery.default-item-lore") ?: "A highly important sealed parcel."
 
-                    if (meta is BookMeta) {
-                        meta.title = itemName
-                        meta.author = questGiver.customName ?: "Leader"
-                        meta.pages = listOf(itemLore)
+                    val itemName = data.questItemName ?: defaultItemName
+                    val itemLore = data.questItemDescription ?: defaultItemLore
+
+                    meta.setDisplayName("§d$itemName")
+
+                    val loreFormat = plugin.language.getStringList("quest.delivery.package-lore")
+                    if (loreFormat.isNotEmpty()) {
+                        meta.lore = loreFormat.map { it.replace("{itemLore}", itemLore) }
                     } else {
-                        meta.setDisplayName("§d$itemName")
-                        meta.lore = listOf("§7$itemLore", "", "§8Highly important political document.")
+                        meta.lore = listOf(
+                            "§7$itemLore",
+                            "",
+                            "§8Highly important political parcel.",
+                            "§e[Right-Click] §7to break the seal and open.",
+                            "§4WARNING: Opening this will fail the quest!"
+                        )
                     }
+
+                    // Apply the "Extinct Mining Lootbox" custom texture
+                    try {
+                        val profile = Bukkit.createPlayerProfile(UUID.randomUUID())
+                        val textures = profile.textures
+                        textures.skin = URL("http://textures.minecraft.net/texture/131c54ff62535750bf3a0cd15bdf848de8d83da1664ab91acfd6dec617552439")
+                        profile.setTextures(textures)
+                        meta.ownerProfile = profile
+                    } catch (e: Exception) {
+                        plugin.logger.warning("Failed to apply package texture: ${e.message}")
+                    }
+
+                    // Generate the AI written letter
+                    val defaultSender = plugin.language.getString("quest.delivery.default-sender") ?: "Leader"
+                    val bookTitleFormat = plugin.language.getString("quest.delivery.book-title") ?: "§6Letter from {sender}"
+                    val senderName = questGiver.customName ?: defaultSender
+
+                    val letterBook = ItemStack(Material.WRITTEN_BOOK)
+                    val bookMeta = letterBook.itemMeta as BookMeta
+                    bookMeta.title = bookTitleFormat.replace("{sender}", senderName)
+                    bookMeta.author = senderName
+
+                    val defaultLetterContent = plugin.language.getString("quest.delivery.default-letter-content") ?: "We must stand together."
+                    val content = data.letterContent ?: defaultLetterContent
+                    bookMeta.pages = content.chunked(250) // Chunk long text to fit on pages
+                    letterBook.itemMeta = bookMeta
+
+                    // Generate random internal loot
+                    val loot = mutableListOf<ItemStack>(letterBook)
+                    if (Math.random() > 0.5) loot.add(ItemStack(Material.DIAMOND, (1..3).random()))
+                    if (Math.random() > 0.3) loot.add(ItemStack(Material.GOLD_INGOT, (3..10).random()))
+                    if (Math.random() > 0.7) loot.add(ItemStack(Material.EMERALD, (1..5).random()))
+
+                    // Serialize the loot and store it inside the item's PersistentDataContainer
+                    meta.persistentDataContainer.set(NamespacedKey(plugin, "package_contents"), PersistentDataType.STRING, serializeItems(loot))
                     finalItem.itemMeta = meta
                 }
             }
 
-            // Return the fully constructed Quest object
             Quest(
                 type,
                 type.questFamily,
@@ -249,16 +289,54 @@ class QuestManager : Listener {
     }
 
     /**
-     * Cancels an active quest for a specific player.
+     * Intercepts Right-Clicks to prevent placing the package and to handle breaking the seal.
      */
+    @EventHandler
+    fun onPackageInteract(event: PlayerInteractEvent) {
+        if (event.action != Action.RIGHT_CLICK_AIR && event.action != Action.RIGHT_CLICK_BLOCK) return
+        val item = event.item ?: return
+        if (item.type != Material.PLAYER_HEAD) return
+
+        val meta = item.itemMeta ?: return
+        val packageKey = NamespacedKey(plugin, "package_contents")
+
+        if (meta.persistentDataContainer.has(packageKey, PersistentDataType.STRING)) {
+            event.isCancelled = true // Prevent placing the head as a block
+
+            val questId = meta.persistentDataContainer.get(NamespacedKey(plugin, "quest_id"), PersistentDataType.LONG)
+            val contentsRaw = meta.persistentDataContainer.get(packageKey, PersistentDataType.STRING)
+
+            if (contentsRaw != null) {
+                // Deserialize and drop the hidden loot to the player
+                val items = deserializeItems(contentsRaw)
+                items.forEach { event.player.world.dropItemNaturally(event.player.location, it) }
+            }
+
+            event.player.playSound(event.player.location, Sound.ENTITY_ITEM_BREAK, 1.0f, 1.0f)
+            val msg = plugin.language.getString("quest.seal-broken") ?: "§cYou broke the seal and stole the contents!"
+            event.player.sendFormattedMessage(msg)
+
+            item.amount -= 1 // Consume the package
+
+            // If it belongs to an active quest, mark it as SEAL BROKEN (-2.0)
+            if (questId != null) {
+                val player = event.player
+                val quest = player.quests().find { it.id == questId }
+                if (quest != null) {
+                    quest.progress = -2.0 // -2.0 specifically indicates Betrayal / Seal Broken
+                    plugin.server.scheduler.runTask(plugin, Runnable {
+                        invalidateQuest(quest, QuestInvalidationEvent.Reason.NOT_ACTUAL)
+                    })
+                }
+            }
+        }
+    }
+
     fun cancelQuest(player: Player, quest: Quest) {
         progressTracker.stopTracking(player, quest)
         player.removeQuest(quest)
     }
 
-    /**
-     * Increments the global server quest counter and saves it to persistent data.
-     */
     private fun incrementQuestID(): Long {
         var questCount = totalQuestAmount
         questCount += 1
@@ -266,9 +344,6 @@ class QuestManager : Listener {
         return questCount
     }
 
-    /**
-     * Removes a quest globally and triggers failure/invalidation logic for any players who had it active.
-     */
     fun invalidateQuest(quest: Quest, reason: QuestInvalidationEvent.Reason) {
         plugin.gameplayManager.actualQuests.remove(quest.id)
         Bukkit.getOnlinePlayers().forEach { onlinePlayer ->
@@ -278,9 +353,6 @@ class QuestManager : Listener {
         }
     }
 
-    /**
-     * Handles successful quest completion, distributing rewards, experience, and triggering completion dialogues.
-     */
     fun finishQuest(player: Player, questGiver: LivingEntity, quest: Quest, onFinish: () -> Unit = {}) {
         val playerReputation = (quest.score * plugin.gameplayManager.config.quest.reputationMultiplier).toInt()
         val playerExperience = (quest.score * plugin.gameplayManager.config.quest.playerExperienceMultiplier).toInt()
@@ -297,15 +369,29 @@ class QuestManager : Listener {
         questGiver.removeQuest(quest)
         player.removeQuest(quest)
 
+        if (quest.type == QuestType.MESSAGE_DELIVERY && quest.giverSettlementId != null && quest.targetSettlementId != null) {
+            val giverSettlement = SettlementManager.getById(quest.giverSettlementId!!)
+            val targetSettlement = SettlementManager.getById(quest.targetSettlementId!!)
+            if (giverSettlement != null && targetSettlement != null) {
+                val defaultItemName = plugin.language.getString("quest.delivery.default-item-name") ?: "Sealed Package"
+                val itemName = quest.data.questItemName ?: defaultItemName
+                val record = "SUCCESS: Player '${player.name}' successfully delivered '$itemName' from ${giverSettlement.data.leaderName} to ${targetSettlement.data.leaderName}."
+                SettlementManager.recordDiplomaticEvent(giverSettlement, targetSettlement, record)
+
+                // NOTIFY PLAYER OF DIPLOMATIC IMPACT (SUCCESS)
+                val impactMsg = plugin.language.getString("quest.diplomatic-success")
+                    ?.replace("{settlementA}", giverSettlement.data.settlementName)
+                    ?.replace("{settlementB}", targetSettlement.data.settlementName)
+                    ?: "§6[Diplomacy] §eYour actions have positively influenced the relations between §b${giverSettlement.data.settlementName} §eand §b${targetSettlement.data.settlementName}§e!"
+                player.sendFormattedMessage(impactMsg)
+            }
+        }
+
         player.questsCompleted += 1
         player.experienceEarnedByQuests += playerExperience
 
         onFinish.invoke()
-
-        // Invalidate the quest for everyone else so it can't be completed multiple times
         this.invalidateQuest(quest, QuestInvalidationEvent.Reason.FINISHED_BY_SOMEONE_ELSE)
-
-        // Trigger the AI-generated finishing dialogue
         questGiver.talk(player, this.determineFinishingDialogue(player, quest))
     }
 
@@ -313,22 +399,15 @@ class QuestManager : Listener {
         return quest.data.questFinisherDialogue.replace("%playerName%", player.name)
     }
 
-    /**
-     * Intercepts merchant trades to process quest turn-ins.
-     * If the item being traded matches an active quest item, it triggers the quest completion logic.
-     */
     @EventHandler
     fun onMerchantTrade(event: MerchantTradeEvent) {
         event.player.quests().find { it.questItem.getItemStack().isSimilar(event.recipe.ingredients.first()) }?.let { quest ->
             event.player.closeInventory()
-
-            // Handle different types of turn-in logic based on the quest type
             when (quest.type) {
-                QuestType.PROFESSION_ITEM_GATHERING, QuestType.SMITHING_TEMPLATE_ORDER, QuestType.ENCHANTED_BOOK_ORDER, QuestType.TREASURE_HUNT -> {
+                QuestType.PROFESSION_ITEM_GATHERING, QuestType.SMITHING_TEMPLATE_ORDER, QuestType.ENCHANTED_BOOK_ORDER, QuestType.TREASURE_HUNT, QuestType.MESSAGE_DELIVERY -> {
                     this.finishQuest(event.player, event.merchant, quest)
                 }
                 QuestType.MUSIC_DISC -> {
-                    // Custom logic to play the music disc given to the NPC
                     fun getSoundKeyFromMaterial(material: Material): String? {
                         val name = material.name
                         if (!name.startsWith("MUSIC_DISC_")) return null
@@ -346,12 +425,10 @@ class QuestManager : Listener {
                     this.finishQuest(event.player, event.merchant, quest)
                 }
                 QuestType.FOOD_SEARCH -> {
-                    // Replenish the merchant's hunger
                     event.merchant.eat()
                     this.finishQuest(event.player, event.merchant, quest)
                 }
                 QuestType.BOOZE -> {
-                    // Make the humanoid drink the potion they requested
                     event.merchant.asHumanoid()?.let { humanoid ->
                         val potion = quest.questItem.getItemStack()
                         val effect = (potion.itemMeta as PotionMeta).basePotionType?.potionEffects?.firstOrNull()
@@ -362,14 +439,10 @@ class QuestManager : Listener {
                         }
                     } ?: this.finishQuest(event.player, event.merchant, quest)
                 }
-                else -> {}
             }
         }
     }
 
-    /**
-     * If a villager dies, invalidate all quests associated with them.
-     */
     @EventHandler
     private fun onVillagerDeath(event: EntityDeathEvent) {
         (event.entity as? Villager)?.quests()?.forEach { quest ->
@@ -377,9 +450,6 @@ class QuestManager : Listener {
         }
     }
 
-    /**
-     * Detects if a quest-critical item (like a delivery letter) takes damage and gets destroyed (e.g., burned in lava).
-     */
     @EventHandler
     fun onItemDamage(event: EntityDamageEvent) {
         val entity = event.entity as? Item ?: return
@@ -390,22 +460,16 @@ class QuestManager : Listener {
         }
     }
 
-    /**
-     * Detects if a quest-critical item despawns from the world.
-     */
     @EventHandler
     fun onItemDespawn(event: ItemDespawnEvent) {
         val questId = event.entity.itemStack.itemMeta?.persistentDataContainer?.get(NamespacedKey(plugin, "quest_id"), PersistentDataType.LONG) ?: return
         handleItemDestruction(questId)
     }
 
-    /**
-     * Marks a quest as failed because its required item was destroyed.
-     */
     private fun handleItemDestruction(questId: Long) {
         val player = Bukkit.getOnlinePlayers().find { p -> p.quests().any { it.id == questId } } ?: return
         val quest = player.quests().find { it.id == questId } ?: return
-        quest.progress = -1.0 // Set progress to -1 to flag it as destroyed
+        quest.progress = -1.0 // -1.0 flag for destroyed item
         plugin.server.scheduler.runTask(plugin, Runnable {
             invalidateQuest(quest, QuestInvalidationEvent.Reason.NOT_ACTUAL)
         })
@@ -413,7 +477,7 @@ class QuestManager : Listener {
 
     /**
      * Handles the logic for when a quest becomes invalid or is failed by the player.
-     * Decreases relations between settlements if a delivery quest fails.
+     * Decreases relations between settlements robustly upon delivery failures.
      */
     @EventHandler
     private fun onQuestInvalidation(event: QuestInvalidationEvent) {
@@ -427,16 +491,45 @@ class QuestManager : Listener {
             QuestInvalidationEvent.Reason.NOT_ACTUAL -> plugin.language.getString("quest.failed.notActual")
         }
 
-        // Apply severe penalties if a political delivery quest is failed or the item is destroyed
+        // Apply severe penalties if a political delivery quest is failed
         if (event.quest.type == QuestType.MESSAGE_DELIVERY) {
+            var reasonStr = "Unknown reason"
+
+            // Override messages based on the specific failure type
             if (event.quest.progress == -1.0) {
-                message = plugin.language.getString("quest.failed.destroyed") ?: "Your quest item was destroyed!"
+                message = plugin.language.getString("quest.failed.destroyed") ?: "Quest §6{quest} §7was failed; your quest item was destroyed!"
+                reasonStr = "Item was destroyed"
+            } else if (event.quest.progress == -2.0) {
+                message = plugin.language.getString("quest.failed.seal-broken") ?: "Quest §6{quest} §7was failed; you broke the seal and stole the contents!"
+                reasonStr = "Courier betrayed us, broke the seal and stole the contents"
+            } else if (event.reason == QuestInvalidationEvent.Reason.TIME_EXPIRATION) {
+                reasonStr = "Time expired"
+            } else if (event.reason == QuestInvalidationEvent.Reason.NPC_DEATH) {
+                reasonStr = "A leader died"
             }
-            if (event.reason == QuestInvalidationEvent.Reason.TIME_EXPIRATION || event.quest.progress == -1.0) {
-                val giverSettlement = event.quest.giverSettlementId?.let { SettlementManager.getById(it) }
-                val targetSettlement = event.quest.targetSettlementId?.let { SettlementManager.getById(it) }
-                if (giverSettlement != null && targetSettlement != null) {
+
+            val giverSettlement = event.quest.giverSettlementId?.let { SettlementManager.getById(it) }
+            val targetSettlement = event.quest.targetSettlementId?.let { SettlementManager.getById(it) }
+
+            if (giverSettlement != null && targetSettlement != null) {
+                val defaultItemName = plugin.language.getString("quest.delivery.default-item-name") ?: "Sealed Package"
+                val itemName = event.quest.data.questItemName ?: defaultItemName
+
+                // Record the failure in Diplomatic History
+                val record = "FAILURE: Player '${player.name}' failed to deliver '$itemName'. Reason: $reasonStr."
+                SettlementManager.recordDiplomaticEvent(giverSettlement, targetSettlement, record)
+
+                // ALWAYS degrade relations on Time Out, Destruction, or Betrayal (Seal Broken)
+                if (event.reason == QuestInvalidationEvent.Reason.TIME_EXPIRATION || event.quest.progress == -1.0 || event.quest.progress == -2.0) {
                     SettlementManager.setRelation(giverSettlement, targetSettlement, Settlement.RelationLevel.TENSE)
+                    SettlementManager.recordDiplomaticEvent(giverSettlement, targetSettlement, "RELATION CHANGED: Dropped to TENSE due to failed delivery ($reasonStr).")
+
+                    // NOTIFY PLAYER OF DIPLOMATIC IMPACT (FAILURE)
+                    val impactMsg = plugin.language.getString("quest.diplomatic-fail")
+                        ?.replace("{settlementA}", giverSettlement.data.settlementName)
+                        ?.replace("{settlementB}", targetSettlement.data.settlementName)
+                        ?: "§4[Diplomacy] §cYour actions have worsened the relations between §b${giverSettlement.data.settlementName} §cand §b${targetSettlement.data.settlementName}§c."
+                    player.sendFormattedMessage(impactMsg)
                 }
             }
         }
@@ -446,10 +539,6 @@ class QuestManager : Listener {
         player.questsFailed += 1
     }
 
-    /**
-     * Handles the moment a player clicks to accept a quest.
-     * Validates limits, assigns physical items if needed, and starts tracking.
-     */
     @EventHandler
     fun onPlayerAcceptQuest(event: PlayerAcceptQuestEvent) {
         val player = event.player
@@ -467,7 +556,6 @@ class QuestManager : Listener {
             return
         }
 
-        // Give the player the physical document to deliver and set the quest deadline
         if (quest.type == QuestType.MESSAGE_DELIVERY) {
             val item = quest.questItem.getItemStack().clone()
             val meta = item.itemMeta
@@ -486,7 +574,6 @@ class QuestManager : Listener {
         player.sendFormattedMessage(plugin.language.getString("info-messages.quest-chat-info.quest-giver")!!.replace("{npcName}", npc.customName!!).replace("%playerName%", player.name))
         player.sendFormattedMessage(plugin.language.getString("info-messages.quest-chat-info.task-description")!!.replace("{desc}", quest.data.extraShortTaskDescription).replace("%playerName%", player.name))
 
-        // Begin tracking the player's progress on this quest
         if (questTracker[player] == null) {
             questTracker[player] = quest to progressTracker.startTracking(player, quest)
         }
@@ -494,17 +581,15 @@ class QuestManager : Listener {
         player.addQuest(quest)
     }
 
-    /**
-     * Helper class to map game context and dynamically build the prompt sent to the AI for generating quests.
-     */
     class QuestGenerationController(questType: QuestType, private val questGiver: LivingEntity, targetLeaderName: String? = null, targetSettlementId: UUID? = null) {
 
         private val isDelivery = questType.questFamily == QuestFamily.DELIVERY
         private val baseInfo = if (isDelivery) plugin.gameplayManager.questManager.deliveryDescription else plugin.gameplayManager.questManager.gatheringDescription
         private val questInfo = baseInfo.replace("{taskDescription}", plugin.gameplayManager.questManager.taskDescriptions[questType]!!)
 
+        // NEW FIELD IN SCHEMA: "letterContent" for the secret message inside the box
         private val schemaAdditions = if (isDelivery) {
-            ",\n  \"questItemName\": \"Creative name for the political item to deliver (e.g. 'Sealed Treaty', 'Cursed Relic', 'Royal Decree').\",\n  \"questItemDescription\": \"Short lore description of the item to be delivered.\""
+            ",\n  \"questItemName\": \"Creative name for the sealed package (e.g. 'Sealed Diplomatic Pouch', 'Suspicious Lockbox').\",\n  \"questItemDescription\": \"Short lore description of the package.\",\n  \"letterContent\": \"The actual text of the secret letter inside the package (written in 1st person from the sender to the receiver. Be expressive!)\""
         } else ""
 
         private val questPrompt = """
@@ -514,7 +599,7 @@ class QuestManager : Listener {
             ### JSON SCHEMA TO FOLLOW:
             {
               "questNames":[
-                // Array of 5 short, creative, and distinct quest names (Do NOT use personalized dialogue here)
+                // Array of 5 short, creative, and distinct quest names
               ],
               "extraShortTaskDescription": "Extremely short description of the task (Goal, Quest Giver Name, Amount).",
               "shortRequiredQuestItemDescription": "Literally one sentence describing the item in the context of the quest (written in third-person perspective).",
@@ -525,7 +610,7 @@ class QuestManager : Listener {
             ### WRITING STYLE & RULES:
             1. Deep Roleplay: Fully embody the NPC. Tone, vocabulary, and worldview MUST be heavily influenced by the following priority: Global Setting > Personality & Race > Biome > Profession > Gender.
             2. Personal Connection: The NPC must communicate with the player in a highly personal, expressive, and engaging manner in the dialogues.
-            3. Clear Requests & Motives: In the dialogue, the NPC must explicitly state WHAT they need the player to do and explain WHY they need it done (their underlying motive/reason). Only omit the "why" if the NPC's specific personality (e.g., highly secretive, arrogant, mindless) strictly forbids explaining themselves.
+            3. Clear Requests & Motives: In the dialogue, the NPC must explicitly state WHAT they need the player to do and explain WHY they need it done.
             4. Player Placeholder: Whenever the NPC addresses the player directly, use exactly "%playerName%".
         
             ### NPC & QUEST CONTEXT:
@@ -538,8 +623,6 @@ class QuestManager : Listener {
             - Current Biome: {currentBiome}
             - Gender: {npcGender}
             - Quest Info: {questInfo}
-            - Target Settlement (If Delivery): {targetSettlement}
-            - Target Leader (If Delivery): {targetLeader}
         """.trimIndent()
 
         val questItem = questType.strategy.get(questGiver)
@@ -547,7 +630,6 @@ class QuestManager : Listener {
         val amount    = questItem.item.amount
         val score     = (if (questItem.score < currency.getBasicScore()) currency.getBasicScore() * 10 else questItem.score).toLong()
 
-        // Populate placeholders for the prompt to contextualize the AI's generation
         private val placeholders  = mutableMapOf<String, String>().also { it ->
             it["npcPersonality"]  = "${questGiver.getPersonality()}"
             it["npcName"]         = questGiver.customName.toString()
@@ -556,9 +638,26 @@ class QuestManager : Listener {
             it["raceDescription"] = questGiver.race.description
             it["currentBiome"]    = questGiver.location.block.biome.key.key
 
-            val targetSettlement = targetSettlementId?.let { id -> SettlementManager.getById(id) }
-            it["targetSettlement"] = targetSettlement?.data?.settlementName ?: "Unknown Town"
+            val giverSettlement = questGiver.settlement
+            val targetSettlementObj = targetSettlementId?.let { id -> SettlementManager.getById(id) }
+
+            var relationLevel = "NEUTRAL"
+            var historyStr = "No significant past events. This is their first major interaction."
+
+            if (giverSettlement != null && targetSettlementObj != null) {
+                relationLevel = SettlementManager.getRelation(giverSettlement, targetSettlementObj).name
+
+                // FIXED: Using safe call '?.' to avoid NPE on older saves
+                val rawHistory = giverSettlement.data.diplomaticHistory?.get(targetSettlementId!!)
+                if (!rawHistory.isNullOrEmpty()) {
+                    historyStr = rawHistory.joinToString("\n- ", prefix = "- ")
+                }
+            }
+
+            it["targetSettlement"] = targetSettlementObj?.data?.settlementName ?: "Unknown Town"
             it["targetLeader"] = targetLeaderName ?: "Another Leader"
+            it["relationLevel"] = relationLevel
+            it["diplomaticHistory"] = historyStr
 
             (questGiver as? Villager)?.let { villager ->
                 it["npcProfession"]      = villager.profession.key.key
@@ -579,13 +678,9 @@ class QuestManager : Listener {
             it["questInfo"]       = questInfo.replaceMap(it)
         }
 
-        // The finalized prompt ready to be sent to the AI
         val prompt = questPrompt.replaceMap(placeholders)
     }
 
-    /**
-     * Data class representing an active or generated quest, holding all contextual information, progress, and AI data.
-     */
     data class Quest(
         val type: QuestType,
         val family: QuestFamily,
@@ -604,26 +699,18 @@ class QuestManager : Listener {
         var deadline: Long = 0L,
         var timeLimit: Long = 0L
     ) {
-
-        /** Wrapper for storing and retrieving the required quest item via JSON serialization. */
         data class QuestItem(val serialized: String) {
             fun getItemStack(): ItemStack = gson.fromJson(serialized, ItemStack::class.java)
         }
 
-        /**
-         * Calculates and packages the physical currency reward for finishing the quest.
-         * If the amount exceeds a single stack (64), it groups them inside a Bundle.
-         */
         fun calculateReward(currency: String): ItemStack {
             val material     = XMaterial.valueOf(currency).get() ?: throw NullPointerException("Can't find material with name $currency.")
             val currencyItem = ItemStack(material)
             var amount       = score / material.getBasicScore()
 
-            // Return a single stack if the amount is less than a full stack limit
             if (amount < 64)
                 return currencyItem.apply { this.amount = if (amount <= 0) 1 else amount.toInt() }
 
-            // If the reward is massive, bundle it together
             val items = mutableListOf<ItemStack>()
             while (amount > 0) {
                 amount.coerceIn(1, 64).toInt().let { i ->
@@ -633,9 +720,6 @@ class QuestManager : Listener {
             return this.bundle(items)
         }
 
-        /**
-         * Wraps multiple item stacks into a single Minecraft Bundle item.
-         */
         private fun bundle(items: List<ItemStack>): ItemStack {
             return ItemStack(Material.BUNDLE, 1).apply {
                 itemMeta = (itemMeta as BundleMeta).apply {
@@ -645,16 +729,14 @@ class QuestManager : Listener {
         }
     }
 
-    /**
-     * Container matching the exact schema returned by the AI provider to map JSON into usable object properties.
-     */
     data class GeneratedCharacterDataContainer(val questNames: List<String>,
                                                val extraShortTaskDescription: String,
                                                val shortRequiredQuestItemDescription: String,
                                                val questDescription: String,
                                                val questFinisherDialogue: String,
                                                val questItemName: String? = null,
-                                               val questItemDescription: String? = null)
+                                               val questItemDescription: String? = null,
+                                               val letterContent: String? = null) // Added Letter Content
 
     enum class QuestFamily {
         GATHERING,
@@ -673,7 +755,6 @@ class QuestManager : Listener {
     }
 
     companion object {
-        /** Utility function to replace a map of keys with their corresponding values in a String. */
         fun String.replaceMap(replacements: Map<String, String>): String {
             var result = this
             for ((key, value) in replacements) {
@@ -682,14 +763,42 @@ class QuestManager : Listener {
             return result
         }
 
-        /** Adds a quest to a living entity's persistent data storage. */
         fun LivingEntity.addQuest(quest: Quest) {
             persistentDataContainer.set(questDataKey, PersistentDataType.STRING, gson.toJson(this.quests().apply { add(quest) }))
         }
 
-        /** Removes a specific quest from a living entity's persistent data storage. */
         fun LivingEntity.removeQuest(quest: Quest) {
             persistentDataContainer.set(questDataKey, PersistentDataType.STRING, gson.toJson(this.quests().apply { removeIf { it.id == quest.id } }))
+        }
+
+        /** Utility to serialize a list of ItemStacks into a Base64 string for safe PDC storage */
+        fun serializeItems(items: List<ItemStack>): String {
+            try {
+                val io = ByteArrayOutputStream()
+                val os = BukkitObjectOutputStream(io)
+                os.writeInt(items.size)
+                for (item in items) os.writeObject(item)
+                os.flush()
+                return Base64.getEncoder().encodeToString(io.toByteArray())
+            } catch (e: Exception) {
+                e.printStackTrace()
+                return ""
+            }
+        }
+
+        /** Utility to deserialize a Base64 string back into a list of ItemStacks */
+        fun deserializeItems(data: String): List<ItemStack> {
+            val items = mutableListOf<ItemStack>()
+            try {
+                val bytes = Base64.getDecoder().decode(data)
+                val io = ByteArrayInputStream(bytes)
+                val `is` = BukkitObjectInputStream(io)
+                val size = `is`.readInt()
+                for (i in 0 until size) items.add(`is`.readObject() as ItemStack)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            return items
         }
     }
 }

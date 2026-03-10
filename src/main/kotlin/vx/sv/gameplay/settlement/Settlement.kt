@@ -21,6 +21,10 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         var leaderName: String? = null, // Stores the elected leader's string name for quick access
         val reputation: MutableMap<UUID, Int> = mutableMapOf(),
         val relations: MutableMap<UUID, RelationLevel> = mutableMapOf(),
+
+        // FIELD IS NOW NULLABLE: Backward compatibility for old saves that don't have this field in JSON
+        var diplomaticHistory: MutableMap<UUID, MutableList<String>>? = null,
+
         var activeRaid: RaidData? = null
     )
 

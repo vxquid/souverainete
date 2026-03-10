@@ -45,6 +45,7 @@ import vx.sv.gameplay.quest.QuestManager.Quest
 import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
+import vx.sv.gameplay.settlement.getLedSettlementId // Needed for the new logic
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
 
@@ -59,7 +60,7 @@ class InteractionHandler : Listener {
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
-            // Копируем список во избежание ConcurrentModificationException
+            // Copy list to avoid ConcurrentModificationException
             openedMenuList.toList().forEach(Menu::relocate)
         }, 0L, 1L)
     }
@@ -138,7 +139,7 @@ class InteractionHandler : Listener {
         if (time - last <= 200) return else lastInteraction[player] = time
         event.isCancelled = true
 
-        // Если меню уже открыто - игрок нажимает на выбранную в данный момент кнопку
+        // If the menu is already open, click the currently selected button
         openedMenuList.find { it.viewer == player }?.let { menu ->
             menu.invokeSelected()
             menu.destroy()
@@ -200,9 +201,11 @@ class InteractionHandler : Listener {
     private fun showDefaultMenu(player: Player, villager: Villager) {
         val builder = Builder(villager, player)
 
+        // FIXED: Now we check if the villager is ANY leader of the target settlement,
+        // avoiding issues when the original leader dies and is replaced.
         val activeDelivery = player.quests().find {
             it.type == QuestManager.QuestType.MESSAGE_DELIVERY &&
-                    it.targetLeaderId == villager.uniqueId
+                    (it.targetLeaderId == villager.uniqueId || (it.targetSettlementId != null && it.targetSettlementId == villager.getLedSettlementId()))
         }
 
         if (activeDelivery != null) {
@@ -213,18 +216,21 @@ class InteractionHandler : Listener {
                 }
 
                 if (itemInInv != null) {
-                    player.inventory.remove(itemInInv)
-                    plugin.gameplayManager.questManager.finishQuest(player, villager, activeDelivery) {
+                    itemInInv.amount -= 1 // Safely consume the package
 
+                    plugin.gameplayManager.questManager.finishQuest(player, villager, activeDelivery) {
                         val giverSet = activeDelivery.giverSettlementId?.let { SettlementManager.getById(it) }
+                        val targetSet = activeDelivery.targetSettlementId?.let { SettlementManager.getById(it) }
+
                         if (giverSet != null) {
                             val originalRepBoost = (activeDelivery.score * plugin.gameplayManager.config.quest.reputationMultiplier * 2).toInt()
                             giverSet.data.reputation[player.uniqueId] = (giverSet.data.reputation[player.uniqueId] ?: 0) + originalRepBoost
                         }
 
-                        val targetSet = activeDelivery.targetSettlementId?.let { SettlementManager.getById(it) }
+                        // Boost relations and log the event in Diplomatic History
                         if (giverSet != null && targetSet != null) {
                             SettlementManager.setRelation(giverSet, targetSet, Settlement.RelationLevel.WARM)
+                            SettlementManager.recordDiplomaticEvent(giverSet, targetSet, "RELATION CHANGED: Improved to WARM due to successful diplomatic delivery.")
                         }
                     }
                     menu.destroy()
@@ -333,14 +339,14 @@ class InteractionHandler : Listener {
     }
 
     private fun handleQuestButtonClick(player: Player, villager: Villager) {
-        if (villager.profession == Villager.Profession.NONE) {
+        if (villager.profession == Villager.Profession.NONE && villager.quests().isEmpty()) {
             val message = villager.race.phrases.jobless.randomOrNull()
-            message?.let { villager.talk(player, it, followDuringDialogue = true) }
+            message?.let { villager.talk(player, it, followDuringDialogue = false) }
             return
         }
-        if (villager.quests().isEmpty()) {
+        if (villager.profession != Villager.Profession.NONE && villager.quests().isEmpty()) {
             val message = villager.race.phrases.noQuest.randomOrNull()
-            message?.let { villager.talk(player, it, followDuringDialogue = true) }
+            message?.let { villager.talk(player, it, followDuringDialogue = false) }
             return
         }
         this.showQuestListMenu(player, villager)
@@ -349,13 +355,13 @@ class InteractionHandler : Listener {
     private fun handleTradeButtonClick(player: Player, villager: Villager) {
         if (villager.profession == Villager.Profession.NONE) {
             val message = villager.race.phrases.jobless.randomOrNull()
-            message?.let { villager.talk(player, it, followDuringDialogue = true) }
+            message?.let { villager.talk(player, it, followDuringDialogue = false) }
             return
         }
         plugin.server.scheduler.runTaskLater(plugin, { _ ->
             if (!villager.openTradeMenu(player)) {
                 val message = villager.race.phrases.noItemsToTrade.randomOrNull()
-                message?.let { villager.talk(player, it, followDuringDialogue = true) }
+                message?.let { villager.talk(player, it, followDuringDialogue = false) }
             }
         }, 1L)
     }

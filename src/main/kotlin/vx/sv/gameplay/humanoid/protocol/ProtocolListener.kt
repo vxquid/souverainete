@@ -36,12 +36,14 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.scoreboard.Team
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.debug.LeaderHighlightManager
 import vx.sv.gameplay.humanoid.event.HumanoidInitializationEvent
 import vx.sv.gameplay.humanoid.leisure.HumanoidLeisureManager
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Gender.FEMALE
 import vx.sv.gameplay.personality.PersonalityManager.Gender.MALE
+import vx.sv.gameplay.settlement.isSettlementLeader
 import java.util.*
 import kotlin.math.abs
 
@@ -105,6 +107,24 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
         val metadata = event.metadata.toMutableList().also {
             it.add(EntityData(if (newIndexing) 16 else 17, EntityDataTypes.BYTE, SkinSection.ALL.mask))
         }
+
+        // === INJECT LEADER HIGHLIGHT ===
+        // If the player has debug mode on, and the entity is a leader, apply the 0x40 (Glowing) bitmask
+        if (LeaderHighlightManager.highlightingPlayers.contains(player.uniqueId) && humanoid is Villager && humanoid.isSettlementLeader()) {
+            var foundStatus = false
+            for (i in metadata.indices) {
+                if (metadata[i].index == 0) {
+                    val currentByte = metadata[i].value as? Byte ?: 0
+                    metadata[i] = EntityData(0, EntityDataTypes.BYTE, (currentByte.toInt() or 0x40).toByte())
+                    foundStatus = true
+                    break
+                }
+            }
+            if (!foundStatus) {
+                metadata.add(EntityData(0, EntityDataTypes.BYTE, 0x40.toByte()))
+            }
+        }
+        // ===============================
 
         // Generate unique fake name based on UUID for scoreboard teams handling
         val fakeName = humanoid.uniqueId.toString().substring(0, 16)
@@ -263,6 +283,24 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                     val subscribed  = humanoidProvider?.subscribers?.contains(player) ?: false
                     val fixedPacket = metadata.removeIf(MUST_BE_REMOVED)
                     val forced      = if (ADAPTIVE_PACKET_MANIPULATOR) humanoidProvider?.forcedViewers?.contains(player) ?: false else false
+
+                    // === INJECT LEADER HIGHLIGHT ===
+                    // Dynamically apply glowing effect to outgoing metadata for leaders if debug mode is ON
+                    if (LeaderHighlightManager.highlightingPlayers.contains(player.uniqueId) && entity.isSettlementLeader()) {
+                        var foundStatus = false
+                        for (i in metadata.indices) {
+                            if (metadata[i].index == 0) {
+                                val currentByte = metadata[i].value as? Byte ?: 0
+                                metadata[i] = EntityData(0, EntityDataTypes.BYTE, (currentByte.toInt() or 0x40).toByte())
+                                foundStatus = true
+                                break
+                            }
+                        }
+                        if (!foundStatus) {
+                            metadata.add(EntityData(0, EntityDataTypes.BYTE, 0x40.toByte()))
+                        }
+                    }
+                    // ===============================
 
                     if (fixedPacket) {
                         player.sendVerbose(" §c> Preventing wrong villager metadata. §7[id ${entity.entityId}]")

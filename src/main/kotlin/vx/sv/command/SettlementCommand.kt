@@ -10,6 +10,7 @@ import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.sendFormattedMessage
+import vx.sv.debug.LeaderHighlightManager
 import vx.sv.gameplay.quest.QuestManager
 import vx.sv.gameplay.quest.QuestManager.Companion.addQuest
 import vx.sv.gameplay.settlement.Settlement
@@ -192,15 +193,15 @@ class SettlementCommand : BaseCommand() {
             ?.replace("{defender}", defender.data.settlementName)
             ?: "§c⚔ A raid has begun: §6${attacker.data.settlementName} §chas attacked §6${defender.data.settlementName}§c!"
 
-        player.world.players.forEach { player ->
-            player.sendMessage(broadcastRaidMessage)
+        player.world.players.forEach { p ->
+            p.sendMessage(broadcastRaidMessage)
         }
     }
 
     @Subcommand("forcequest")
     @CommandPermission("sv.settlement.forcequest")
     fun onForceQuest(player: Player) {
-        // Получаем сущность на которую смотрит игрок в радиусе 10 блоков
+        // Fetch the entity the player is looking at within 10 blocks
         val targetEntity = player.getTargetEntity(10)
 
         if (targetEntity !is Villager) {
@@ -218,7 +219,7 @@ class SettlementCommand : BaseCommand() {
             return
         }
 
-        // Ищем ближайшее другое поселение с лидером
+        // Find the closest other settlement with a valid leader
         val worldSettlements = SettlementManager.settlements[player.world] ?: emptyList()
         val targetSettlement = worldSettlements
             .filter { it.data.id != giverSettlement.data.id && it.data.leaderId != null }
@@ -232,7 +233,7 @@ class SettlementCommand : BaseCommand() {
         val leaderName = targetEntity.customName ?: "Leader"
         player.sendFormattedMessage("§eGenerating a political quest for $leaderName... Please wait, AI is processing.")
 
-        // Генерируем квест асинхронно
+        // Generate the quest asynchronously
         plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
             try {
                 val quest = plugin.gameplayManager.questManager.generateQuest(
@@ -245,7 +246,7 @@ class SettlementCommand : BaseCommand() {
                 )
 
                 if (quest != null) {
-                    // Возвращаемся в главный поток для изменения данных Bukkit
+                    // Return to the main thread to apply Bukkit changes
                     plugin.server.scheduler.runTask(plugin, Runnable {
                         plugin.gameplayManager.actualQuests.add(quest.id)
                         targetEntity.addQuest(quest)
@@ -261,4 +262,14 @@ class SettlementCommand : BaseCommand() {
         })
     }
 
+    @Subcommand("highlight|hl")
+    @CommandPermission("sv.settlement.highlight")
+    fun onHighlight(player: Player) {
+        val isEnabled = LeaderHighlightManager.toggleHighlight(player)
+        if (isEnabled) {
+            player.sendFormattedMessage("§a[Debug] Leader highlight mode has been §eENABLED§a. Leaders will now glow for you.")
+        } else {
+            player.sendFormattedMessage("§a[Debug] Leader highlight mode has been §cDISABLED§a.")
+        }
+    }
 }

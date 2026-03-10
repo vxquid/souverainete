@@ -60,7 +60,7 @@ settlement:
           - ""
           - "§eClick to type new name."
     rename:
-      prompt: "§eWrite new name in chat (or 'cancel'):"
+      prompt: "§eWrite new name in chat (or cancel):"
       cancelled: "§cCancelled."
       success: "§aSettlement renamed to: §6{name}"
 
@@ -97,10 +97,27 @@ quest:
     timeExpiration: "Quest §6{quest} §7was failed; quest duration expired."
     finishedBySomeoneElse: "Quest §6{quest} §7was failed; it was finished by someone else."
     notActual: "Quest §6{quest} §7was failed; it's not relevant anymore."
+    destroyed: "Quest §6{quest} §7was failed; your quest item was destroyed!"
+    seal-broken: "Quest §6{quest} §7was failed; you broke the seal and stole the contents!"
   accepted: "You have accepted the quest §6{quest}§7."
   limit: "You can't have more than §6{playerQuestLimit} §7quests."
   already-accepted: "You already have this quest."
   description-missing: "Quest description missing."
+  seal-broken: "§cYou broke the seal and stole the contents!"
+  diplomatic-success: "§6[Diplomacy] §eYour actions have positively influenced the relations between §b{settlementA} §eand §b{settlementB}§e!"
+  diplomatic-fail: "§4[Diplomacy] §cYour actions have worsened the relations between §b{settlementA} §cand §b{settlementB}§c."
+  delivery:
+    default-item-name: "Sealed Package"
+    default-item-lore: "A highly important sealed parcel."
+    default-letter-content: "We must stand together."
+    package-lore:
+      - "§7{itemLore}"
+      - ""
+      - "§8Highly important political parcel."
+      - "§e[Right-Click] §7to break the seal and open."
+      - "§4WARNING: Opening this will fail the quest!"
+    book-title: "§6Letter from {sender}"
+    default-sender: "Leader"
 
 party:
   member: "§b{playerName}'s Group Member"

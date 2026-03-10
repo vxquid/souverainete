@@ -309,7 +309,6 @@ class SettlementManager : Listener {
         val worldSettlements = settlements[world] ?: return
         val settlement = worldSettlements.find { it.territory.contains(blockVector) } ?: return
 
-        // NEW MECHANIC: If the player clicks the bell holding a compass, attune it instead of opening menu!
         val itemInHand = event.item
         if (itemInHand != null && itemInHand.type == Material.COMPASS) {
             event.isCancelled = true
@@ -399,6 +398,33 @@ class SettlementManager : Listener {
                 settlementA.data.relations[settlementB.data.id] = level
                 settlementB.data.relations[settlementA.data.id] = level
             }
+
+            saveSettlements(settlementA.world)
+            if (settlementA.world != settlementB.world) {
+                saveSettlements(settlementB.world)
+            }
+        }
+
+        /**
+         * Records a diplomatic event between two settlements.
+         * Keeps only the last 5 events to save memory and AI token limits.
+         */
+        fun recordDiplomaticEvent(settlementA: Settlement, settlementB: Settlement, event: String) {
+            val maxRecords = 5
+
+            // Initialize history if it's missing (backward compatibility with old saves)
+            if (settlementA.data.diplomaticHistory == null) settlementA.data.diplomaticHistory = mutableMapOf()
+            if (settlementB.data.diplomaticHistory == null) settlementB.data.diplomaticHistory = mutableMapOf()
+
+            // Record history for settlement A
+            val historyA = settlementA.data.diplomaticHistory!!.getOrPut(settlementB.data.id) { mutableListOf() }
+            historyA.add(event)
+            if (historyA.size > maxRecords) historyA.removeAt(0)
+
+            // Record history for settlement B
+            val historyB = settlementB.data.diplomaticHistory!!.getOrPut(settlementA.data.id) { mutableListOf() }
+            historyB.add(event)
+            if (historyB.size > maxRecords) historyB.removeAt(0)
 
             saveSettlements(settlementA.world)
             if (settlementA.world != settlementB.world) {
