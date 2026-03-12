@@ -231,7 +231,7 @@ class GameplayConfiguration {
         var lifetimeDuration: Long = 192000L
 
         @Comment("Interval in ticks for quest generation.")
-        var intervalTicks: Long = 1200L
+        var intervalTicks: Long = 2400L
 
         @Comment("Reputation score multiplier for quest completion.")
         var reputationMultiplier: Double = 0.005
