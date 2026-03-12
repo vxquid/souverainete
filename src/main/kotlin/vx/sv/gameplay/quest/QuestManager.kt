@@ -42,11 +42,11 @@ import vx.sv.gameplay.trade.ScoreCalculator.getBasicScore
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
 import vx.sv.persistent.LivingEntityExtend.hasEdibleItem
 import vx.sv.persistent.LivingEntityExtend.hunger
+import vx.sv.persistent.LivingEntityExtend.professionLevelName
 import vx.sv.persistent.LivingEntityExtend.questDataKey
 import vx.sv.persistent.LivingEntityExtend.quests
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
-import vx.sv.persistent.VillagerExtend.professionLevelName
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.net.URL
@@ -73,7 +73,7 @@ class QuestManager : Listener {
         plugin.server.pluginManager.registerEvents(this, plugin)
 
         // TODO; Don't forget to enable quest tick. I don't need it right now.
-        // plugin.server.scheduler.runTaskTimer(plugin, Runnable { tick() }, 0, plugin.gameplayManager.config.quest.intervalTicks)
+        plugin.server.scheduler.runTaskTimer(plugin, Runnable { tick() }, 0, plugin.gameplayManager.config.quest.intervalTicks)
         plugin.server.scheduler.runTaskTimer(plugin, Runnable { politicalTick() }, 100L, plugin.gameplayManager.config.quest.intervalTicks)
 
         gatheringDescription = plugin.prompts.getString("quest-family.gathering.quest-description")

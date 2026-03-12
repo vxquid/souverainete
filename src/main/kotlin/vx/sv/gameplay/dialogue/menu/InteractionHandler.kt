@@ -11,12 +11,10 @@ import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
+import org.bukkit.event.block.Action
 import org.bukkit.event.entity.EntityDamageByEntityEvent
 import org.bukkit.event.entity.EntityDeathEvent
-import org.bukkit.event.player.PlayerInteractEntityEvent
-import org.bukkit.event.player.PlayerInteractEvent
-import org.bukkit.event.player.PlayerJoinEvent
-import org.bukkit.event.player.PlayerQuitEvent
+import org.bukkit.event.player.*
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
@@ -45,9 +43,11 @@ import vx.sv.gameplay.quest.QuestManager.Quest
 import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
-import vx.sv.gameplay.settlement.getLedSettlementId // Needed for the new logic
+import vx.sv.gameplay.settlement.getLedSettlementId
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
+import vx.sv.persistent.MenuControlMode
+import vx.sv.persistent.PlayerPreferencesManager.preferences
 
 class InteractionHandler : Listener {
 
@@ -174,6 +174,42 @@ class InteractionHandler : Listener {
     private fun handlePlayerQuit(event: PlayerQuitEvent) {
         openedMenuList.removeIf { it.viewer == event.player }
     }
+
+    @EventHandler
+    private fun onPlayerItemHeld(event: PlayerItemHeldEvent) {
+        val player = event.player
+        val prefs = player.preferences
+
+        // Ignore if the player prefers aiming (cursor mode)
+        if (prefs.menuControl != MenuControlMode.SCROLL) return
+
+        val menu = openedMenuList.find { it.viewer == player } ?: return
+
+        // Prevent the actual hotbar visual change while in a menu
+        event.isCancelled = true
+
+        val diff = event.newSlot - event.previousSlot
+
+        // Calculate logical direction (+1 for scroll right/down, -1 for scroll left/up)
+        // Checks account for 0 <-> 8 hotbar wrap-around.
+        val direction = if (diff > 0) {
+            if (diff == 8) -1 else 1
+        } else {
+            if (diff == -8) 1 else -1
+        }
+
+        if (direction > 0) {
+            // NOTE: Ensure your Menu class has these methods implemented!
+            // Example implementation in Menu: fun selectNext() { selectedIndex = (selectedIndex + 1) % buttons.size; updateVisuals() }
+            menu.selectNext()
+            player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.3f, 1.2f)
+        } else {
+            menu.selectPrevious()
+            player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.3f, 1.2f)
+        }
+    }
+
+
 
     private fun showDialogueMenu(player: Player, villager: Villager) {
         val builder = Builder(villager, player)
@@ -401,8 +437,33 @@ class InteractionHandler : Listener {
         builder.build()
     }
 
+    /**
+     * Replaces your existing onPlayerInteract to support SCROLL mode confirmation clicks.
+     */
     @EventHandler
     private fun onPlayerInteract(event: PlayerInteractEvent) {
+        val player = event.player
+
+        // --- Handle confirmation click for SCROLL mode ---
+        val prefs = player.preferences
+        if (prefs.menuControl == MenuControlMode.SCROLL) {
+            val menu = openedMenuList.find { it.viewer == player }
+            if (menu != null) {
+                event.isCancelled = true // Prevent block breaking/item using/interaction
+
+                // Confirm selection on any click
+                if (event.action == Action.LEFT_CLICK_AIR || event.action == Action.LEFT_CLICK_BLOCK ||
+                    event.action == Action.RIGHT_CLICK_AIR || event.action == Action.RIGHT_CLICK_BLOCK) {
+
+                    menu.invokeSelected()
+                    menu.destroy()
+                    plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(menu.villager).talkingPlayer = null
+                }
+                return
+            }
+        }
+        // --------------------------------------------------
+
         event.clickedBlock?.let { block ->
             (block.blockData as? Bed)?.let { bed ->
                 if (bed.isOccupied) event.isCancelled = true

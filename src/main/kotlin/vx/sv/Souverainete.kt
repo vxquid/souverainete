@@ -16,9 +16,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import vx.sv.ai.ProviderManager
-import vx.sv.command.QuestCommand
-import vx.sv.command.SettlementCommand
-import vx.sv.command.TranslateCommand
+import vx.sv.command.*
 import vx.sv.config.lib.TranslationManager
 import vx.sv.gameplay.GameplayManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
@@ -158,7 +156,6 @@ class Souverainete : JavaPlugin(), Listener {
         gameplayManager.raidManager.disable()
     }
 
-    /* Gameplay-related stuff must be initialized post-world. */
     @EventHandler
     private fun onFirstWorldLoad(event: WorldLoadEvent) {
         if (server.worlds.indexOf(event.world) == 0) {
@@ -169,20 +166,30 @@ class Souverainete : JavaPlugin(), Listener {
             commandManager.registerCommand(QuestCommand())
             commandManager.registerCommand(TranslateCommand())
             commandManager.registerCommand(SettlementCommand())
+            commandManager.registerCommand(SettingsCommand()) // Register the new command
+
+            // Register GUI listener
+            server.pluginManager.registerEvents(SettingsGUIListener(), this)
         }
     }
 
     @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
+        // Handle admin updates alert
         if (event.player.hasPermission("sv.update")) {
-            if (latestVersion != null) {
-                if (updateAvailable) {
-                    val updateMsg = language.getString("update.new-version-available", "§cA new version of §6Souverainete §cis available: §e{newVersion}§c! Please update.")
-                        ?.replace("{newVersion}", latestVersion!!)
-                    event.player.sendFormattedMessage(updateMsg ?: "New version available: $latestVersion")
-                }
+            if (latestVersion != null && updateAvailable) {
+                val updateMsg = language.getString("update.new-version-available", "§cA new version of §6Souverainete §cis available: §e{newVersion}§c! Please update.")
+                    ?.replace("{newVersion}", latestVersion!!)
+                event.player.sendFormattedMessage(updateMsg ?: "New version available: $latestVersion")
             }
         }
+
+        // --- NEW: Settings Welcome Hint ---
+        val welcomeMsg = language.getString(
+            "info-messages.welcome-settings",
+            "§8[Souverainete] §7Server is running Souverainete. Customize your experience using §e/s settings§7."
+        )
+        welcomeMsg?.let { event.player.sendMessage(it) }
     }
 
     init {

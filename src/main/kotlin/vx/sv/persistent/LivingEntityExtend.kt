@@ -8,6 +8,7 @@ import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.Sound
 import org.bukkit.entity.LivingEntity
+import org.bukkit.entity.Villager
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
@@ -32,6 +33,8 @@ object LivingEntityExtend {
     val inventoryKey  = NamespacedKey(plugin, "Inventory")
     val settlementKey = NamespacedKey(plugin, "NPCSettlement")
     val hungerKey     = NamespacedKey(plugin, "Hunger")
+
+    val Villager.professionLevelName get() = when (villagerLevel) { 1 -> "NOVICE"; 2 -> "APPRENTICE"; 3 -> "JOURNEYMAN"; 4 -> "EXPERT"; else -> "MASTER" }
 
     fun LivingEntity.quests(): MutableList<Quest> =
         persistentDataContainer.get(questDataKey, PersistentDataType.STRING)?.let {

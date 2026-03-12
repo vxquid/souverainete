@@ -231,7 +231,7 @@ class GameplayConfiguration {
         var lifetimeDuration: Long = 192000L
 
         @Comment("Interval in ticks for quest generation.")
-        var intervalTicks: Long = 400L
+        var intervalTicks: Long = 1200L
 
         @Comment("Reputation score multiplier for quest completion.")
         var reputationMultiplier: Double = 0.005
@@ -245,7 +245,7 @@ class GameplayConfiguration {
         @Comment("Maximum number of quests a player can have.")
         var playerQuestLimit: Int = 4
 
-        @Comment("Base number of quests an NPC can have (added to villager level).")
+        @Comment("Base number of quests an NPC can have (added to villager profession level).")
         var npcQuestBase: Int = 1
     }
 

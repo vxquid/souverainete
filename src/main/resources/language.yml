@@ -189,6 +189,7 @@ command-message:
 
 info-messages:
   premium-only: "This feature is only available in the premium version."
+  welcome-settings: "§7Server is running Souverainete. Customize your experience using §e/s settings§7."
   quest-chat-info:
     quest-giver: "NPC: §6{npcName}"
     task-description: "Task Description: §f{desc}"
@@ -264,3 +265,16 @@ politics:
   war-declared: "§c⚔ WAR! §6{attacker} §chas formally declared war on §6{defender}§c!"
   alliance-gifts: "§a🎁 §6{sender} §ahas sent a caravan of diplomatic gifts to their ally, §6{receiver}§a."
   diplomatic-incident: "§c⚠ Diplomatic Incident! Relations between §6{settlementA} §cand §6{settlementB} §care severely damaged and are now tense."
+
+settings:
+  gui:
+    title: "Personal Settings"
+    filler-name: " "
+    menu-control:
+      name: "§eInteraction Menu Control"
+      mode-cursor: "§aCursor (Aiming)"
+      mode-scroll: "§bScroll (Hotbar)"
+      lore:
+        - "§7Current mode: {current}"
+        - ""
+        - "§eClick to toggle!"

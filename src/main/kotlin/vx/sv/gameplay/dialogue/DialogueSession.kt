@@ -33,9 +33,9 @@ import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
+import vx.sv.persistent.LivingEntityExtend.professionLevelName
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
-import vx.sv.persistent.VillagerExtend.professionLevelName
 import vx.sv.util.Daytime
 
 class DialogueSession(val player: Player, val entity: Villager) : Listener, PacketListenerAbstract(PacketListenerPriority.HIGHEST) {

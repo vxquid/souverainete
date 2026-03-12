@@ -20,9 +20,9 @@ import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
+import vx.sv.persistent.LivingEntityExtend.professionLevelName
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.LivingEntityExtend.subInventory
-import vx.sv.persistent.VillagerExtend.professionLevelName
 import vx.sv.util.HexColorLib.color
 import java.util.*
 import kotlin.random.Random
