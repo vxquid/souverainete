@@ -1,4 +1,5 @@
 import xyz.jpenilla.resourcefactory.bukkit.BukkitPluginYaml
+import xyz.jpenilla.resourcefactory.bukkit.Permission
 
 plugins {
   kotlin("jvm") version "2.0.0"
@@ -20,6 +21,14 @@ bukkitPluginYaml {
   softDepend = listOf("MythicMobs")
   authors.add("vxquid")
   apiVersion = "1.21"
+
+  permissions {
+    register("sv.player.settings") {
+      description = "Allows opening the settings menu."
+      default = Permission.Default.TRUE
+    }
+  }
+
 }
 
 repositories {
