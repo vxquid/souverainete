@@ -287,14 +287,14 @@ class ReputationTracker : Listener {
             val humanoid = plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(npc)
 
             if (isFullCombat) {
-                humanoid.attack(target)
+                humanoid?.attack(target)
             } else {
                 // Annoyance mode: just one punch
                 if (target is Player) {
-                    humanoid.attack(target, 1)
+                    humanoid?.attack(target, 1)
                     annoyanceTimers.remove(npc.uniqueId to target.uniqueId)
                 } else {
-                    humanoid.attack(target) // NPCs always full attack other NPCs if provoked
+                    humanoid?.attack(target) // NPCs always full attack other NPCs if provoked
                 }
             }
         } catch (_: Exception) {

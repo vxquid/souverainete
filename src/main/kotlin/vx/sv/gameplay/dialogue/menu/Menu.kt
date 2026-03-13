@@ -75,7 +75,7 @@ class Menu(
 
         updateSelection() // Update colors every tick for smooth rainbow buttons
 
-        plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager).talkingPlayer = viewer
+        plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager)?.talkingPlayer = viewer
     }
 
     private fun updatePosition() {

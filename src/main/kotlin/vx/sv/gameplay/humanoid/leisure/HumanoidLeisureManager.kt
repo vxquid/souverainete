@@ -399,7 +399,7 @@ class HumanoidLeisureManager : Listener {
 
         val sound = if (isDrink) Sound.ENTITY_GENERIC_DRINK else Sound.ENTITY_GENERIC_EAT
 
-        humanoid.consume(npc.world, item, sound, 7, npc.location, 7) {
+        humanoid?.consume(npc.world, item, sound, 7, npc.location, 7) {
             // Visual consumption completed; no status effects are applied.
         }
     }

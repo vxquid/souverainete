@@ -143,7 +143,7 @@ class InteractionHandler : Listener {
         openedMenuList.find { it.viewer == player }?.let { menu ->
             menu.invokeSelected()
             menu.destroy()
-            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager).talkingPlayer = null
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager)?.talkingPlayer = null
             return
         }
 
@@ -457,7 +457,7 @@ class InteractionHandler : Listener {
 
                     menu.invokeSelected()
                     menu.destroy()
-                    plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(menu.villager).talkingPlayer = null
+                    plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(menu.villager)?.talkingPlayer = null
                 }
                 return
             }

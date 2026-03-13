@@ -239,14 +239,31 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     }
 
     private fun manageChunkLoading(load: Boolean) {
-        val centerChunk = defender.data.center.chunk
+        val center = defender.data.center
         val world = defender.world
+
+        // Математически вычисляем координаты чанка (сдвиг вправо на 4 эквивалентен делению на 16).
+        // Мы убрали вызов .chunk, так как он тоже синхронно грузит центральный чанк!
+        val centerChunkX = center.blockX shr 4
+        val centerChunkZ = center.blockZ shr 4
 
         for (x in -forceLoadRadius..forceLoadRadius) {
             for (z in -forceLoadRadius..forceLoadRadius) {
-                val cx = centerChunk.x + x
-                val cz = centerChunk.z + z
-                world.getChunkAt(cx, cz).isForceLoaded = load
+                val cx = centerChunkX + x
+                val cz = centerChunkZ + z
+
+                if (load) {
+                    // Решение вашего FIXME: проверяем, существует ли чанк.
+                    // Метод isChunkGenerated читает только заголовки файлов и работает моментально.
+                    if (world.isChunkGenerated(cx, cz)) {
+                        // Добавляем тикет плагина. Эта операция НЕ вызывает getChunkAt() и
+                        // ставит чанк в очередь на асинхронную загрузку, спасая TPS сервера.
+                        world.addPluginChunkTicket(cx, cz, plugin)
+                    }
+                } else {
+                    // Плагинный тикет безопасно удаляется
+                    world.removePluginChunkTicket(cx, cz, plugin)
+                }
             }
         }
         chunksLocked = load
@@ -413,7 +430,7 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     private fun performAttack(attacker: Mob, target: LivingEntity?) {
         if (target == null) return
         try {
-            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(attacker).attack(target)
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(attacker)?.attack(target)
             attacker.target = target
         } catch (e: Exception) {
             attacker.target = target
@@ -588,7 +605,7 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         try {
             val humanoid = plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(raider)
             loadout.forEach { (slot, item) ->
-                humanoid.equip(slot, item)
+                humanoid?.equip(slot, item)
             }
         } catch (_: Exception) {
             raider.equipment?.let { eq ->

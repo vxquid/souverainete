@@ -4,6 +4,7 @@ import net.minecraft.world.entity.EntityType
 import net.minecraft.world.entity.npc.Villager
 import net.minecraft.world.level.storage.PrimaryLevelData
 import org.bukkit.craftbukkit.entity.CraftLivingEntity
+import org.bukkit.entity.LivingEntity
 import org.bukkit.plugin.java.JavaPlugin
 import vx.sv.nms.EntityProvider
 import vx.sv.nms.EntityProvider.Humanoid
@@ -17,10 +18,8 @@ class VersionSpecificHumanoidEntityProvider(override val plugin: JavaPlugin) : E
         Companion.plugin = this.plugin
     }
 
-    override fun asHumanoid(entity: org.bukkit.entity.LivingEntity): Humanoid {
-        return ((entity as CraftLivingEntity).handle as HumanoidVillager) as? Humanoid ?: run {
-            throw ClassCastException("Entity ${entity.type} is not humanoid instance!")
-        }
+    override fun asHumanoid(entity: LivingEntity): Humanoid? {
+        return ((entity as CraftLivingEntity).handle as? HumanoidVillager) as? Humanoid
     }
 
     @Suppress("UNCHECKED_CAST")

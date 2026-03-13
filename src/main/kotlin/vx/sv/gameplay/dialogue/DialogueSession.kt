@@ -50,7 +50,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
                 HandlerList.unregisterAll(this)
                 PacketEvents.getAPI().eventManager.unregisterListener(this)
                 activeDialogueSessions.remove(this)
-                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = null
+                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = null
             }
             field = value
         }
@@ -90,7 +90,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         if (timeout || tooFar || differentWorld || someoneIsDead) {
             this.cancelled = true
         } else {
-            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = player // TODO, ВАЖНО: Пример того, как можно получить экземпляр гуманоида избегая NMS
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = player // TODO, ВАЖНО: Пример того, как можно получить экземпляр гуманоида избегая NMS
         }
 
     }
@@ -389,11 +389,11 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
 
                             // Реализация агрессии
                             Directive.PUNCH -> {
-                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).attack(player, 1) // 1 = maxStrikes, call it "punch quota"
+                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.attack(player, 1) // 1 = maxStrikes, call it "punch quota"
                                 this.cancelled = true // Разговор после удара обычно заканчивается
                             }
                             Directive.KILL -> {
-                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).attack(player)
+                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.attack(player)
                                 this.cancelled = true
                             }
 

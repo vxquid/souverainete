@@ -213,7 +213,7 @@ class DialogueManager {
                             display.text += "$word "
                             player.playSound(entity.location, voice, 1F, pitch)
                             if (follow && !isHologram) {
-                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = player
+                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = player
                             }
                         }
 
@@ -256,7 +256,7 @@ class DialogueManager {
 
         fun destroy() {
             display.remove()
-            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity).talkingPlayer = null
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = null
             dialogues.remove(player to entity, this@DialogueWindow)
             isDestroyed = true
         }

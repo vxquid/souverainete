@@ -13,7 +13,7 @@ interface EntityProvider {
 
     val plugin: JavaPlugin
 
-    fun asHumanoid(entity: LivingEntity): Humanoid
+    fun asHumanoid(entity: LivingEntity): Humanoid?
     fun replaceEntityTypes()
 
     interface Humanoid {
