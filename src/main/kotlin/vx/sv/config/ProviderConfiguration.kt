@@ -19,14 +19,14 @@ class ProviderConfiguration {
     var providerType: ProviderType = ProviderType.CEREBRAS
 
     @Comment(
-        "For CEREBRAS, default model is \"gpt-oss-120b\".",
+        "For CEREBRAS, default model is \"qwen-3-235b-a22b-instruct-2507\".",
         "For GEMINI, default model is \"gemini-2.5-flash-lite\".",
         "For OPENROUTER, default model is \"google/gemini-2.5-flash-lite\".",
         "For GROQ, I recommend \"openai/gpt-oss-120b\".",
         "For DEEPSEEK, default model is \"deepseek-chat\".",
         "For ANYTHINGLLM, this usually depends on your workspace settings. You can often leave it as \"gpt-3.5-turbo\" for compatibility."
     )
-    var model = "gpt-oss-120b"
+    var model = "qwen-3-235b-a22b-instruct-2507"
 
     @Comment(
         "The API Endpoint URL. Required ONLY for self-hosted providers like ANYTHINGLLM.",

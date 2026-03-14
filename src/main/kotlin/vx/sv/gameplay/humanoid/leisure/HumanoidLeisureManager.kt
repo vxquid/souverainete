@@ -17,6 +17,7 @@ import org.bukkit.inventory.meta.PotionMeta
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.dialogue.DialogueSession
 import vx.sv.gameplay.dialogue.menu.InteractionHandler
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.random.Random
 
@@ -50,7 +51,9 @@ class HumanoidLeisureManager : Listener {
         val startTime: Long = System.currentTimeMillis()
     )
 
-    private val activeSessions = mutableMapOf<Villager, LeisureSession>()
+    // Using ConcurrentHashMap prevents CMEs if an event (like EntityDamageEvent) removes
+    // an entity during the ticker's iterator loop.
+    private val activeSessions = ConcurrentHashMap<Villager, LeisureSession>()
     private val occupiedSeats = mutableSetOf<Location>()
 
     init {
@@ -63,7 +66,7 @@ class HumanoidLeisureManager : Listener {
             val candidate = plugin.server.worlds
                 .filter { plugin.gameplayManager.allowedWorlds.contains(it) }
                 // Restrict leisure search during the night, as NPCs should be sleeping.
-                .filter { it.time !in config.time.nightStart..config.time.nightEnd }
+                .filter { !isNightTime(it.time) }
                 .flatMap { it.entities }
                 .filterIsInstance<Villager>()
                 .filter {
@@ -92,15 +95,15 @@ class HumanoidLeisureManager : Listener {
                 val session = iterator.next()
                 val npc = session.villager
 
-                // Invalidate session if the NPC is dead or no longer valid (e.g. chunk unexpectedly unloaded)
-                if (!npc.isValid || npc.isDead) {
+                // Invalidate session if the NPC is dead, no longer valid, or somehow changed worlds.
+                if (!npc.isValid || npc.isDead || npc.world != session.targetSeat.world) {
                     standUp(npc, session) // Ensures attributes are safely reset
                     iterator.remove()
                     continue
                 }
 
                 // Force NPCs sitting outdoors to stand up and go home when night falls
-                val isNight = npc.world.time in config.time.nightStart..config.time.nightEnd
+                val isNight = isNightTime(npc.world.time)
                 if (isNight && session.preference == Preference.OUTDOOR) {
                     standUp(npc, session)
                     iterator.remove()
@@ -137,10 +140,16 @@ class HumanoidLeisureManager : Listener {
     // CORE LOGIC
     // =======================================================================================
 
-    /**
-     * Checks if the 3x3 area around a potential seat is already occupied.
-     * Enforces a personal space rule so NPCs do not sit shoulder-to-shoulder.
-     */
+    private fun isNightTime(time: Long): Boolean {
+        val start = config.time.nightStart
+        val end = config.time.nightEnd
+        return if (start < end) {
+            time in start..end
+        } else {
+            time !in (end + 1)..<start
+        }
+    }
+
     private fun isPersonalSpaceInvaded(loc: Location, occupiedSet: Set<Location> = occupiedSeats): Boolean {
         for (dx in -1..1) {
             for (dz in -1..1) {
@@ -152,18 +161,19 @@ class HumanoidLeisureManager : Listener {
         return false
     }
 
-    /**
-     * Initiates an asynchronous search for the best seating block around the NPC.
-     */
     private fun startLeisureSearch(npc: Villager) {
-        val centerChunk = npc.location.chunk
         val world = npc.world
+        val centerChunk = npc.location.chunk
 
-        // Determine NPC's environmental preference based on configuration
+        // Synchronously capture metadata
+        val npcY = npc.location.blockY
+        val minHeight = world.minHeight
+        val maxHeight = world.maxHeight
+        val occupiedSnapshot = occupiedSeats.toSet()
+
         val desiredPreference = if (Random.nextDouble() < config.interaction.indoorPreferenceChance) Preference.INDOOR else Preference.OUTDOOR
         val isSocial = Random.nextBoolean()
 
-        // Synchronously collect snapshots of a 3x3 chunk area to allow safe async block reading.
         val snapshots = mutableListOf<org.bukkit.ChunkSnapshot>()
         for (dx in -1..1) {
             for (dz in -1..1) {
@@ -173,24 +183,24 @@ class HumanoidLeisureManager : Listener {
             }
         }
 
-        // Shift to async thread to perform the heavy block evaluation
         plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
-            val npcY = npc.location.blockY
-            val candidates = mutableListOf<Pair<Location, Int>>() // Maps a Location to its calculated Score
-            val campfires = mutableListOf<Triple<Int, Int, Int>>() // Stores campfire coordinates: worldX, y, worldZ
+            val candidates = mutableListOf<Pair<Location, Int>>()
+            val campfires = mutableListOf<Triple<Int, Int, Int>>()
 
-            // Lambda for fast, cross-chunk block material retrieval
             val getMat = { wx: Int, wy: Int, wz: Int ->
                 val cx = wx shr 4
                 val cz = wz shr 4
                 val snap = snapshots.find { it.x == cx && it.z == cz }
-                snap?.getBlockType(wx and 15, wy, wz and 15) ?: Material.AIR
+                if (snap != null && wy in minHeight until maxHeight) {
+                    snap.getBlockType(wx and 15, wy, wz and 15)
+                } else {
+                    Material.AIR
+                }
             }
 
-            // Pre-pass: Scan for campfires to potentially boost outdoor seating priority.
-            // A slightly larger vertical range is used to ensure ground-level campfires are found.
             for (snapshot in snapshots) {
                 for (y in (npcY - 4)..(npcY + 4)) {
+                    if (y !in minHeight until maxHeight) continue
                     for (x in 0..15) {
                         for (z in 0..15) {
                             val mat = snapshot.getBlockType(x, y, z)
@@ -202,86 +212,66 @@ class HumanoidLeisureManager : Listener {
                 }
             }
 
-            // Main pass: Evaluate blocks for seating suitability
             for (snapshot in snapshots) {
                 for (y in (npcY - 3)..(npcY + 2)) {
+                    if (y !in minHeight until maxHeight) continue
                     for (x in 0..15) {
                         for (z in 0..15) {
                             val material = snapshot.getBlockType(x, y, z)
                             if (material.isAir) continue
 
                             val isStairs = material.name.endsWith("STAIRS")
-
-                            val worldX = (snapshot.x shl 4) + x
-                            val worldZ = (snapshot.z shl 4) + z
-
-                            if (isStairs) {
-                                val blockData = snapshot.getBlockData(x, y, z)
-                                if (blockData is org.bukkit.block.data.type.Stairs) {
-                                    // Ignore upside-down stairs as they are invalid seats
-                                    if (blockData.half == org.bukkit.block.data.Bisected.Half.TOP) continue
-
-                                    // Directional check: ensure there is no solid block directly in front of the seat.
-                                    // In Bukkit, the 'facing' of stairs is the back of the chair, so opposite is the front.
-                                    val frontFace = blockData.facing.oppositeFace
-                                    val frontX = worldX + frontFace.modX
-                                    val frontZ = worldZ + frontFace.modZ
-
-                                    val frontMat = getMat(frontX, y, frontZ)
-                                    val frontMatUp = getMat(frontX, y + 1, frontZ)
-
-                                    // Skip if the legs or torso area in front of the stair is blocked
-                                    if (frontMat.isSolid || frontMatUp.isSolid) continue
-                                }
-
-                                // Staircase filter: Check Y+1 and Y-1 to differentiate a bench from an actual staircase.
-                                // If adjacent stairs are detected vertically, it indicates an elevation structure.
-                                var isStaircase = false
-                                for (dx in -1..1) {
-                                    for (dz in -1..1) {
-                                        val matUp = getMat(worldX + dx, y + 1, worldZ + dz)
-                                        val matDown = getMat(worldX + dx, y - 1, worldZ + dz)
-                                        if (matUp.name.endsWith("STAIRS") || matDown.name.endsWith("STAIRS")) {
-                                            isStaircase = true
-                                            break
-                                        }
-                                    }
-                                    if (isStaircase) break
-                                }
-                                if (isStaircase) continue
-                            }
-
                             val isSolid = material.isSolid
 
                             if (isStairs || isSolid) {
-                                val loc = Location(world, worldX.toDouble(), y.toDouble(), worldZ.toDouble())
+                                val worldX = (snapshot.x shl 4) + x
+                                val worldZ = (snapshot.z shl 4) + z
 
-                                // Skip if the seat is already reserved
-                                if (occupiedSeats.contains(loc)) continue
+                                if (isStairs) {
+                                    val blockData = snapshot.getBlockData(x, y, z)
+                                    if (blockData is org.bukkit.block.data.type.Stairs) {
+                                        if (blockData.half == org.bukkit.block.data.Bisected.Half.TOP) continue
 
-                                // Enforce personal space to prevent overlapping or intimately close NPCs
-                                if (isPersonalSpaceInvaded(loc)) continue
+                                        val frontFace = blockData.facing.oppositeFace
+                                        val frontX = worldX + frontFace.modX
+                                        val frontZ = worldZ + frontFace.modZ
 
-                                // Ensure there are at least 2 empty blocks above the seat to prevent head collision
-                                if (!snapshot.getBlockType(x, y + 1, z).isAir || !snapshot.getBlockType(x, y + 2, z).isAir) {
-                                    continue
+                                        val frontMat = getMat(frontX, y, frontZ)
+                                        val frontMatUp = getMat(frontX, y + 1, frontZ)
+
+                                        if (frontMat.isSolid || frontMatUp.isSolid) continue
+                                    }
+
+                                    var isStaircase = false
+                                    for (dx in -1..1) {
+                                        for (dz in -1..1) {
+                                            val matUp = getMat(worldX + dx, y + 1, worldZ + dz)
+                                            val matDown = getMat(worldX + dx, y - 1, worldZ + dz)
+                                            if (matUp.name.endsWith("STAIRS") || matDown.name.endsWith("STAIRS")) {
+                                                isStaircase = true
+                                                break
+                                            }
+                                        }
+                                        if (isStaircase) break
+                                    }
+                                    if (isStaircase) continue
                                 }
 
-                                var score = 0
+                                val loc = Location(world, worldX.toDouble(), y.toDouble(), worldZ.toDouble())
 
-                                // Determine if the seat is indoor or outdoor based on the highest block Y
+                                if (occupiedSnapshot.contains(loc)) continue
+                                if (isPersonalSpaceInvaded(loc, occupiedSnapshot)) continue
+                                if (!getMat(worldX, y + 1, worldZ).isAir || !getMat(worldX, y + 2, worldZ).isAir) continue
+
+                                var score = 0
                                 val highestY = snapshot.getHighestBlockYAt(x, z)
                                 val isIndoor = highestY > y + 2
                                 val actualPreference = if (isIndoor) Preference.INDOOR else Preference.OUTDOOR
 
-                                // Add score for matching the NPC's desired preference
                                 if (actualPreference == desiredPreference) score += config.scoring.preferenceMatchBonus
-                                // Provide a base priority for indoor environments to encourage home usage
                                 if (isIndoor) score += config.scoring.indoorBaseBonus
-                                // Prioritize proper stair blocks over raw solid blocks
                                 if (isStairs) score += config.scoring.stairBonus
 
-                                // Social intelligence check: if this is a stair block with adjacent stairs, it's a bench.
                                 if (isStairs) {
                                     val neighbors = listOf(
                                         Pair(worldX + 1, worldZ), Pair(worldX - 1, worldZ),
@@ -296,10 +286,8 @@ class HumanoidLeisureManager : Listener {
                                     }
                                 }
 
-                                // Campfire priority: If looking for an outdoor seat, prioritize locations near fire.
                                 if (desiredPreference == Preference.OUTDOOR && actualPreference == Preference.OUTDOOR) {
                                     val nearCampfire = campfires.any { cf ->
-                                        // Detection radius: 6 blocks horizontally, 2 blocks vertically
                                         abs(cf.first - worldX) <= 6 && abs(cf.second - y) <= 2 && abs(cf.third - worldZ) <= 6
                                     }
                                     if (nearCampfire) {
@@ -314,14 +302,15 @@ class HumanoidLeisureManager : Listener {
                 }
             }
 
-            // Select the highest-scoring seat
             val bestSeat = candidates.maxByOrNull { it.second } ?: return@Runnable
 
-            // Return to the main thread to assign the seat and handle entities
             plugin.server.scheduler.runTask(plugin, Runnable {
+                // Safety guard: NPC could have died/unloaded or been assigned another task while the async calculation ran
+                if (!npc.isValid || npc.isDead || activeSessions.containsKey(npc)) return@Runnable
+                if (occupiedSeats.contains(bestSeat.first)) return@Runnable
+
                 assignSeat(npc, bestSeat.first, desiredPreference)
 
-                // If the NPC is social and found a high-value bench, invite nearby friends
                 if (isSocial && bestSeat.second >= config.scoring.minScoreForSocialInvite) {
                     val friends = npc.getNearbyEntities(config.interaction.socialInviteRadiusX, config.interaction.socialInviteRadiusY, config.interaction.socialInviteRadiusZ)
                         .filterIsInstance<Villager>()
@@ -329,7 +318,6 @@ class HumanoidLeisureManager : Listener {
                         .shuffled()
                         .take(Random.nextInt(1, config.interaction.maxFriendsToInvite + 1))
 
-                    // Attempt to seat friends on valid adjacent blocks
                     val friendSeats = getAdjacentFreeSeats(bestSeat.first, friends.size)
                     friends.forEachIndexed { index, friend ->
                         friendSeats.getOrNull(index)?.let { fLoc ->
@@ -363,25 +351,23 @@ class HumanoidLeisureManager : Listener {
             return
         }
 
-        // Manage pathfinding through the Paper API
+        // Manage pathfinding through the Paper API safely
         val pathfinder: Pathfinder = npc.pathfinder
-        if (!pathfinder.hasPath() || pathfinder.currentPath?.finalPoint?.distanceSquared(target)!! > config.pathing.repathDistanceSquared) {
+        val finalPoint = pathfinder.currentPath?.finalPoint
+        val distanceSq = finalPoint?.distanceSquared(target) ?: Double.MAX_VALUE
+
+        if (!pathfinder.hasPath() || distanceSq > config.pathing.repathDistanceSquared) {
             pathfinder.moveTo(target, config.pathing.walkSpeed)
         }
     }
 
     private fun handleSitting(session: LeisureSession) {
         val npc = session.villager
-
-        // Chance per second to consume a random visual food or drink item
         if (Random.nextDouble() < config.interaction.consumptionChancePerSecond) {
             triggerRandomConsumption(npc)
         }
     }
 
-    /**
-     * Creates a visual-only consumption effect (eating or drinking) for the NPC.
-     */
     private fun triggerRandomConsumption(npc: Villager) {
         val humanoid = plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(npc)
 
@@ -389,7 +375,7 @@ class HumanoidLeisureManager : Listener {
         val item = if (isDrink) {
             ItemStack(Material.POTION).apply {
                 val meta = itemMeta as PotionMeta
-                meta.color = org.bukkit.Color.fromRGB(Random.nextInt(255), Random.nextInt(255), Random.nextInt(255))
+                meta.color = org.bukkit.Color.fromRGB(Random.nextInt(256), Random.nextInt(256), Random.nextInt(256))
                 itemMeta = meta
             }
         } else {
@@ -406,6 +392,9 @@ class HumanoidLeisureManager : Listener {
 
     private fun standUp(npc: Villager, session: LeisureSession) {
         plugin.gameplayManager.humanoidManager.protocolListener.actionController.toggleSitting(npc, false)
+        if (session.state == LeisureState.PATHING) {
+            npc.pathfinder.stopPathfinding()
+        }
         freeSeat(session)
     }
 
@@ -413,56 +402,74 @@ class HumanoidLeisureManager : Listener {
         occupiedSeats.remove(session.targetSeat)
     }
 
-    /**
-     * Evaluates seating availability for friends around a central location, enforcing a strict personal distance.
-     */
     private fun getAdjacentFreeSeats(center: Location, count: Int): List<Location> {
         val seats = mutableListOf<Location>()
-        val tempOccupied = occupiedSeats.toMutableSet() // Local copy to prevent friends from sitting next to each other
-
-        // Offsets represent a minimum of 1 empty block gap (i.e., distance of 2 or 3 blocks).
-        val offsets = listOf(
-            Pair(2, 0), Pair(-2, 0), Pair(0, 2), Pair(0, -2), // 1 block gap straight
-            Pair(2, 2), Pair(-2, -2), Pair(2, -2), Pair(-2, 2), // 1 block gap diagonally
-            Pair(3, 0), Pair(-3, 0), Pair(0, 3), Pair(0, -3) // Further check for longer benches
-        )
+        val tempOccupied = occupiedSeats.toMutableSet()
         val world = center.world
+        val minHeight = world.minHeight
+        val maxHeight = world.maxHeight
+
+        val offsets = listOf(
+            Pair(2, 0), Pair(-2, 0), Pair(0, 2), Pair(0, -2),
+            Pair(2, 2), Pair(-2, -2), Pair(2, -2), Pair(-2, 2),
+            Pair(3, 0), Pair(-3, 0), Pair(0, 3), Pair(0, -3)
+        )
 
         for (offset in offsets) {
             if (seats.size >= count) break
             val checkLoc = center.clone().add(offset.first.toDouble(), 0.0, offset.second.toDouble())
+
+            if (checkLoc.blockY !in minHeight until maxHeight) continue
+
+            // Guard against evaluating unloaded chunks synchronously.
+            if (!world.isChunkLoaded(checkLoc.blockX shr 4, checkLoc.blockZ shr 4)) continue
+
             val block = checkLoc.block
             val mat = block.type
-            var isSeat = mat.name.endsWith("STAIRS")
+            var isSeat = mat.name.endsWith("STAIRS") || mat.isSolid
 
-            if (isSeat) {
+            if (mat.name.endsWith("STAIRS")) {
                 val bData = block.blockData
                 if (bData is org.bukkit.block.data.type.Stairs) {
                     if (bData.half == org.bukkit.block.data.Bisected.Half.TOP) {
                         isSeat = false
                     } else {
-                        // Ensure the space in front of the friend's seat is not blocked
                         val frontFace = bData.facing.oppositeFace
-                        val frontBlock = block.getRelative(frontFace)
-                        val frontBlockUp = frontBlock.getRelative(BlockFace.UP)
+                        val frontX = checkLoc.blockX + frontFace.modX
+                        val frontZ = checkLoc.blockZ + frontFace.modZ
 
-                        if (frontBlock.type.isSolid || frontBlockUp.type.isSolid) {
+                        // Guard for the block directly in front of the stairs
+                        if (!world.isChunkLoaded(frontX shr 4, frontZ shr 4)) {
                             isSeat = false
+                        } else {
+                            val frontBlock = block.getRelative(frontFace)
+                            val frontBlockUp = frontBlock.getRelative(BlockFace.UP)
+
+                            if (frontBlock.type.isSolid || frontBlockUp.type.isSolid) {
+                                isSeat = false
+                            }
                         }
                     }
                 }
 
-                // Re-apply the staircase elevation filter for friend seating
                 if (isSeat) {
                     var isStaircase = false
                     for (dx in -1..1) {
                         for (dz in -1..1) {
-                            val up = world.getBlockAt(checkLoc.blockX + dx, checkLoc.blockY + 1, checkLoc.blockZ + dz).type
-                            val down = world.getBlockAt(checkLoc.blockX + dx, checkLoc.blockY - 1, checkLoc.blockZ + dz).type
-                            if (up.name.endsWith("STAIRS") || down.name.endsWith("STAIRS")) {
-                                isStaircase = true
-                                break
+                            val neighborX = checkLoc.blockX + dx
+                            val neighborZ = checkLoc.blockZ + dz
+
+                            if (!world.isChunkLoaded(neighborX shr 4, neighborZ shr 4)) continue
+
+                            if (checkLoc.blockY + 1 < maxHeight) {
+                                val up = world.getBlockAt(neighborX, checkLoc.blockY + 1, neighborZ).type
+                                if (up.name.endsWith("STAIRS")) isStaircase = true
                             }
+                            if (checkLoc.blockY - 1 >= minHeight) {
+                                val down = world.getBlockAt(neighborX, checkLoc.blockY - 1, neighborZ).type
+                                if (down.name.endsWith("STAIRS")) isStaircase = true
+                            }
+                            if (isStaircase) break
                         }
                         if (isStaircase) break
                     }
@@ -471,13 +478,13 @@ class HumanoidLeisureManager : Listener {
             }
 
             if (isSeat && !tempOccupied.contains(checkLoc)) {
-                // Ensure the friend respects the personal space constraint based on the local occupied map
                 if (isPersonalSpaceInvaded(checkLoc, tempOccupied)) continue
 
-                // Check for head clearance
-                if (checkLoc.clone().add(0.0, 1.0, 0.0).block.type.isAir) {
+                if (checkLoc.blockY + 2 < maxHeight &&
+                    checkLoc.clone().add(0.0, 1.0, 0.0).block.type.isAir &&
+                    checkLoc.clone().add(0.0, 2.0, 0.0).block.type.isAir) {
                     seats.add(checkLoc)
-                    tempOccupied.add(checkLoc) // Reserve locally to maintain spacing for the next friend
+                    tempOccupied.add(checkLoc)
                 }
             }
         }
@@ -490,16 +497,12 @@ class HumanoidLeisureManager : Listener {
     @EventHandler
     fun onPluginDisable(event: PluginDisableEvent) {
         if (event.plugin == plugin) {
-            // Force all NPCs to stand up before the server stops or the plugin reloads.
-            // This prevents their sitting attributes from being permanently stuck in their NBT data.
             val iterator = activeSessions.values.iterator()
             while (iterator.hasNext()) {
                 val session = iterator.next()
                 try {
                     standUp(session.villager, session)
-                } catch (_: Exception) {
-                    // Fail silently during shutdown sequence if entities are already invalidated
-                }
+                } catch (_: Exception) {}
                 iterator.remove()
             }
             occupiedSeats.clear()
@@ -509,11 +512,17 @@ class HumanoidLeisureManager : Listener {
     @EventHandler
     fun onChunkUnload(event: ChunkUnloadEvent) {
         val chunk = event.chunk
-        // Prevent attributes from getting stuck when the chunk they are in gets unloaded
         val iterator = activeSessions.values.iterator()
         while (iterator.hasNext()) {
             val session = iterator.next()
-            if (session.villager.location.chunk == chunk) {
+            val npcLoc = session.villager.location
+            val seatLoc = session.targetSeat
+
+            // Cancel session if either the NPC or its designated destination gets unloaded
+            val isNpcInChunk = npcLoc.world == chunk.world && (npcLoc.blockX shr 4) == chunk.x && (npcLoc.blockZ shr 4) == chunk.z
+            val isSeatInChunk = seatLoc.world == chunk.world && (seatLoc.blockX shr 4) == chunk.x && (seatLoc.blockZ shr 4) == chunk.z
+
+            if (isNpcInChunk || isSeatInChunk) {
                 standUp(session.villager, session)
                 iterator.remove()
             }
@@ -525,7 +534,6 @@ class HumanoidLeisureManager : Listener {
         val npc = event.entity as? Villager ?: return
         val session = activeSessions[npc] ?: return
 
-        // Interrupt leisure session upon taking any damage
         standUp(npc, session)
         activeSessions.remove(npc)
     }
@@ -534,7 +542,6 @@ class HumanoidLeisureManager : Listener {
     fun onNpcDeath(event: EntityDeathEvent) {
         val npc = event.entity as? Villager ?: return
         activeSessions.remove(npc)?.let { session ->
-            // Use standUp to ensure sitting attributes are fully cleared before the entity is destroyed
             standUp(npc, session)
         }
     }

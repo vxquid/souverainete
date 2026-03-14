@@ -115,14 +115,14 @@ class TranslateCommand : BaseCommand(), Listener {
     @CommandPermission("sv.admin.setup")
     @CommandCompletion("@providers")
     fun onSelectProvider(player: Player, @Values("@providers") type: String) {
-        val providerType = try { ProviderType.valueOf(type.uppercase()) } catch (e: Exception) {
+        val providerType = try { ProviderType.valueOf(type.uppercase()) } catch (_: Exception) {
             player.sendFormattedMessage(MSG_INVALID)
             return
         }
 
         // Configuration and URL mapping
         val (url, defaultModel) = when (providerType) {
-            ProviderType.CEREBRAS -> "https://cloud.cerebras.ai" to "gpt-oss-120b"
+            ProviderType.CEREBRAS -> "https://cloud.cerebras.ai" to "qwen-3-235b-a22b-instruct-2507"
             ProviderType.GEMINI -> "https://aistudio.google.com/app/apikey" to "google/gemini-2.5-flash-lite"
             ProviderType.GROQ -> "https://console.groq.com/keys" to "openai/gpt-oss-120b"
             ProviderType.OPENROUTER -> "https://openrouter.ai/keys" to "deepseek/deepseek-r1-0528:free"
