@@ -35,6 +35,7 @@ class ProviderConfiguration {
     )
     var url: String = "http://localhost:3001"
 
+    @Comment("The API key used to authenticate with the selected provider.")
     var apiKey: String = "YOUR_API_KEY"
 
     @Comment(
