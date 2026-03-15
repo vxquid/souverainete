@@ -303,8 +303,8 @@ class CerebrasClient(
         // Cerebras возвращает 429 для Rate Limit
         if (response.code == 429 || body.contains("quota") || body.contains("rate limit")) {
             key.quota = true
-            plugin.logger.info("Cerebras Quota/Rate Limit exceeded. Resetting key in 60 seconds.")
-            plugin.server.scheduler.runTaskLater(plugin, { _ -> key.quota = false }, 60 * 20)
+            plugin.logger.info("Cerebras Quota/Rate Limit exceeded. Resetting key in 5 seconds.")
+            plugin.server.scheduler.runTaskLater(plugin, { _ -> key.quota = false }, 5 * 20)
         } else {
             plugin.logger.warning("Cerebras Request Failed: ${response.code} - $body")
         }

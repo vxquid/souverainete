@@ -90,7 +90,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         if (timeout || tooFar || differentWorld || someoneIsDead) {
             this.cancelled = true
         } else {
-            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = player // TODO, ВАЖНО: Пример того, как можно получить экземпляр гуманоида избегая NMS
+            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = player
         }
 
     }
@@ -119,6 +119,9 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
 
         val wrapper = WrapperPlayClientChatMessage(event)
         val message = wrapper.message
+
+        // ИГНОРИРУЕМ сообщения, начинающиеся на '@' — их подхватит PartyChatManager!
+        if (message.startsWith("@")) return
 
         event.isCancelled = true
 
@@ -166,7 +169,6 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.toString() }.toString()
 
-        // Provide the racial leader title if the NPC is the settlement leader
         val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
 
         val placeholders = mapOf(
@@ -189,7 +191,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "dialogueHistory"    to if (dialogue.isEmpty()) "[NO PREVIOUS MESSAGES. IT IS THE START OF THE DIALOGUE. GREET THE PLAYER IF NEEDED.]" else dialogue.toString(),
             "shortMemory"        to shortMemory,
             "tradeReadiness"     to tradeReadiness,
-            "npcPartyStatus"     to partyStatus // НОВЫЙ ПЛЕЙСХОЛДЕР
+            "npcPartyStatus"     to partyStatus
         )
 
         val prompt = placeholders.entries.fold(plugin.prompts.getString("npc-chat")!!) { acc, entry ->
@@ -203,7 +205,6 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
                 player.spigot().sendMessage(ChatMessageType.ACTION_BAR, TextComponent.fromLegacy(plugin.language.getString("info-messages.npc-conversation.ai-overloaded")!!))
             }
         })
-
     }
 
     data class NPCGiftReaction(val npcResponse: List<String>, val memoryNode: String, val impression: String, val updatedOpinionOnPlayer: String, val keepTheGift: Boolean)
@@ -229,7 +230,6 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.key.key }.toString()
 
-        // Provide the racial leader title if the NPC is the settlement leader
         val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
 
         val placeholders = mapOf(
@@ -286,10 +286,8 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         if (!cancelled) {
             reaction.npcResponse.forEach { dialogueHistory.add("${entity.customName}: \"$it\" ->") }
 
-            // NPC memory modification.
             entity.getEmotionalMemory().let { memory ->
                 memory.shortMemory.add(reaction.memoryNode)
-                // Ограничение короткой памяти
                 if (memory.shortMemory.size > MAX_SHORT_MEMORY_SIZE) {
                     memory.shortMemory.removeAt(0)
                 }
@@ -299,20 +297,16 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
 
             val impression = Impression.valueOf(reaction.impression)
 
-            // Sending messages.
             var delay = 0L
             for (message in reaction.npcResponse) {
                 plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                    // Новая логика форматирования: аква курсив для сообщений-действий в астерисках
                     val formattedMessage = if (message.startsWith("*") && message.endsWith("*")) {
                         val cleanedMessage = message.removePrefix("*").removeSuffix("*")
-                        // Заменяем стандартный цвет §f на Aqua §b и Italic §o
                         npcResponseMessage
                             .replace("§f{message}", "§7§o{message}")
                             .replace("{npcName}", entity.customName ?: "NPC")
                             .replace("{message}", cleanedMessage)
                     } else {
-                        // Стандартное форматирование для обычных сообщений
                         npcResponseMessage
                             .replace("{npcName}", entity.customName ?: "NPC")
                             .replace("{message}", message)
@@ -320,16 +314,13 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
 
                     player.sendFormattedMessage(formattedMessage)
                     player.playSound(player.eyeLocation, XSound.UI_TOAST_IN.get() ?: throw NullPointerException(), 1F, 1.25F)
-                    // Handling directive only on last message of the response.
                     if (reaction.npcResponse.last() == message) {
                         if (!reaction.keepTheGift) {
                             entity.takeItemFromQuillInventory(gift, gift.amount)
                             entity.world.dropItem(entity.location, gift)
                         }
                         readyToSend = true
-                        // Modifying reputation after talking. We should add check for it.
                         plugin.gameplayManager.reputationManager.addReputation(entity, player, impression.score)
-                        // Force equipment update.
                         plugin.gameplayManager.humanoidManager.equipmentManager.equipBestEquipmentFor(entity)
                     }
                 }, delay)
@@ -343,10 +334,8 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         if (!cancelled) {
             responseData.npcResponse.forEach { dialogueHistory.add("${entity.customName}: \"$it\" ->") }
 
-            // NPC memory modification.
             entity.getEmotionalMemory().let { memory ->
                 memory.shortMemory.add(responseData.memoryNode)
-                // Ограничение короткой памяти
                 if (memory.shortMemory.size > MAX_SHORT_MEMORY_SIZE) {
                     memory.shortMemory.removeAt(0)
                 }
@@ -357,20 +346,16 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             val impression = Impression.valueOf(responseData.impression)
             val directive  = Directive.valueOf(responseData.directive)
 
-            // Sending messages.
             var delay = 0L
             for (message in responseData.npcResponse) {
                 plugin.server.scheduler.runTaskLater(plugin, { _ ->
-                    // Новая логика форматирования: аква курсив для сообщений-действий в астерисках
                     val formattedMessage = if (message.startsWith("*") && message.endsWith("*")) {
                         val cleanedMessage = message.removePrefix("*").removeSuffix("*")
-                        // Заменяем стандартный цвет §f на Aqua §b и Italic §o
                         npcResponseMessage
                             .replace("§f{message}", "§7§o{message}")
                             .replace("{npcName}", entity.customName ?: "NPC")
                             .replace("{message}", cleanedMessage)
                     } else {
-                        // Стандартное форматирование для обычных сообщений
                         npcResponseMessage
                             .replace("{npcName}", entity.customName ?: "NPC")
                             .replace("{message}", message)
@@ -378,25 +363,20 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
 
                     player.sendFormattedMessage(formattedMessage)
                     player.playSound(player.eyeLocation, XSound.UI_TOAST_IN.get() ?: throw NullPointerException(), 1F, 1.25F)
-                    // Handling directive only on last message of the response.
                     if (responseData.npcResponse.last() == message) {
-                        // Modifying reputation after talking. We should add check for it.
                         plugin.gameplayManager.reputationManager.addReputation(entity, player, impression.score)
                         readyToSend = true
                         when (directive) {
                             Directive.OPEN_TRADE_MENU -> entity.openTradeMenu(player)
                             Directive.INTERRUPT_CONVERSATION -> this.cancelled = true
-
-                            // Реализация агрессии
                             Directive.PUNCH -> {
-                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.attack(player, 1) // 1 = maxStrikes, call it "punch quota"
-                                this.cancelled = true // Разговор после удара обычно заканчивается
+                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.attack(player, 1)
+                                this.cancelled = true
                             }
                             Directive.KILL -> {
                                 plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.attack(player)
                                 this.cancelled = true
                             }
-
                             Directive.NONE -> { /* I have nothing to do. */}
                         }
                     }

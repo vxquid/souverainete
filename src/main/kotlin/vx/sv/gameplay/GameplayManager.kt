@@ -11,6 +11,7 @@ import vx.sv.config.lib.ConfigurationManager
 import vx.sv.config.lib.GameplayConfiguration
 import vx.sv.gameplay.death.DeathManager
 import vx.sv.gameplay.dialogue.DialogueManager
+import vx.sv.gameplay.dialogue.PartyChatManager
 import vx.sv.gameplay.dialogue.menu.InteractionHandler
 import vx.sv.gameplay.humanoid.HumanoidManager
 import vx.sv.gameplay.humanoid.HungerManager
@@ -58,6 +59,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     val raidManager        = RaidManager()
     val hungerManager      = HungerManager.also { it.startTicker() }
     val partyManager       = PartyManager(plugin, plugin.gameplayManager.config)
+    val partChatManager    = PartyChatManager()
     val deathManager       = DeathManager()
     val versionBridge      = VersionBridge(plugin)
 
