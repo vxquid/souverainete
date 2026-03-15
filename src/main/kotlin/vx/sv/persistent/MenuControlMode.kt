@@ -15,13 +15,23 @@ enum class MenuControlMode {
 }
 
 /**
+ * Enum for determining the preferred nametag style.
+ */
+enum class NametagMode {
+    ADVANCED, VANILLA
+}
+
+/**
  * Data class representing player-specific preferences.
  * By using default parameters, GSON will naturally handle adding new configurations
  * in future updates without breaking existing stored JSONs.
  */
 data class PlayerPreferences(
     @SerializedName("menu_control")
-    var menuControl: MenuControlMode = MenuControlMode.SCROLL
+    var menuControl: MenuControlMode = MenuControlMode.SCROLL,
+
+    @SerializedName("nametag_mode")
+    var nametagMode: NametagMode = NametagMode.ADVANCED
 
     // Feel free to add more preferences here later.
     // Example: var enableHolograms: Boolean = true

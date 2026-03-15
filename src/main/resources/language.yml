@@ -278,3 +278,11 @@ settings:
         - "§7Current mode: {current}"
         - ""
         - "§eClick to toggle!"
+    nametag-mode:
+      name: "§eNametag Display Mode"
+      mode-advanced: "§dAdvanced (Detailed text)"
+      mode-vanilla: "§aVanilla (Standard)"
+      lore:
+        - "§7Current mode: {current}"
+        - ""
+        - "§eClick to toggle!"

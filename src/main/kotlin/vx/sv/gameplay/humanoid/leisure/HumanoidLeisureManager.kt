@@ -17,6 +17,7 @@ import org.bukkit.inventory.meta.PotionMeta
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.dialogue.DialogueSession
 import vx.sv.gameplay.dialogue.menu.InteractionHandler
+import vx.sv.gameplay.party.PartyManager.Companion.partyLeaderUUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.random.Random
@@ -79,7 +80,9 @@ class HumanoidLeisureManager : Listener {
                             // Ignore NPCs that are in an active dialogue session.
                             DialogueSession.activeDialogueSessions.none { session -> session.entity == it } &&
                             // Ignore NPCs that are interacting via a menu.
-                            InteractionHandler.openedMenuList.none { menu -> menu.villager == it }
+                            InteractionHandler.openedMenuList.none { menu -> menu.villager == it } &&
+                            // Игнорируем жителей, которые уже находятся в пати с игроком
+                            it.partyLeaderUUID == null
                 }
                 .randomOrNull() ?: return@runTaskTimer
 
@@ -95,8 +98,8 @@ class HumanoidLeisureManager : Listener {
                 val session = iterator.next()
                 val npc = session.villager
 
-                // Invalidate session if the NPC is dead, no longer valid, or somehow changed worlds.
-                if (!npc.isValid || npc.isDead || npc.world != session.targetSeat.world) {
+                // Invalidate session if the NPC is dead, no longer valid, somehow changed worlds, or joined a party.
+                if (!npc.isValid || npc.isDead || npc.world != session.targetSeat.world || npc.partyLeaderUUID != null) {
                     standUp(npc, session) // Ensures attributes are safely reset
                     iterator.remove()
                     continue
@@ -306,7 +309,7 @@ class HumanoidLeisureManager : Listener {
 
             plugin.server.scheduler.runTask(plugin, Runnable {
                 // Safety guard: NPC could have died/unloaded or been assigned another task while the async calculation ran
-                if (!npc.isValid || npc.isDead || activeSessions.containsKey(npc)) return@Runnable
+                if (!npc.isValid || npc.isDead || activeSessions.containsKey(npc) || npc.partyLeaderUUID != null) return@Runnable
                 if (occupiedSeats.contains(bestSeat.first)) return@Runnable
 
                 assignSeat(npc, bestSeat.first, desiredPreference)
@@ -314,7 +317,7 @@ class HumanoidLeisureManager : Listener {
                 if (isSocial && bestSeat.second >= config.scoring.minScoreForSocialInvite) {
                     val friends = npc.getNearbyEntities(config.interaction.socialInviteRadiusX, config.interaction.socialInviteRadiusY, config.interaction.socialInviteRadiusZ)
                         .filterIsInstance<Villager>()
-                        .filter { it.isValid && !activeSessions.containsKey(it) && it.vehicle == null }
+                        .filter { it.isValid && !activeSessions.containsKey(it) && it.vehicle == null && it.partyLeaderUUID == null }
                         .shuffled()
                         .take(Random.nextInt(1, config.interaction.maxFriendsToInvite + 1))
 

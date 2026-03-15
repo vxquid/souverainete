@@ -65,8 +65,6 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
             it.index == 15 || it.index == (if (newIndexing) 17 else 16) || it.index == (if (newIndexing) 16 else 17) && it.type != EntityDataTypes.BYTE || it.type == EntityDataTypes.VILLAGER_DATA
         }
 
-        fun LivingEntity.skinID() = persistentDataContainer.get(skinIDKey, PersistentDataType.FLOAT)
-
         fun LivingEntity.skin() = race.let { r ->
             persistentDataContainer.get(skinKey, PersistentDataType.STRING)?.let { skin ->
                 val (value, signature) = skin.split(":"); TextureProperty("textures", value, signature)

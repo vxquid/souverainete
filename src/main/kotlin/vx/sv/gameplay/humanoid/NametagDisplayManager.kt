@@ -30,6 +30,8 @@ import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.persistent.LivingEntityExtend.hunger
 import vx.sv.persistent.LivingEntityExtend.settlement
+import vx.sv.persistent.NametagMode
+import vx.sv.persistent.PlayerPreferencesManager.preferences
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -111,6 +113,7 @@ class NametagDisplayManager : Listener {
         const val TEXT = 23
         const val BG_COLOR = 25
         const val OPACITY = 26
+        const val FLAGS = 27 // Bitmask (1 = shadow)
     }
 
     init {
@@ -290,6 +293,7 @@ class NametagDisplayManager : Listener {
 
             val playerDisplays = activeDisplays.getOrPut(player.uniqueId) { ConcurrentHashMap() }
             val currentVisibleIds = mutableSetOf<Int>()
+            val isVanillaMode = player.preferences.nametagMode == NametagMode.VANILLA
 
             // Find the NPC the player is looking at most directly
             var bestFocusId = -1
@@ -306,21 +310,41 @@ class NametagDisplayManager : Listener {
                 val isFocused = (snapshot.entityId == bestFocusId) || view.isSingleClose
                 currentVisibleIds.add(snapshot.entityId)
 
-                val text = buildText(view, isFocused, player.uniqueId)
-                val targetBgColor = determineBackgroundColor(snapshot, player.uniqueId, baseConfigColor, isFocused)
+                // Render the text depending on the player's preference
+                val text = if (isVanillaMode) {
+                    val nameToShow = if (snapshot.name != "Unknown") snapshot.name else {
+                        when {
+                            snapshot.isRaider -> plugin.language.getString("villager-professions.raider") ?: "Raider"
+                            snapshot.customProfessionDisplay != null -> snapshot.customProfessionDisplay
+                            else -> (plugin.language.getString("villager-professions.${snapshot.professionName}") ?: snapshot.professionName).replace("_", " ").capitalizeWords()
+                        }
+                    }
+                    "&f$nameToShow" // White text like vanilla nametags
+                } else {
+                    buildText(view, isFocused, player.uniqueId)
+                }
+
+                val targetBgColor = if (isVanillaMode) {
+                    toARGBInt(64, 0, 0, 0) // Standard vanilla translucent black background
+                } else {
+                    determineBackgroundColor(snapshot, player.uniqueId, baseConfigColor, isFocused)
+                }
 
                 val baseOffsetY = config.nametag.displayOffsetY.toFloat()
                 // Lower the nametag slightly if the NPC is standing under a low ceiling
                 val targetOffsetY = (if (snapshot.isCeilingLow) baseOffsetY - 0.45f else baseOffsetY) + snapshot.randomYOffset
 
                 val baseScaleCfg = config.nametag.displayScale
-                val targetScaleMult = if (isFocused) 1.0f else 0.65f
+                // In vanilla mode, scale is static so it doesn't jump
+                val targetScaleMult = if (isVanillaMode) 0.85f else if (isFocused) 1.0f else 0.65f
                 val scale = PEVector3f(
                     baseScaleCfg[0] * targetScaleMult,
                     baseScaleCfg[1] * targetScaleMult,
                     baseScaleCfg[2] * targetScaleMult
                 )
+
                 val translation = PEVector3f(0f, targetOffsetY, 0f)
+                val opacity = if (isVanillaMode) 255.toByte() else if (isFocused) 255.toByte() else 90.toByte()
 
                 val data = playerDisplays[snapshot.entityId]
 
@@ -334,8 +358,6 @@ class NametagDisplayManager : Listener {
                     newData.lastCeilingState = snapshot.isCeilingLow
                     newData.lastBgColor = targetBgColor
                     newData.lastText = text
-
-                    val opacity = if (isFocused) 255.toByte() else 90.toByte()
 
                     // Delay the spawn slightly to ensure the base entity passenger update registers
                     plugin.server.scheduler.runTaskLaterAsynchronously(plugin, Runnable {
@@ -359,18 +381,17 @@ class NametagDisplayManager : Listener {
                     val visualChanged = data.lastFocusState != isFocused || data.lastCeilingState != snapshot.isCeilingLow || data.lastBgColor != targetBgColor
                     val textChanged = data.lastText != text
 
-                    if (focusGained) {
+                    if (focusGained && !isVanillaMode) {
                         // When gaining focus, instantly snap to full opacity to make it feel responsive
-                        sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, 255.toByte(), scale, translation, 0, 0)
+                        sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 0, 0)
 
                         // Follow up with a smooth interpolation for scale/translation
                         plugin.server.scheduler.runTaskLaterAsynchronously(plugin, Runnable {
                             if (player.isOnline && playerDisplays.contains(snapshot.entityId)) {
-                                sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, 255.toByte(), scale, translation, 10, 0)
+                                sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 10, 0)
                             }
                         }, 1L)
                     } else if (visualChanged || textChanged) {
-                        val opacity = if (isFocused) 255.toByte() else 90.toByte()
                         sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 10, 0)
                     }
 
@@ -398,8 +419,7 @@ class NametagDisplayManager : Listener {
     }
 
     /**
-     * Constructs the multi-line text for the nametag.
-     * Shows detailed info (health, reputation, hunger, party) only when focused.
+     * Constructs the multi-line text for the nametag in ADVANCED mode.
      */
     private fun buildText(view: PlayerViewData, isFocused: Boolean, playerUUID: UUID): String {
         val config = plugin.gameplayManager.config
@@ -417,7 +437,6 @@ class NametagDisplayManager : Listener {
         var text = "$settlementLine$line1"
 
         if (isFocused) {
-            // Detailed view when looking directly at the NPC
             val repManager = plugin.gameplayManager.reputationManager
             val settlementRep = snap.settlementRepMap[playerUUID] ?: 0
             val finalRepScore = view.personalRep + settlementRep
@@ -457,7 +476,6 @@ class NametagDisplayManager : Listener {
                 text += "\n${view.stateColor}$stateDisplayName"
             }
         } else {
-            // Compact view when not focused, shows a small star indicator if they have an active state (e.g., quest available)
             if (view.stateColor != null) {
                 text = "${view.stateColor}✦&r\n$text"
             }
@@ -483,7 +501,6 @@ class NametagDisplayManager : Listener {
             settlementRep > 100 -> Color.fromARGB(targetAlpha, 30, 110, 30)
             settlementRep < -50 -> Color.fromARGB(targetAlpha, 120, 50, 20)
             else -> {
-                // Determine color based on profession category
                 when (snap.professionName) {
                     "armorer", "weaponsmith", "toolsmith", "guard" -> Color.fromARGB(targetAlpha, 80, 85, 95)
                     "cleric", "librarian", "mage" -> Color.fromARGB(targetAlpha, 100, 40, 140)
@@ -554,7 +571,8 @@ class NametagDisplayManager : Listener {
             EntityData(DisplayMeta.TRANSLATION, EntityDataTypes.VECTOR3F, translation),
             EntityData(DisplayMeta.INTERPOLATION_DURATION, EntityDataTypes.INT, interpDuration),
             EntityData(DisplayMeta.INTERPOLATION_DELAY, EntityDataTypes.INT, interpDelay),
-            EntityData(DisplayMeta.BILLBOARD, EntityDataTypes.BYTE, 3.toByte()) // 3 = Center Billboard (always faces player)
+            EntityData(DisplayMeta.BILLBOARD, EntityDataTypes.BYTE, 3.toByte()), // 3 = Center Billboard (always faces player)
+            EntityData(DisplayMeta.FLAGS, EntityDataTypes.BYTE, 1.toByte()) // 1 = Shadow (Makes it look natively vanilla!)
         )
 
         user.sendPacket(WrapperPlayServerEntityMetadata(displayEntityId, metadata))

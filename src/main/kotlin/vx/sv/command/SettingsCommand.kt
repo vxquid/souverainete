@@ -17,6 +17,7 @@ import org.bukkit.inventory.ItemFlag
 import org.bukkit.inventory.ItemStack
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.persistent.MenuControlMode
+import vx.sv.persistent.NametagMode
 import vx.sv.persistent.PlayerPreferencesManager.preferences
 
 /**
@@ -78,10 +79,29 @@ class SettingsGUI(val player: Player) : InventoryHolder {
         btnMeta?.addItemFlags(ItemFlag.HIDE_ATTRIBUTES)
 
         btnItem.itemMeta = btnMeta
-
-        // Place the setting button in Slot 10
-        // You have slots 10, 11, 12, 13, 14, 15, 16 free for future settings in this row.
         inv.setItem(10, btnItem)
+
+        // === Nametag Mode Toggle Button (Slot 11 - Row 2, Column 3) ===
+        val isNametagAdvanced = prefs.nametagMode == NametagMode.ADVANCED
+        val nameBtnMat = if (isNametagAdvanced) Material.NAME_TAG else Material.OAK_SIGN
+
+        val nameBtnItem = ItemStack(nameBtnMat)
+        val nameBtnMeta = nameBtnItem.itemMeta
+
+        nameBtnMeta?.setDisplayName(plugin.language.getString("settings.gui.nametag-mode.name") ?: "§eNametag Display Mode")
+
+        val advancedStr = plugin.language.getString("settings.gui.nametag-mode.mode-advanced") ?: "§dAdvanced (Detailed text)"
+        val vanillaStr = plugin.language.getString("settings.gui.nametag-mode.mode-vanilla") ?: "§aVanilla (Standard)"
+        val currentNametagStr = if (isNametagAdvanced) advancedStr else vanillaStr
+
+        val nameLore = plugin.language.getStringList("settings.gui.nametag-mode.lore").takeIf { it.isNotEmpty() }
+            ?: listOf("§7Current mode: {current}", "", "§eClick to toggle!")
+
+        nameBtnMeta?.lore = nameLore.map { it.replace("{current}", currentNametagStr) }
+        nameBtnMeta?.addItemFlags(ItemFlag.HIDE_ATTRIBUTES)
+
+        nameBtnItem.itemMeta = nameBtnMeta
+        inv.setItem(11, nameBtnItem)
     }
 }
 
@@ -107,6 +127,22 @@ class SettingsGUIListener : Listener {
                     MenuControlMode.SCROLL
                 } else {
                     MenuControlMode.CURSOR
+                }
+
+                // Save automatically via PDC property setter
+                player.preferences = prefs
+
+                // Play feedback sound
+                player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.8f, 1.2f)
+
+                // Render update without closing the inventory
+                gui.render()
+            }
+            11 -> { // Nametag Mode Toggle Button (Row 2, Column 3)
+                prefs.nametagMode = if (prefs.nametagMode == NametagMode.ADVANCED) {
+                    NametagMode.VANILLA
+                } else {
+                    NametagMode.ADVANCED
                 }
 
                 // Save automatically via PDC property setter
