@@ -279,7 +279,7 @@ settings:
         - ""
         - "§eClick to toggle!"
     nametag-mode:
-      name: "§eNametag Display Mode"
+      name: "§eNPC Name Display Mode"
       mode-advanced: "§dAdvanced (Detailed text)"
       mode-vanilla: "§aVanilla (Standard)"
       lore:
