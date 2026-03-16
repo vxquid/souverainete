@@ -56,7 +56,7 @@ class ProviderConfiguration {
     @Comment(
         "Controls the randomness of generated content. Higher values (e.g., 2.0) increase creativity but may reduce coherence."
     )
-    var temperature: Double = 1.5
+    var temperature: Double = 1.0
 
     @Comment(
         "The maximum number of retry attempts after a failed content generation request."

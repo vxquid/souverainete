@@ -135,7 +135,7 @@ class PartyChatManager : Listener, PacketListenerAbstract(PacketListenerPriority
             ### CURRENT ENVIRONMENT (STRICT FACTS):
             - Biome: $currentBiome
             - Time: $currentDaytime
-            - Weather: $currentWeather (DO NOT invent or hallucinate other weather. If it is clear, there is NO thunder, rain, or storm.)
+            - Weather: $currentWeather
             - Interaction Status: $interactionContext
             
             ### PARTY MEMBERS:
