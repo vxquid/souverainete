@@ -51,7 +51,7 @@ class ProviderConfiguration {
     @Comment(
         "The thematic setting for content generation. For example, 'Fantasy' for a fantasy-themed world."
     )
-    var setting: String = "Fantasy"
+    var setting: String = "Minecraft Universe"
 
     @Comment(
         "Controls the randomness of generated content. Higher values (e.g., 2.0) increase creativity but may reduce coherence."
@@ -61,7 +61,7 @@ class ProviderConfiguration {
     @Comment(
         "The maximum number of retry attempts after a failed content generation request."
     )
-    var maxRetries: Int = 1
+    var maxRetries: Int = 2
 
     @Comment(
         "Proxy configuration for connecting to providers in regions where they are restricted. Won't be used if host name is PROXY_HOST."

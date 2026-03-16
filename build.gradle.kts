@@ -27,6 +27,22 @@ bukkitPluginYaml {
       description = "Allows opening the settings menu."
       default = Permission.Default.TRUE
     }
+    register("sv.quest.remove") {
+      description = "Allows removing an accepted quest."
+      default = Permission.Default.TRUE
+    }
+    register("sv.quest.track") {
+      description = "Allows tracking a quest."
+      default = Permission.Default.TRUE
+    }
+    register("sv.quest.list") {
+      description = "Allows listing accepted quests."
+      default = Permission.Default.TRUE
+    }
+    register("sv.quest.stats") {
+      description = "Allows viewing quest statistics."
+      default = Permission.Default.TRUE
+    }
   }
 
 }
