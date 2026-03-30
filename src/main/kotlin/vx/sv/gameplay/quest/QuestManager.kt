@@ -99,6 +99,7 @@ class QuestManager : Listener {
         val world = plugin.gameplayManager.allowedWorlds.filter { it.entities.filterIsInstance<Villager>().isNotEmpty() }.randomOrNull() ?: return
         val villager = this.selectRandomVillager(world) ?: return
 
+        if (Bukkit.getOnlinePlayers().count() == 0) return // No quest gen with zero players
         if (villager.profession == Profession.NONE) return
         if (villager.quests().size > plugin.gameplayManager.config.quest.npcQuestBase + villager.villagerLevel) return
 
