@@ -38,6 +38,7 @@ import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import vx.sv.util.Daytime
 import vx.sv.util.VivaldiHook
+import vx.vivaldi.season.Season
 
 class DialogueSession(val player: Player, val entity: Villager) : Listener, PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
 
@@ -167,7 +168,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val biome = villager.world.getBiome(villager.location).key.key.replace("_", " ").lowercase()
         val currentBiome   = biome.split(":").getOrNull(1) ?: biome
         val currentDaytime = Daytime.fromWorldTime(villager.world.time).toString().lowercase()
-        val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
+        val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else if (VivaldiHook.getCurrentSeasonName() == Season.WINTER.name) "snowing" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.toString() }.toString()
 
         // CHANGED: Безопасное получение сезона. Если плагина нет, подставляем "Unknown"
@@ -231,7 +232,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val biome          = villager.world.getBiome(villager.location).key.key.replace("_", " ").lowercase()
         val currentBiome   = biome.split(":").getOrNull(1) ?: biome
         val currentDaytime = Daytime.fromWorldTime(villager.world.time).toString().lowercase()
-        val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
+        val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else if (VivaldiHook.getCurrentSeasonName() == Season.WINTER.name) "snowing" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.key.key }.toString()
 
         // CHANGED: Безопасное получение сезона. Если плагина нет, подставляем "Unknown"

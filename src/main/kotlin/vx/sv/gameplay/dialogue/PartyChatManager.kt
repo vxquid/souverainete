@@ -27,6 +27,7 @@ import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
 import vx.sv.util.Daytime
 import vx.sv.util.VivaldiHook
+import vx.vivaldi.season.Season
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -112,7 +113,7 @@ class PartyChatManager : Listener, PacketListenerAbstract(PacketListenerPriority
         val biome          = player.world.getBiome(player.location).key.key.replace("_", " ").lowercase()
         val currentBiome   = biome.split(":").getOrNull(1) ?: biome
         val currentDaytime = Daytime.fromWorldTime(player.world.time).toString().lowercase()
-        val currentWeather = player.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
+        val currentWeather = player.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else if (VivaldiHook.getCurrentSeasonName() == Season.WINTER.name) "snowing" else "raining" }
 
         // CHANGED: Безопасное получение сезона и динамическое формирование строки
         val currentSeason  = VivaldiHook.getCurrentSeasonName()
