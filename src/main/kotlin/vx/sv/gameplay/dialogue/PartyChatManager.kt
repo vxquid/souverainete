@@ -26,6 +26,7 @@ import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
 import vx.sv.util.Daytime
+import vx.sv.util.VivaldiHook
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -113,6 +114,10 @@ class PartyChatManager : Listener, PacketListenerAbstract(PacketListenerPriority
         val currentDaytime = Daytime.fromWorldTime(player.world.time).toString().lowercase()
         val currentWeather = player.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
 
+        // CHANGED: Безопасное получение сезона и динамическое формирование строки
+        val currentSeason  = VivaldiHook.getCurrentSeasonName()
+        val seasonContext  = if (currentSeason != null) "\n            - Season: $currentSeason" else ""
+
         // Dialogue context (If the player is currently talking to an NPC)
         val activeSession = player.getActiveDialogueSession()
         val interactionContext = if (activeSession != null) {
@@ -129,12 +134,13 @@ class PartyChatManager : Listener, PacketListenerAbstract(PacketListenerPriority
             "- Name: ${member.customName ?: "Unknown"}, UUID: ${member.uniqueId}, Race: ${member.race.name}, Gender: ${member.gender}, Personality: ${member.getPersonality()}, Profession: $profName"
         }
 
+        // CHANGED: seasonContext вставлен безопасно (если null, он просто исчезнет)
         val partyPrompt = """
             You are an AI generating a natural, grounded group conversation between a player and their party members in a medieval fantasy world.
             
             ### CURRENT ENVIRONMENT (STRICT FACTS):
             - Biome: $currentBiome
-            - Time: $currentDaytime
+            - Time: $currentDaytime$seasonContext
             - Weather: $currentWeather
             - Interaction Status: $interactionContext
             

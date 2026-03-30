@@ -47,6 +47,7 @@ import vx.sv.persistent.LivingEntityExtend.questDataKey
 import vx.sv.persistent.LivingEntityExtend.quests
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
+import vx.sv.util.VivaldiHook
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.net.URL
@@ -631,6 +632,9 @@ class QuestManager : Listener {
         private val baseInfo = if (isDelivery) plugin.gameplayManager.questManager.deliveryDescription else plugin.gameplayManager.questManager.gatheringDescription
         private val questInfo = baseInfo.replace("{taskDescription}", plugin.gameplayManager.questManager.taskDescriptions[questType]!!)
 
+        // NEW: Получаем сезон безопасно. Если Vivaldi нет, будет null.
+        private val currentSeason = VivaldiHook.getCurrentSeasonName()
+
         // EXPLICIT DIPLOMATIC CONTEXT INJECTION FOR DELIVERY QUESTS
         private val diplomaticContext = if (isDelivery) {
             """
@@ -648,13 +652,22 @@ class QuestManager : Listener {
             """.trimIndent()
         } else ""
 
-        // Adjust roleplay priority based on quest type
-        private val roleplayPriority = if (isDelivery) "Diplomatic History & Relations > Global Setting" else "Global Setting"
+        // NEW: Adjust roleplay priority dynamically based on Vivaldi presence
+        private val roleplayPriority = if (isDelivery) {
+            if (currentSeason != null) "Diplomatic History & Relations > Seasonal Setting > Global Setting"
+            else "Diplomatic History & Relations > Global Setting"
+        } else {
+            if (currentSeason != null) "Seasonal Setting > Global Setting"
+            else "Global Setting"
+        }
 
         // NEW FIELD IN SCHEMA: "letterContent" explicitly instructs to write to {targetLeader}
         private val schemaAdditions = if (isDelivery) {
             ",\n  \"questItemName\": \"Creative name for the sealed package (e.g. 'Sealed Diplomatic Pouch').\",\n  \"questItemDescription\": \"Short lore description of the package.\",\n  \"letterContent\": \"The actual text of the secret letter inside the package (written in 1st person from {npcName} to {targetLeader}. Be expressive!)\""
         } else ""
+
+        // NEW: Динамическое добавление строки сезона в промпт (если плагина нет, вставится пустая строка)
+        private val seasonContextString = if (currentSeason != null) "\n    - Current Season: $currentSeason" else ""
 
         private val questPrompt = """
             You are an expert game narrative designer and voice actor. Your task is to generate a quest for an NPC.
@@ -678,7 +691,7 @@ class QuestManager : Listener {
             4. Player Placeholder: Whenever the NPC addresses the player directly, use exactly "%playerName%".{diplomaticContext}
         
             ### NPC & QUEST CONTEXT:
-            - Global Setting: {globalSetting}
+            - Global Setting: {globalSetting}{seasonContextString}
             - NPC Name: {npcName}
             - Personality: {npcPersonality}
             - Race: {npcRace}
@@ -695,13 +708,14 @@ class QuestManager : Listener {
         val score     = (if (questItem.score < currency.getBasicScore()) currency.getBasicScore() * 10 else questItem.score).toLong()
 
         private val placeholders  = mutableMapOf<String, String>().also { it ->
-            it["globalSetting"]   = plugin.prompts.getString("global-setting") ?: "A medieval fantasy world."
-            it["npcPersonality"]  = "${questGiver.getPersonality()}"
-            it["npcName"]         = questGiver.customName.toString()
-            it["npcGender"]       = questGiver.gender.toString()
-            it["npcRace"]         = questGiver.race.name
-            it["raceDescription"] = questGiver.race.description
-            it["currentBiome"]    = questGiver.location.block.biome.key.key
+            it["globalSetting"]       = plugin.prompts.getString("global-setting") ?: "A medieval fantasy world."
+            it["seasonContextString"] = seasonContextString // NEW: Injecting dynamic season line
+            it["npcPersonality"]      = "${questGiver.getPersonality()}"
+            it["npcName"]             = questGiver.customName.toString()
+            it["npcGender"]           = questGiver.gender.toString()
+            it["npcRace"]             = questGiver.race.name
+            it["raceDescription"]     = questGiver.race.description
+            it["currentBiome"]        = questGiver.location.block.biome.key.key
 
             // Get settlements safely
             val giverSettlementObj = giverSettlementId?.let { id -> SettlementManager.getById(id) } ?: questGiver.settlement

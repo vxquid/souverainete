@@ -7,6 +7,7 @@ npc-chat: |
   
   CONTEXT:
   - NPC: {npcName} ({npcGender} {npcRace}, {npcProfession} Lvl {npcProfessionLevel}).
+  - Season: {currentSeason}
   - Lore: {raceLore}
   - Personality: {npcPersonality} | Wealth: {wealth}
   - Status: {npcPartyStatus}
@@ -44,6 +45,7 @@ npc-gift-reaction: |
 
   CONTEXT:
   - NPC: {npcName} ({npcGender} {npcRace}, {npcProfession}).
+  - Season: {currentSeason}
   - Lore: {raceLore}
   - Personality: {npcPersonality} | Wealth: {wealth}
   - Status: {npcPartyStatus}

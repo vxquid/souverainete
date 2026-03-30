@@ -10,10 +10,11 @@ plugins {
 }
 
 group = "souverainete"
-version = "0.7.2.1"
+version = "0.8.1"
 description = "The definitive overhaul of villager intelligence and society."
 
 bukkitPluginYaml {
+
   name = "souverainete"
   main = "vx.sv.Souverainete"
   load = BukkitPluginYaml.PluginLoadOrder.STARTUP
@@ -58,14 +59,15 @@ repositories {
 }
 
 dependencies {
-  paperweight.paperDevBundle("1.21.10-R0.1-SNAPSHOT")
+  paperweight.paperDevBundle("1.21.11-R0.1-SNAPSHOT")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")
   implementation("com.github.cryptomorin:XSeries:13.3.3")
-  implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT") // Annotations-based commands.
+  implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT")
   implementation(project(":nms-support"))
   implementation(project(":nms-support:base"))
+  compileOnly(files("libs/vivaldi-1.0.0-all.jar"))
   compileOnly("com.github.retrooper:packetevents-spigot:2.11.1")
   compileOnly("io.lumine:Mythic-Dist:5.10.0")
   compileOnly("org.geysermc.geyser:api:2.9.0-SNAPSHOT")

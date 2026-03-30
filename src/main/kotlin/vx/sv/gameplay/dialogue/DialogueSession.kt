@@ -37,6 +37,7 @@ import vx.sv.persistent.LivingEntityExtend.professionLevelName
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import vx.sv.util.Daytime
+import vx.sv.util.VivaldiHook
 
 class DialogueSession(val player: Player, val entity: Villager) : Listener, PacketListenerAbstract(PacketListenerPriority.HIGHEST) {
 
@@ -169,6 +170,8 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.toString() }.toString()
 
+        // CHANGED: Безопасное получение сезона. Если плагина нет, подставляем "Unknown"
+        val currentSeason  = VivaldiHook.getCurrentSeasonName() ?: "Unknown"
         val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
 
         val placeholders = mapOf(
@@ -186,6 +189,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "currentBiome"       to currentBiome,
             "currentTime"        to currentDaytime,
             "currentWeather"     to currentWeather,
+            "currentSeason"      to currentSeason, // Плейсхолдер теперь всегда имеет строковое значение
             "activeEffects"      to activeEffects,
             "playerMessage"      to playerMessage,
             "dialogueHistory"    to if (dialogue.isEmpty()) "[NO PREVIOUS MESSAGES. IT IS THE START OF THE DIALOGUE. GREET THE PLAYER IF NEEDED.]" else dialogue.toString(),
@@ -219,7 +223,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val playerReputation = plugin.gameplayManager.reputationManager.getPlayerReputationStatus(villager, player)
 
         val partyStatus = when {
-            villager.partyLeaderUUID == player.uniqueId -> "IN_PLAYER_PARTY_LEADER (The player is the leader of the group this NPC belongs to. This implies a high level of trust, loyalty, and willingness to follow orders. The NPC should be more assertive, helpful, and respectful.)"
+            villager.partyLeaderUUID == player.uniqueId -> "IN_PLAYER_PARTY_LEADER (The player is the leader of the group this environment belongs to. This implies a high level of trust, loyalty, and willingness to follow orders. The NPC should be more assertive, helpful, and respectful.)"
             villager.partyLeaderUUID != null -> "IN_OTHER_PARTY (This NPC is currently following another player. They are loyal to someone else. They might be polite but distant, or dismissive if the player tries to give orders. Their priority is their own leader.)"
             else -> "FREE (This NPC is independent and not currently in any party.)"
         }
@@ -229,6 +233,9 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val currentDaytime = Daytime.fromWorldTime(villager.world.time).toString().lowercase()
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.key.key }.toString()
+
+        // CHANGED: Безопасное получение сезона. Если плагина нет, подставляем "Unknown"
+        val currentSeason  = VivaldiHook.getCurrentSeasonName() ?: "Unknown"
 
         val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
 
@@ -247,6 +254,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "currentTime"        to currentDaytime,
             "settlementName"     to (villager.settlement?.data?.settlementName ?: "[NPC is homeless.]"),
             "currentWeather"     to currentWeather,
+            "currentSeason"      to currentSeason, // Плейсхолдер теперь всегда имеет строковое значение
             "activeEffects"      to activeEffects,
             "itemType"           to gift.type.toString().lowercase().replace("_", " "),
             "itemAmount"         to gift.amount.toString(),
