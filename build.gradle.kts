@@ -14,7 +14,6 @@ version = "0.8.1"
 description = "The definitive overhaul of villager intelligence and society."
 
 bukkitPluginYaml {
-
   name = "souverainete"
   main = "vx.sv.Souverainete"
   load = BukkitPluginYaml.PluginLoadOrder.STARTUP
@@ -45,7 +44,6 @@ bukkitPluginYaml {
       default = Permission.Default.TRUE
     }
   }
-
 }
 
 repositories {
@@ -65,6 +63,7 @@ dependencies {
   implementation("com.google.code.gson:gson:2.11.0")
   implementation("com.github.cryptomorin:XSeries:13.3.3")
   implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT")
+  implementation("org.yaml:snakeyaml:1.33")
   implementation(project(":nms-support"))
   implementation(project(":nms-support:base"))
   compileOnly(files("libs/vivaldi-1.0.0-all.jar"))
@@ -75,7 +74,6 @@ dependencies {
 }
 
 tasks {
-
   compileJava {
     // Set the release flag. This configures what version bytecode the compiler will emit, as well as what JDK APIs are usable.
     // See https://openjdk.java.net/jeps/247 for more information.
@@ -86,23 +84,20 @@ tasks {
     options.encoding = Charsets.UTF_8.name() // We want UTF-8 for everything
   }
 
-  tasks {
-    shadowJar {
-      archiveFileName = "souverainete-${version}.jar"
-      relocate("co.aikar.commands", "vx.sv.command")
-      relocate("co.aikar.locales", "vx.sv.command.locales")
-      relocate("kotlin", "vx.sv.kotlin")
-      relocate("com.github.retrooper.packetevents", "vx.sv.packetevents.api")
-      relocate("io.github.retrooper.packetevents", "vx.sv.packetevents.impl")
-      relocate("com.cryptomorin.xseries", "vx.sv.utils")
-      minimize()
-    }
+  // ИСПРАВЛЕНО: Убрана лишняя вложенность tasks { ... }
+  shadowJar {
+    archiveFileName = "souverainete-${version}.jar"
+
+    relocate("co.aikar.commands", "vx.sv.command")
+    relocate("co.aikar.locales", "vx.sv.command.locales")
+    relocate("kotlin", "vx.sv.kotlin")
+    relocate("com.cryptomorin.xseries", "vx.sv.utils")
+
+    // ДОБАВЛЕНО: Релокация SnakeYAML, чтобы серверный загрузчик не перекрыл его новой версией
+    relocate("org.yaml.snakeyaml", "vx.sv.libs.snakeyaml")
+
+    minimize()
   }
-
-}
-
-repositories {
-  mavenCentral()
 }
 
 java {
