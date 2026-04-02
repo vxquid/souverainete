@@ -633,10 +633,8 @@ class QuestManager : Listener {
         private val baseInfo = if (isDelivery) plugin.gameplayManager.questManager.deliveryDescription else plugin.gameplayManager.questManager.gatheringDescription
         private val questInfo = baseInfo.replace("{taskDescription}", plugin.gameplayManager.questManager.taskDescriptions[questType]!!)
 
-        // NEW: Получаем сезон безопасно. Если Vivaldi нет, будет null.
         private val currentSeason = VivaldiHook.getCurrentSeasonName()
 
-        // EXPLICIT DIPLOMATIC CONTEXT INJECTION FOR DELIVERY QUESTS
         private val diplomaticContext = if (isDelivery) {
             """
             
@@ -653,7 +651,6 @@ class QuestManager : Listener {
             """.trimIndent()
         } else ""
 
-        // NEW: Adjust roleplay priority dynamically based on Vivaldi presence
         private val roleplayPriority = if (isDelivery) {
             if (currentSeason != null) "Diplomatic History & Relations > Seasonal Setting > Global Setting"
             else "Diplomatic History & Relations > Global Setting"
@@ -662,12 +659,10 @@ class QuestManager : Listener {
             else "Global Setting"
         }
 
-        // NEW FIELD IN SCHEMA: "letterContent" explicitly instructs to write to {targetLeader}
         private val schemaAdditions = if (isDelivery) {
             ",\n  \"questItemName\": \"Creative name for the sealed package (e.g. 'Sealed Diplomatic Pouch').\",\n  \"questItemDescription\": \"Short lore description of the package.\",\n  \"letterContent\": \"The actual text of the secret letter inside the package (written in 1st person from {npcName} to {targetLeader}. Be expressive!)\""
         } else ""
 
-        // NEW: Динамическое добавление строки сезона в промпт (если плагина нет, вставится пустая строка)
         private val seasonContextString = if (currentSeason != null) "\n    - Current Season: $currentSeason" else ""
 
         private val questPrompt = """
@@ -682,6 +677,7 @@ class QuestManager : Listener {
               "extraShortTaskDescription": "Extremely short description of the task (Goal, Quest Giver Name, Amount).",
               "shortRequiredQuestItemDescription": "Literally one sentence describing the item in the context of the quest (written in third-person perspective).",
               "questDescription": "A highly immersive, deeply personal first-person dialogue where the NPC explains what they need and why.",
+              "shortQuestDescription": "A concise, 1-2 sentence alternative version of 'questDescription', written in 1st person. Tell the exact task and reason without fluff.",
               "questFinisherDialogue": "A highly immersive, deeply personal first-person dialogue where the TARGET LEADER ({targetLeader}) reads the letter and thanks the player."{schemaAdditions}
             }
         
@@ -704,13 +700,13 @@ class QuestManager : Listener {
         """.trimIndent()
 
         val questItem = questType.strategy.get(questGiver)
-        val currency  = questGiver.race.normalCurrency.get() ?: throw NullPointerException("Can't get race normal currency: ${questGiver.race.name}.")
+        val currency  = questGiver.race.normalCurrency.get() ?: throw NullPointerException("Can্্রt get race normal currency: ${questGiver.race.name}.")
         val amount    = questItem.item.amount
         val score     = (if (questItem.score < currency.getBasicScore()) currency.getBasicScore() * 10 else questItem.score).toLong()
 
         private val placeholders  = mutableMapOf<String, String>().also { it ->
             it["globalSetting"]       = plugin.prompts.getString("global-setting") ?: "A medieval fantasy world."
-            it["seasonContextString"] = seasonContextString // NEW: Injecting dynamic season line
+            it["seasonContextString"] = seasonContextString
             it["npcPersonality"]      = "${questGiver.getPersonality()}"
             it["npcName"]             = questGiver.customName.toString()
             it["npcGender"]           = questGiver.gender.toString()
@@ -718,7 +714,6 @@ class QuestManager : Listener {
             it["raceDescription"]     = questGiver.race.description
             it["currentBiome"]        = questGiver.location.block.biome.key.key
 
-            // Get settlements safely
             val giverSettlementObj = giverSettlementId?.let { id -> SettlementManager.getById(id) } ?: questGiver.settlement
             val targetSettlementObj = targetSettlementId?.let { id -> SettlementManager.getById(id) }
 
@@ -726,8 +721,6 @@ class QuestManager : Listener {
             val targetNameStr = targetSettlementObj?.data?.settlementName ?: "Unknown Town"
 
             var relationLevel = "NEUTRAL"
-
-            // INITIALIZE HISTORY PROPERLY IF EMPTY
             var historyStr = "This is the beginning of diplomatic relations between $giverNameStr and $targetNameStr."
 
             if (giverSettlementObj != null && targetSettlementObj != null) {
@@ -739,14 +732,13 @@ class QuestManager : Listener {
                 }
             }
 
-            // Bind values required by the new Diplomatic Context block
             it["giverSettlement"] = giverNameStr
             it["targetSettlement"] = targetNameStr
             it["targetLeader"] = targetLeaderName ?: "Another Leader"
             it["relationLevel"] = relationLevel
             it["diplomaticHistory"] = historyStr
             it["roleplayPriority"] = roleplayPriority
-            it["diplomaticContext"] = diplomaticContext // This string itself contains placeholders which replaceMap will process naturally
+            it["diplomaticContext"] = diplomaticContext
 
             (questGiver as? Villager)?.let { villager ->
                 it["npcProfession"]      = villager.profession.key.key
@@ -822,10 +814,11 @@ class QuestManager : Listener {
                                                val extraShortTaskDescription: String,
                                                val shortRequiredQuestItemDescription: String,
                                                val questDescription: String,
+                                               val shortQuestDescription: String? = null, // Added short version
                                                val questFinisherDialogue: String,
                                                val questItemName: String? = null,
                                                val questItemDescription: String? = null,
-                                               val letterContent: String? = null) // Added Letter Content
+                                               val letterContent: String? = null)
 
     enum class QuestFamily {
         GATHERING,
@@ -860,7 +853,6 @@ class QuestManager : Listener {
             persistentDataContainer.set(questDataKey, PersistentDataType.STRING, gson.toJson(this.quests().apply { removeIf { it.id == quest.id } }))
         }
 
-        /** Utility to serialize a list of ItemStacks into a Base64 string for safe PDC storage */
         fun serializeItems(items: List<ItemStack>): String {
             try {
                 val io = ByteArrayOutputStream()
@@ -875,7 +867,6 @@ class QuestManager : Listener {
             }
         }
 
-        /** Utility to deserialize a Base64 string back into a list of ItemStacks */
         fun deserializeItems(data: String): List<ItemStack> {
             val items = mutableListOf<ItemStack>()
             try {

@@ -287,3 +287,11 @@ settings:
         - "§7Current mode: {current}"
         - ""
         - "§eClick to toggle!"
+    quest-dialogue:
+      name: "§eQuest Dialogue Length"
+      mode-long: "§aImmersive & Long"
+      mode-short: "§bShort & Concise"
+      lore:
+        - "§7Current mode: {current}"
+        - ""
+        - "§eClick to toggle!"

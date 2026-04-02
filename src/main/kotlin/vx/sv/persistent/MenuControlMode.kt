@@ -22,6 +22,13 @@ enum class NametagMode {
 }
 
 /**
+ * Enum for determining the preferred length of quest dialogues.
+ */
+enum class QuestDialogueLength {
+    LONG, SHORT
+}
+
+/**
  * Data class representing player-specific preferences.
  * By using default parameters, GSON will naturally handle adding new configurations
  * in future updates without breaking existing stored JSONs.
@@ -31,7 +38,10 @@ data class PlayerPreferences(
     var menuControl: MenuControlMode = MenuControlMode.SCROLL,
 
     @SerializedName("nametag_mode")
-    var nametagMode: NametagMode = NametagMode.ADVANCED
+    var nametagMode: NametagMode = NametagMode.ADVANCED,
+
+    @SerializedName("quest_dialogue_length")
+    var questDialogueLength: QuestDialogueLength = QuestDialogueLength.LONG
 
     // Feel free to add more preferences here later.
     // Example: var enableHolograms: Boolean = true

@@ -50,6 +50,7 @@ import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
 import vx.sv.persistent.MenuControlMode
 import vx.sv.persistent.PlayerPreferencesManager.preferences
+import vx.sv.persistent.QuestDialogueLength
 
 class InteractionHandler : Listener {
 
@@ -474,7 +475,15 @@ class InteractionHandler : Listener {
         quests.forEach { quest ->
             val useRainbow = false
             builder.button(quest.name, isRainbow = useRainbow) {
-                val description = quest.data.questDescription.replace("%playerName%", player.name)
+
+                // === QUEST DIALOGUE LENGTH LOGIC ===
+                val questLengthPref = player.preferences.questDialogueLength
+                val rawDescription = if (questLengthPref == QuestDialogueLength.SHORT && !quest.data.shortQuestDescription.isNullOrEmpty()) {
+                    quest.data.shortQuestDescription
+                } else {
+                    quest.data.questDescription
+                }
+                val description = rawDescription.replace("%playerName%", player.name)
 
                 var skipMenu: Menu? = null
 
@@ -488,8 +497,6 @@ class InteractionHandler : Listener {
                     val activeDialogue = dialogues[player to villager]
                     val dialogueScale = activeDialogue?.size ?: 0.35f
 
-                    // ИЗМЕНЕНИЕ: Динамический расчёт смещения на основе масштаба текста!
-                    // Умножаем на 0.8 для компенсации высоты строк и добавляем 0.12 для отступа.
                     val dynamicOffset = -(dialogueScale * 0.8) - 0.12
 
                     val skipBuilder = Builder(villager, player, dynamicOffset)
