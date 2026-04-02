@@ -16,7 +16,8 @@ import vx.sv.util.RainbowColorTicker.rainbowColor
 
 class Menu(
     val villager: Villager,
-    val viewer: Player
+    val viewer: Player,
+    val yOffset: Double = 0.0 // Added vertical offset parameter
 ) {
 
     data class MenuRow(
@@ -26,7 +27,6 @@ class Menu(
         val action: () -> Unit
     )
 
-    // Changed to var since the center must update when moving
     private var pivot: Location = calculatePosition()
     private val rows: MutableList<MenuRow> = mutableListOf()
 
@@ -52,7 +52,8 @@ class Menu(
             return pLoc
         }
 
-        return pLoc.add(vLoc).multiply(0.5)
+        // Apply yOffset to shift the entire menu up or down
+        return pLoc.add(vLoc).multiply(0.5).add(0.0, yOffset, 0.0)
     }
 
     fun relocate() {
@@ -60,7 +61,6 @@ class Menu(
 
         val targetLoc = villager.location.clone().add(0.0, height, 0.0)
 
-        // Safety check: different worlds OR too far away
         if (viewer.world != targetLoc.world || viewer.location.distanceSquared(targetLoc) > maxDistanceSq) {
             destroy()
             return
@@ -68,27 +68,22 @@ class Menu(
 
         updatePosition()
 
-        // Only update selection based on look direction if the player prefers CURSOR mode
         if (viewer.preferences.menuControl == MenuControlMode.CURSOR) {
             updateLookSelection()
         }
 
-        updateSelection() // Update colors every tick for smooth rainbow buttons
+        updateSelection()
 
         plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager)?.talkingPlayer = viewer
     }
 
     private fun updatePosition() {
-        pivot = calculatePosition() // Update pivot
+        pivot = calculatePosition()
         rows.forEachIndexed { index, row ->
             row.display.teleport(pivot.clone().add(0.0, -index * step, 0.0))
         }
     }
 
-    /**
-     * Calculates the button the player is looking at by finding the smallest angle
-     * between the look direction and the vector from the player's eyes to the button.
-     */
     private fun updateLookSelection() {
         if (rows.isEmpty()) return
 
@@ -102,7 +97,7 @@ class Menu(
             val buttonLoc = pivot.clone().add(0.0, -i * step, 0.0).toVector()
             val vecToButton = buttonLoc.subtract(eyeLoc)
 
-            if (vecToButton.lengthSquared() > 0.0001) { // Division by zero protection
+            if (vecToButton.lengthSquared() > 0.0001) {
                 val angle = vecToButton.normalize().angle(lookDir).toDouble()
                 if (angle < minAngle) {
                     minAngle = angle
@@ -111,7 +106,6 @@ class Menu(
             }
         }
 
-        // Only update index if it changed, and play the "click" sound
         if (this.index != bestIndex) {
             this.index = bestIndex
             viewer.playSound(viewer.location, Sound.UI_BUTTON_CLICK, 1F, 2F)
@@ -124,20 +118,12 @@ class Menu(
             updateSelection()
         }
 
-    /**
-     * Moves the selection cursor down.
-     * Used for SCROLL mode navigation.
-     */
     fun selectNext() {
-        index++ // The custom setter automatically applies cyclicIndex and updateSelection
+        index++
     }
 
-    /**
-     * Moves the selection cursor up.
-     * Used for SCROLL mode navigation.
-     */
     fun selectPrevious() {
-        index-- // The custom setter automatically applies cyclicIndex and updateSelection
+        index--
     }
 
     fun addLine(text: String, buttonColor: Color = defaultButtonColor, rainbow: Boolean = false, function: () -> Unit) {

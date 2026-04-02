@@ -227,6 +227,7 @@ interaction-menu:
   trade-button: "Trade"
   actions-button: "Actions"
   talk-button: "Chat"
+  skip-button: "§eSkip"
   gift-button: "Gift"
   interrupt-button: "Stop Chatting"
   return-button: "Return"

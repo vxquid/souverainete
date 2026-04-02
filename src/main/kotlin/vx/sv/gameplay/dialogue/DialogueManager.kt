@@ -6,7 +6,7 @@ import org.bukkit.NamespacedKey
 import org.bukkit.Sound
 import org.bukkit.entity.*
 import org.bukkit.persistence.PersistentDataType
-import org.bukkit.scheduler.BukkitRunnable
+import org.bukkit.scheduler.BukkitTask
 import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
 import org.joml.Vector3f
@@ -41,11 +41,11 @@ class DialogueManager {
             }
             DialogueFormat.HOLOGRAM -> {
                 if (!interrupt && dialogues.containsKey(pair)) return
-                // ИЗМЕНЕНИЕ: Размер увеличен до 0.9F. Это делает текст крупным и очень разборчивым.
                 DialogueWindow(player, villager, 0.9F, formattedText.split(" "), follow, interrupt, true, onFinish).schedule()
             }
             DialogueFormat.CHAT -> {
                 this.sendDialogueInChat(player, villager, formattedText)
+                onFinish.invoke()
             }
             DialogueFormat.BOTH -> {
                 if (!interrupt && dialogues.containsKey(pair)) return
@@ -57,7 +57,6 @@ class DialogueManager {
 
     private val cooldownPlayers = mutableListOf<Player>()
     fun sendDialogueInChat(player: Player, entity: LivingEntity, message: String) {
-
         if (cooldownPlayers.contains(player)) {
             return
         } else {
@@ -78,18 +77,17 @@ class DialogueManager {
     }
 
     companion object {
-
         private lateinit var dialogueManager: DialogueManager
 
         val dialogueFormatKey = NamespacedKey(plugin, "DialogueFormat")
-        private val dialogueBoxSize = 0.28F
-        private val dialogueBoxTextBaseColor = "§f"
-        private val dialogueBoxTextImportantColor = "§5"
-        private val dialogueBoxTextInterestingColor = "§6"
-        val dialogueBackgroundAlpha = 185
-        val dialogueBackgroundRed = 0
-        val dialogueBackgroundGreen = 0
-        val dialogueBackgroundBlue = 0
+        private const val dialogueBoxSize = 0.28F
+        private const val dialogueBoxTextBaseColor = "§f"
+        private const val dialogueBoxTextImportantColor = "§5"
+        private const val dialogueBoxTextInterestingColor = "§6"
+        const val dialogueBackgroundAlpha = 185
+        const val dialogueBackgroundRed = 0
+        const val dialogueBackgroundGreen = 0
+        const val dialogueBackgroundBlue = 0
 
         val dialogues: ConcurrentHashMap<Pair<Player, LivingEntity>, DialogueWindow> = ConcurrentHashMap()
 
@@ -128,14 +126,13 @@ class DialogueManager {
     class DialogueWindow(
         private val player: Player,
         val entity: LivingEntity,
-        private val size: Float,
+        val size: Float, // ИЗМЕНЕНИЕ: Теперь это public val, чтобы мы могли читать его размер
         private val words: List<String>,
         private val follow: Boolean,
         cancelPrevious: Boolean,
         private val isHologram: Boolean,
         private val onFinish: () -> Unit = {}
     ) {
-
         private val display: TextDisplay
         private val displayBackgroundColor = if (isHologram) {
             Color.fromARGB(0, 0, 0, 0)
@@ -147,20 +144,20 @@ class DialogueManager {
         private val pitch: Float = entity.getVoicePitch()
 
         private val height = if (entity is Ageable && !entity.isAdult) 0.75 else 1.25
-        private val maxDistance = 12.0 // Еще увеличил дистанцию, текст большой, видно далеко
-
-        private val pauseDurationBetweenSentences = 3000L
-        private val pauseDurationBetweenWords = 175L
-        private val fastPauseDurationBetweenSentences = 1250L
-        private val fastPauseDurationBetweenWords = 100L
+        private val maxDistance = 12.0
 
         private var isCancelled = false
         private var isDestroyed = false
+        private var tickTask: BukkitTask? = null
+
+        private var currentWordIndex = 0
+        private var wordsInCurrentLine = 0
+        private var currentTextString = dialogueBoxTextBaseColor
+        private var ticksToWait = 0
 
         init {
             if (cancelPrevious) dialogues[player to entity]?.let {
-                it.display.remove()
-                it.isCancelled = true
+                it.destroy()
             }
             display = entity.world.spawnEntity(entity.location, EntityType.TEXT_DISPLAY) as TextDisplay
             dialogues[player to entity] = this
@@ -173,7 +170,6 @@ class DialogueManager {
 
             if (isHologram) {
                 display.isShadowed = true
-                // ИЗМЕНЕНИЕ: Увеличил ширину строки до 350, чтобы крупный текст не переносился каждые два слова
                 display.lineWidth = 350
             }
 
@@ -182,86 +178,100 @@ class DialogueManager {
 
             if (isHologram) {
                 entity.addPassenger(display)
-
-                // ИЗМЕНЕНИЕ: Подняли еще выше (0.95f), чтобы компенсировать крупный шрифт
-                display.transformation = Transformation(
-                    Vector3f(0f, 0.65f, 0f),
-                    AxisAngle4f(),
-                    Vector3f(size, size, size),
-                    AxisAngle4f()
-                )
+                display.transformation = Transformation(Vector3f(0f, 0.65f, 0f), AxisAngle4f(), Vector3f(size, size, size), AxisAngle4f())
             } else {
-                display.transformation = Transformation(
-                    Vector3f(0f, 0f, 0f),
-                    AxisAngle4f(),
-                    Vector3f(size, size, size),
-                    AxisAngle4f()
-                )
+                display.transformation = Transformation(Vector3f(0f, 0f, 0f), AxisAngle4f(), Vector3f(size, size, size), AxisAngle4f())
             }
 
-            val task = object : BukkitRunnable() {
-                override fun run() {
-                    var wordAmount = 0
-                    for (word in words) {
-                        if (!plugin.isEnabled || word.isEmpty() || isCancelled || isDestroyed) break
+            tickTask = plugin.server.scheduler.runTaskTimer(plugin, Runnable { processTick() }, 0L, 1L)
+        }
 
-                        val sentence = word.last() == '.' || word.last() == '!' || word.last() == '?' || word.last() == ','
-                        val lastWord = words.indexOf(word) == words.lastIndex
-                        val clear    = ++wordAmount > 10 && sentence && !lastWord
-
-                        plugin.server.scheduler.runTask(plugin) { _ ->
-                            display.text += "$word "
-                            player.playSound(entity.location, voice, 1F, pitch)
-                            if (follow && !isHologram) {
-                                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = player
-                            }
-                        }
-
-                        val pauseDuration = when {
-                            player.isSneaking && sentence -> fastPauseDurationBetweenSentences
-                            player.isSneaking -> fastPauseDurationBetweenWords
-                            sentence || lastWord -> if (word.last() != ',' || clear) pauseDurationBetweenSentences else pauseDurationBetweenWords * 3
-                            else -> pauseDurationBetweenWords
-                        }
-
-                        Thread.sleep(pauseDuration)
-
-                        if (clear) {
-                            display.text = dialogueBoxTextBaseColor
-                            wordAmount = 0
-                        }
-                    }
-
-                    if (plugin.isEnabled && !isDestroyed) {
-                        plugin.server.scheduler.runTask(plugin) { _ ->
-                            destroy()
-                            onFinish.invoke()
-                        }
-                    }
-                }
+        private fun processTick() {
+            if (!plugin.isEnabled || isDestroyed) {
+                tickTask?.cancel()
+                return
             }
 
-            task.runTaskAsynchronously(plugin)
+            if (isCancelled) {
+                tickTask?.cancel()
+                destroy()
+                onFinish.invoke()
+                return
+            }
+
+            if (ticksToWait > 0) {
+                ticksToWait--
+                return
+            }
+
+            if (currentWordIndex >= words.size) {
+                tickTask?.cancel()
+
+                plugin.server.scheduler.runTaskLater(plugin, Runnable {
+                    if (!isDestroyed) {
+                        destroy()
+                        onFinish.invoke()
+                    }
+                }, 40L)
+                return
+            }
+
+            val word = words[currentWordIndex]
+            val sentence = word.isNotEmpty() && word.last() in charArrayOf('.', '!', '?', ',')
+            val lastWord = currentWordIndex == words.lastIndex
+
+            wordsInCurrentLine++
+            val clear = wordsInCurrentLine > 10 && sentence && !lastWord
+
+            currentTextString += "$word "
+            display.text = currentTextString
+            player.playSound(entity.location, voice, 1F, pitch)
+
+            if (follow && !isHologram) {
+                plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = player
+            }
+
+            ticksToWait = when {
+                player.isSneaking && sentence -> 20
+                player.isSneaking -> 2
+                sentence || lastWord -> if (word.last() != ',' || clear) 50 else 10
+                else -> 3
+            }
+
+            if (clear) {
+                currentTextString = dialogueBoxTextBaseColor
+                wordsInCurrentLine = 0
+            }
+
+            currentWordIndex++
         }
 
         fun relocate() {
             if (checkDistance()) {
-                this.destroy()
+                this.isCancelled = true
                 return
             }
-            if (!isHologram) {
+            if (!isHologram && !isDestroyed) {
                 display.teleport(this.calculatePosition())
             }
         }
 
+        fun skip() {
+            if (!isDestroyed && !isCancelled) {
+                isCancelled = true
+            }
+        }
+
         fun destroy() {
+            if (isDestroyed) return
+            isDestroyed = true
+            tickTask?.cancel()
             display.remove()
             plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(entity)?.talkingPlayer = null
             dialogues.remove(player to entity, this@DialogueWindow)
-            isDestroyed = true
         }
 
-        private fun checkDistance(): Boolean = player.location.distance(entity.location) > maxDistance
+        private fun checkDistance(): Boolean = player.location.distanceSquared(entity.location) > maxDistance * maxDistance
 
         private fun calculatePosition(): Location {
             return player.eyeLocation.add(entity.location.add(0.0, if (entity.pose != Pose.SLEEPING) height else height - 0.4, 0.0)).multiply(0.5)

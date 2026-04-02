@@ -20,6 +20,7 @@ import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.premium
 import vx.sv.Souverainete.Companion.sendFormattedMessage
+import vx.sv.config.lib.GameplayConfiguration.DialogueConfig.DialogueFormat
 import vx.sv.event.VillagerKillTargetEvent
 import vx.sv.event.VillagerStartFightEvent
 import vx.sv.gameplay.dialogue.DialogueManager
@@ -27,6 +28,7 @@ import vx.sv.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundAlpha
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundBlue
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundGreen
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundRed
+import vx.sv.gameplay.dialogue.DialogueManager.Companion.dialogueFormat
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.dialogues
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.shout
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.talk
@@ -60,7 +62,6 @@ class InteractionHandler : Listener {
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
-            // Copy list to avoid ConcurrentModificationException
             openedMenuList.toList().forEach(Menu::relocate)
         }, 0L, 1L)
     }
@@ -74,6 +75,124 @@ class InteractionHandler : Listener {
             dialogueBackgroundGreen,
             dialogueBackgroundBlue
         )
+    }
+
+    private fun tryHandleMenuClick(player: Player): Boolean {
+        val menu = openedMenuList.find { it.viewer == player } ?: return false
+
+        val time = System.currentTimeMillis()
+        val last = lastInteraction.computeIfAbsent(player) { System.currentTimeMillis() }
+        if (time - last <= 200) return true
+        lastInteraction[player] = time
+
+        menu.invokeSelected()
+        menu.destroy()
+        plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(menu.villager)?.talkingPlayer = null
+        return true
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    private fun onPlayerInteract(event: PlayerInteractEvent) {
+        val action = event.action
+        if (action == Action.LEFT_CLICK_AIR || action == Action.LEFT_CLICK_BLOCK ||
+            action == Action.RIGHT_CLICK_AIR || action == Action.RIGHT_CLICK_BLOCK) {
+
+            if (tryHandleMenuClick(event.player)) {
+                event.isCancelled = true
+            }
+        }
+
+        event.clickedBlock?.let { block ->
+            (block.blockData as? Bed)?.let { bed ->
+                if (bed.isOccupied) event.isCancelled = true
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    private fun handleVillagerInteraction(event: PlayerInteractEntityEvent) {
+        if (tryHandleMenuClick(event.player)) {
+            event.isCancelled = true
+            return
+        }
+
+        val villager = event.rightClicked as? Villager ?: return
+
+        if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
+        if (event.isCancelled || !villager.isAware) return
+
+        val outdatedQuests = villager.quests().filter { quest ->
+            @Suppress("SENSELESS_COMPARISON")
+            quest.data.questDescription == null || quest.data.questFinisherDialogue == null
+        }
+        if (outdatedQuests.isNotEmpty()) {
+            outdatedQuests.forEach { oldQuest ->
+                plugin.gameplayManager.questManager.invalidateQuest(oldQuest, QuestInvalidationEvent.Reason.NOT_ACTUAL)
+                villager.removeQuest(oldQuest)
+            }
+        }
+
+        val player: Player = event.player
+        val time = System.currentTimeMillis()
+        val last = lastInteraction.computeIfAbsent(player) { System.currentTimeMillis() }
+
+        if (time - last <= 200) return else lastInteraction[player] = time
+        event.isCancelled = true
+
+        if (dialogues.containsKey(player to villager)) return
+
+        if (villager.pose == Pose.SLEEPING) {
+            val message = villager.race.phrases.sleepInterruption.randomOrNull()
+            message?.let { villager.talk(player, it, followDuringDialogue = false) }
+            return
+        }
+
+        if (plugin.geyserProvider?.checkGeyserPlayer(player) == true) {
+            plugin.geyserProvider?.openInteractionMenu(player, villager)
+            return
+        }
+
+        val dialogueSession = player.getActiveDialogueSession()
+        if (dialogueSession != null) {
+            if (dialogueSession.entity == villager) this.showDialogueMenu(player, villager)
+            return
+        }
+
+        player.inventory.heldItemSlot = 4
+        this.showDefaultMenu(player, villager)
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    private fun onPlayerDamageEntity(event: EntityDamageByEntityEvent) {
+        val player = event.damager as? Player ?: return
+
+        if (tryHandleMenuClick(player)) {
+            event.isCancelled = true
+            return
+        }
+
+        val entity = event.entity as? Villager ?: return
+
+        if (dialogues.contains(player to entity)) {
+            dialogues[player to entity]?.skip()
+            event.isCancelled = true
+            return
+        }
+
+        if (event.finalDamage >= entity.health) {
+            if (entity.equipment?.getItem(EquipmentSlot.OFF_HAND)?.type == Material.TOTEM_OF_UNDYING) {
+                val message = entity.race.phrases.totemResurrection.randomOrNull()
+                message?.let {
+                    entity.talk(player, it, displaySize = 0.55F, followDuringDialogue = false, interruptPreviousDialogue = true)
+                }
+            }
+            return
+        }
+
+        val message = entity.race.phrases.damage.randomOrNull()
+        message?.let {
+            entity.talk(player, it, displaySize = 0.55F, followDuringDialogue = false, interruptPreviousDialogue = true)
+        }
     }
 
     @EventHandler
@@ -114,62 +233,6 @@ class InteractionHandler : Listener {
         lastInteraction[event.player] = System.currentTimeMillis()
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST)
-    private fun handleVillagerInteraction(event: PlayerInteractEntityEvent) {
-        val villager = event.rightClicked as? Villager ?: return
-
-        if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
-        if (event.isCancelled || !villager.isAware) return
-
-        val outdatedQuests = villager.quests().filter { quest ->
-            @Suppress("SENSELESS_COMPARISON")
-            quest.data.questDescription == null || quest.data.questFinisherDialogue == null
-        }
-        if (outdatedQuests.isNotEmpty()) {
-            outdatedQuests.forEach { oldQuest ->
-                plugin.gameplayManager.questManager.invalidateQuest(oldQuest, QuestInvalidationEvent.Reason.NOT_ACTUAL)
-                villager.removeQuest(oldQuest)
-            }
-        }
-
-        val player: Player = event.player
-        val time = System.currentTimeMillis()
-        val last = lastInteraction.computeIfAbsent(player) { System.currentTimeMillis() }
-
-        if (time - last <= 200) return else lastInteraction[player] = time
-        event.isCancelled = true
-
-        // If the menu is already open, click the currently selected button
-        openedMenuList.find { it.viewer == player }?.let { menu ->
-            menu.invokeSelected()
-            menu.destroy()
-            plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(villager)?.talkingPlayer = null
-            return
-        }
-
-        if (dialogues.containsKey(player to villager)) return
-
-        if (villager.pose == Pose.SLEEPING) {
-            val message = villager.race.phrases.sleepInterruption.randomOrNull()
-            message?.let { villager.talk(player, it, followDuringDialogue = false) }
-            return
-        }
-
-        if (plugin.geyserProvider?.checkGeyserPlayer(player) == true) {
-            plugin.geyserProvider?.openInteractionMenu(player, villager)
-            return
-        }
-
-        val dialogueSession = player.getActiveDialogueSession()
-        if (dialogueSession != null) {
-            if (dialogueSession.entity == villager) this.showDialogueMenu(player, villager)
-            return
-        }
-
-        player.inventory.heldItemSlot = 4
-        this.showDefaultMenu(player, villager)
-    }
-
     @EventHandler
     private fun handlePlayerQuit(event: PlayerQuitEvent) {
         openedMenuList.removeIf { it.viewer == event.player }
@@ -180,18 +243,13 @@ class InteractionHandler : Listener {
         val player = event.player
         val prefs = player.preferences
 
-        // Ignore if the player prefers aiming (cursor mode)
         if (prefs.menuControl != MenuControlMode.SCROLL) return
 
         val menu = openedMenuList.find { it.viewer == player } ?: return
 
-        // Prevent the actual hotbar visual change while in a menu
         event.isCancelled = true
 
         val diff = event.newSlot - event.previousSlot
-
-        // Calculate logical direction (+1 for scroll right/down, -1 for scroll left/up)
-        // Checks account for 0 <-> 8 hotbar wrap-around.
         val direction = if (diff > 0) {
             if (diff == 8) -1 else 1
         } else {
@@ -199,8 +257,6 @@ class InteractionHandler : Listener {
         }
 
         if (direction > 0) {
-            // NOTE: Ensure your Menu class has these methods implemented!
-            // Example implementation in Menu: fun selectNext() { selectedIndex = (selectedIndex + 1) % buttons.size; updateVisuals() }
             menu.selectNext()
             player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.3f, 1.2f)
         } else {
@@ -208,8 +264,6 @@ class InteractionHandler : Listener {
             player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.3f, 1.2f)
         }
     }
-
-
 
     private fun showDialogueMenu(player: Player, villager: Villager) {
         val builder = Builder(villager, player)
@@ -237,8 +291,6 @@ class InteractionHandler : Listener {
     private fun showDefaultMenu(player: Player, villager: Villager) {
         val builder = Builder(villager, player)
 
-        // FIXED: Now we check if the villager is ANY leader of the target settlement,
-        // avoiding issues when the original leader dies and is replaced.
         val activeDelivery = player.quests().find {
             it.type == QuestManager.QuestType.MESSAGE_DELIVERY &&
                     (it.targetLeaderId == villager.uniqueId || (it.targetSettlementId != null && it.targetSettlementId == villager.getLedSettlementId()))
@@ -252,7 +304,7 @@ class InteractionHandler : Listener {
                 }
 
                 if (itemInInv != null) {
-                    itemInInv.amount -= 1 // Safely consume the package
+                    itemInInv.amount -= 1
 
                     plugin.gameplayManager.questManager.finishQuest(player, villager, activeDelivery) {
                         val giverSet = activeDelivery.giverSettlementId?.let { SettlementManager.getById(it) }
@@ -263,7 +315,6 @@ class InteractionHandler : Listener {
                             giverSet.data.reputation[player.uniqueId] = (giverSet.data.reputation[player.uniqueId] ?: 0) + originalRepBoost
                         }
 
-                        // Boost relations and log the event in Diplomatic History
                         if (giverSet != null && targetSet != null) {
                             SettlementManager.setRelation(giverSet, targetSet, Settlement.RelationLevel.WARM)
                             SettlementManager.recordDiplomaticEvent(giverSet, targetSet, "RELATION CHANGED: Improved to WARM due to successful diplomatic delivery.")
@@ -424,8 +475,29 @@ class InteractionHandler : Listener {
             val useRainbow = false
             builder.button(quest.name, isRainbow = useRainbow) {
                 val description = quest.data.questDescription.replace("%playerName%", player.name)
+
+                var skipMenu: Menu? = null
+
                 villager.talk(player, description) {
+                    skipMenu?.destroy()
                     this.showQuestSuggestionMenu(player, villager, quest)
+                }
+
+                val format = player.dialogueFormat
+                if (format == DialogueFormat.IMMERSIVE || format == DialogueFormat.BOTH) {
+                    val activeDialogue = dialogues[player to villager]
+                    val dialogueScale = activeDialogue?.size ?: 0.35f
+
+                    // ИЗМЕНЕНИЕ: Динамический расчёт смещения на основе масштаба текста!
+                    // Умножаем на 0.8 для компенсации высоты строк и добавляем 0.12 для отступа.
+                    val dynamicOffset = -(dialogueScale * 0.8) - 0.12
+
+                    val skipBuilder = Builder(villager, player, dynamicOffset)
+                    skipBuilder.button(plugin.language.getString("interaction-menu.skip-button") ?: "§eSkip >>") { menu ->
+                        menu.destroy()
+                        dialogues[player to villager]?.skip()
+                    }
+                    skipMenu = skipBuilder.build()
                 }
             }
         }
@@ -437,69 +509,8 @@ class InteractionHandler : Listener {
         builder.build()
     }
 
-    /**
-     * Replaces your existing onPlayerInteract to support SCROLL mode confirmation clicks.
-     */
-    @EventHandler
-    private fun onPlayerInteract(event: PlayerInteractEvent) {
-        val player = event.player
-
-        // --- Handle confirmation click for SCROLL mode ---
-        val prefs = player.preferences
-        if (prefs.menuControl == MenuControlMode.SCROLL) {
-            val menu = openedMenuList.find { it.viewer == player }
-            if (menu != null) {
-                event.isCancelled = true // Prevent block breaking/item using/interaction
-
-                // Confirm selection on any click
-                if (event.action == Action.LEFT_CLICK_AIR || event.action == Action.LEFT_CLICK_BLOCK ||
-                    event.action == Action.RIGHT_CLICK_AIR || event.action == Action.RIGHT_CLICK_BLOCK) {
-
-                    menu.invokeSelected()
-                    menu.destroy()
-                    plugin.gameplayManager.versionBridge.entityProvider.asHumanoid(menu.villager)?.talkingPlayer = null
-                }
-                return
-            }
-        }
-        // --------------------------------------------------
-
-        event.clickedBlock?.let { block ->
-            (block.blockData as? Bed)?.let { bed ->
-                if (bed.isOccupied) event.isCancelled = true
-            }
-        }
-    }
-
-    @EventHandler
-    private fun onPlayerDamageEntity(event: EntityDamageByEntityEvent) {
-        val player = event.damager as? Player ?: return
-        val entity = event.entity as? Villager ?: return
-
-        if (dialogues.contains(player to entity)) {
-            dialogues[player to entity]?.destroy()
-            event.isCancelled = true
-            return
-        }
-
-        if (event.finalDamage >= entity.health) {
-            if (entity.equipment?.getItem(EquipmentSlot.OFF_HAND)?.type == Material.TOTEM_OF_UNDYING) {
-                val message = entity.race.phrases.totemResurrection.randomOrNull()
-                message?.let {
-                    entity.talk(player, it, displaySize = 0.55F, followDuringDialogue = false, interruptPreviousDialogue = true)
-                }
-            }
-            return
-        }
-
-        val message = entity.race.phrases.damage.randomOrNull()
-        message?.let {
-            entity.talk(player, it, displaySize = 0.55F, followDuringDialogue = false, interruptPreviousDialogue = true)
-        }
-    }
-
-    class Builder(villager: Villager, viewer: Player) {
-        private val menu: Menu = Menu(villager, viewer)
+    class Builder(villager: Villager, viewer: Player, yOffset: Double = 0.0) {
+        private val menu: Menu = Menu(villager, viewer, yOffset)
 
         fun button(name: String, buttonColor: Color = defaultButtonColor, isRainbow: Boolean = false, action: (Menu) -> Unit): Builder {
             menu.addLine(name, buttonColor, isRainbow) {
