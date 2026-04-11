@@ -35,7 +35,10 @@ class ProviderConfiguration {
     )
     var url: String = "http://localhost:3001"
 
-    @Comment("The API key used to authenticate with the selected provider.")
+    @Comment(
+        "The API key used to authenticate with the selected provider.",
+        "To run the plugin in deterministic mode, set this value to \"DISABLED\"."
+    )
     var apiKey: String = "YOUR_API_KEY"
 
     @Comment(

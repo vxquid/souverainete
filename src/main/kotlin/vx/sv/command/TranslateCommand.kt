@@ -13,6 +13,7 @@ import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
 import org.bukkit.event.player.AsyncPlayerChatEvent
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.Souverainete.Companion.premium
 import vx.sv.Souverainete.Companion.sendFormattedMessage
 import vx.sv.config.ProviderConfiguration.ProviderType
 import vx.sv.config.lib.ConfigurationManager
@@ -59,20 +60,15 @@ class TranslateCommand : BaseCommand(), Listener {
         const val MSG_SUCCESS = "§a[AI Setup] Configuration complete! Provider: §6{provider} §a| Model: §e{model}"
         const val MSG_SUGGESTION = "$SETUP_PREFIX§7It's recommended to translate the plugin content using §e/s translate§7."
 
-        // Новые сообщения для режима отключения
+        // Messages for AI disable mode
         const val MSG_DISABLED_HEADER = "$SETUP_PREFIX§cAI features have been disabled."
         const val MSG_DISABLED_MODE = "§7Souveraineté is now running in §eDeterministic Mode§7."
         const val MSG_DISABLED_INFO_1 = "§7- Generative translation: §cOFF"
         const val MSG_DISABLED_INFO_2 = "§7- Dynamic Quests: §cOFF"
         const val MSG_DISABLED_INFO_3 = "§7- Content will be loaded strictly from local configuration files."
 
-        // Сообщения с просьбой о поддержке
-        const val MSG_DONATE_DIVIDER = "§8§m--------------------------------------------------"
-        const val MSG_DONATE_1 = "§7I have been developing §6Souveraineté §7solo for over §e1.5 years§7,"
-        const val MSG_DONATE_2 = "§7pouring hundreds of hours into creating this experience."
-        const val MSG_DONATE_3 = "§7If you enjoy the plugin, please consider §abuying the full version"
-        const val MSG_DONATE_4 = "§7or supporting the development via Ko-fi:"
-        const val MSG_DONATE_LINK = "§b➤ https://ko-fi.com/vxquid"
+        // Premium version single-line advertisement
+        const val MSG_PREMIUM_AD = "$SETUP_PREFIX§7Unlock exclusive mechanics and advanced features in the §6Premium version§7!"
     }
 
     @Subcommand("setup")
@@ -82,32 +78,34 @@ class TranslateCommand : BaseCommand(), Listener {
         player.sendFormattedMessage(MSG_LIST)
     }
 
-    // --- Новая команда для отключения ИИ ---
+    // --- Command to disable AI (Deterministic Mode) ---
     @Subcommand("disable ai")
     @CommandPermission("sv.admin.setup")
     fun onDisableAI(player: Player) {
-        // Если игрок был в процессе настройки, отменяем её
+        // Cancel active setup sessions if any
         if (setupSessions.containsKey(player.uniqueId)) {
             setupSessions.remove(player.uniqueId)
         }
 
         val config = plugin.providerManager.config
 
-        // Устанавливаем маркер отключения в API Key
+        // Set disable marker in API Key
         config.apiKey = "DISABLED"
 
-        // Сохраняем конфигурацию
+        // Save configuration
         ConfigurationManager.save(plugin, config)
 
-        // Информируем игрока о режиме
+        // Inform the player about the mode
         player.sendFormattedMessage(MSG_DISABLED_HEADER)
         player.sendFormattedMessage(MSG_DISABLED_MODE)
         player.sendFormattedMessage(MSG_DISABLED_INFO_1)
         player.sendFormattedMessage(MSG_DISABLED_INFO_2)
         player.sendFormattedMessage(MSG_DISABLED_INFO_3)
 
-        // Просьба о поддержке
-        sendSupportMessage(player)
+        // Show premium ad if the user is on the free version
+        if (!premium) {
+            player.sendFormattedMessage(MSG_PREMIUM_AD)
+        }
     }
     // ---------------------------------------
 
@@ -201,25 +199,15 @@ class TranslateCommand : BaseCommand(), Listener {
                                 .replace("{model}", config.model))
                             player.sendFormattedMessage(MSG_SUGGESTION)
 
-                            // Сообщение о поддержке после успешной настройки
-                            sendSupportMessage(player)
+                            // Show premium ad if the user is on the free version
+                            if (!premium) {
+                                player.sendFormattedMessage(MSG_PREMIUM_AD)
+                            }
                         })
                     })
                 })
             }
         }
-    }
-
-    // Вспомогательная функция для вывода сообщения о донате
-    private fun sendSupportMessage(player: Player) {
-        player.sendFormattedMessage(" ")
-        player.sendFormattedMessage(MSG_DONATE_DIVIDER)
-        player.sendFormattedMessage(MSG_DONATE_1)
-        player.sendFormattedMessage(MSG_DONATE_2)
-        player.sendFormattedMessage(MSG_DONATE_3)
-        player.sendFormattedMessage(MSG_DONATE_4)
-        player.sendFormattedMessage(MSG_DONATE_LINK)
-        player.sendFormattedMessage(MSG_DONATE_DIVIDER)
     }
 
     // --- Bulk Translation Logic ---

@@ -10,7 +10,7 @@ plugins {
 }
 
 group = "souverainete"
-version = "0.8.1"
+version = "0.8.2"
 description = "The definitive overhaul of villager intelligence and society."
 
 bukkitPluginYaml {
