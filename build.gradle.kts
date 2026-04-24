@@ -7,11 +7,20 @@ plugins {
   id("xyz.jpenilla.run-paper") version "2.3.1"
   id("xyz.jpenilla.resource-factory-bukkit-convention") version "1.3.0"
   id("com.gradleup.shadow") version "9.2.2"
+  id("com.github.gmazzo.buildconfig") version "5.4.0"
 }
 
+val isPremiumBuild = project.findProperty("premium")?.toString()?.toBoolean() ?: true
+val buildSuffix = if (isPremiumBuild) "premium" else "free"
+
 group = "souverainete"
-version = "0.8.2"
+version = "0.8.2.1"
 description = "The definitive overhaul of villager intelligence and society."
+
+buildConfig {
+  packageName("vx.sv")
+  buildConfigField("Boolean", "IS_PREMIUM", isPremiumBuild.toString())
+}
 
 bukkitPluginYaml {
   name = "souverainete"
@@ -75,25 +84,20 @@ dependencies {
 
 tasks {
   compileJava {
-    // Set the release flag. This configures what version bytecode the compiler will emit, as well as what JDK APIs are usable.
-    // See https://openjdk.java.net/jeps/247 for more information.
     options.release = 21
   }
 
   javadoc {
-    options.encoding = Charsets.UTF_8.name() // We want UTF-8 for everything
+    options.encoding = Charsets.UTF_8.name()
   }
 
-  // ИСПРАВЛЕНО: Убрана лишняя вложенность tasks { ... }
   shadowJar {
-    archiveFileName = "souverainete-${version}.jar"
+    archiveFileName = "souverainete-${project.version}-$buildSuffix.jar"
 
     relocate("co.aikar.commands", "vx.sv.command")
     relocate("co.aikar.locales", "vx.sv.command.locales")
     relocate("kotlin", "vx.sv.kotlin")
     relocate("com.cryptomorin.xseries", "vx.sv.utils")
-
-    // ДОБАВЛЕНО: Релокация SnakeYAML, чтобы серверный загрузчик не перекрыл его новой версией
     relocate("org.yaml.snakeyaml", "vx.sv.libs.snakeyaml")
 
     minimize()
@@ -106,4 +110,35 @@ java {
 
 kotlin {
   jvmToolchain(21)
+}
+
+
+// --- ИСПРАВЛЕНИЕ: Вызываем независимый процесс (Exec) вместо таски GradleBuild ---
+
+// Находим правильный скрипт gradlew в зависимости от ОС (Windows или Linux/Mac)
+val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+val gradlewPath = project.rootDir.resolve(if (isWindows) "gradlew.bat" else "gradlew").absolutePath
+
+val buildPremium by tasks.registering(Exec::class) {
+  group = "build variants"
+  description = "Build Premium plugin version."
+
+  // Изолированный запуск сборки
+  commandLine(gradlewPath, "shadowJar", "-Ppremium=true")
+}
+
+val buildFree by tasks.registering(Exec::class) {
+  group = "build variants"
+  description = "Build Free plugin version."
+
+  // Изолированный запуск сборки
+  commandLine(gradlewPath, "shadowJar", "-Ppremium=false")
+
+  mustRunAfter(buildPremium) // Чтобы логи не перемешивались, запускаем по очереди
+}
+
+tasks.register("buildAllVariants") {
+  group = "build variants"
+  description = "Build both versions."
+  dependsOn(buildPremium, buildFree)
 }
