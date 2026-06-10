@@ -609,10 +609,10 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
             }
         } catch (_: Exception) {
             raider.equipment?.let { eq ->
-                eq.helmet = loadout[EquipmentSlot.HEAD]
-                eq.chestplate = loadout[EquipmentSlot.CHEST]
-                eq.leggings = loadout[EquipmentSlot.LEGS]
-                eq.boots = loadout[EquipmentSlot.FEET]
+                eq.setHelmet(loadout[EquipmentSlot.HEAD])
+                eq.setChestplate(loadout[EquipmentSlot.CHEST])
+                eq.setLeggings(loadout[EquipmentSlot.LEGS])
+                eq.setBoots(loadout[EquipmentSlot.FEET])
                 eq.setItemInMainHand(loadout[EquipmentSlot.HAND])
                 eq.setItemInOffHand(loadout[EquipmentSlot.OFF_HAND])
             }

@@ -1,6 +1,6 @@
 plugins {
-    kotlin("jvm")
-    id("io.papermc.paperweight.userdev") version "2.0.0-beta.17"
+    kotlin("jvm") version "2.3.0"
+    id("io.papermc.paperweight.userdev") version "2.0.0-beta.21"
 }
 
 group = "souverainete"
@@ -21,7 +21,7 @@ dependencies {
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(25)
 }
 
 subprojects {
@@ -33,14 +33,8 @@ subprojects {
 
     java {
         toolchain {
-            languageVersion.set(JavaLanguageVersion.of(21))
+            languageVersion.set(JavaLanguageVersion.of(25))
         }
     }
 
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions {
-            jvmTarget = "21"
-            javaParameters = true
-        }
-    }
 }

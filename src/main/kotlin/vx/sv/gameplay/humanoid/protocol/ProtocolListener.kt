@@ -1,7 +1,6 @@
 package vx.sv.gameplay.humanoid.protocol
 
 import com.cryptomorin.xseries.XAttribute
-import com.cryptomorin.xseries.reflection.XReflection
 import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.event.SimplePacketListenerAbstract
 import com.github.retrooper.packetevents.event.simple.PacketPlayReceiveEvent
@@ -54,15 +53,21 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
 
     companion object {
 
-        private val newIndexing = XReflection.supports(21, 9)
         private val skinIDKey = NamespacedKey(plugin, "SkinID")
         private val skinKey = NamespacedKey(plugin, "Skin")
         private val HUMANOID_VILLAGERS_ENABLED  = plugin.gameplayManager.config.humanoid.humanoidVillagers
         private val ADAPTIVE_PACKET_MANIPULATOR = plugin.gameplayManager.config.humanoid.adaptivePacketManipulator
 
-        // Predicate for removing invalid and necessary EntityData (especially VILLAGER_DATA, which causes a protocol error on the client).
+        // Жёстко зафиксированные правила фильтрации под 26.1.2:
+        // - Вырезаем 15 (Mob flags).
+        // - Безусловно вырезаем 17 и все индексы выше (включая плечи на 19/20).
+        // - Вырезаем 16, только если его тип не равен BYTE (чтобы сохранить отправку слоёв скина).
+        // - Вырезаем VILLAGER_DATA.
         private val MUST_BE_REMOVED: (EntityData<*>) -> Boolean = {
-            it.index == 15 || it.index == (if (newIndexing) 17 else 16) || it.index == (if (newIndexing) 16 else 17) && it.type != EntityDataTypes.BYTE || it.type == EntityDataTypes.VILLAGER_DATA
+            it.index == 15 ||
+                    it.index >= 17 ||
+                    (it.index == 16 && it.type != EntityDataTypes.BYTE) ||
+                    it.type == EntityDataTypes.VILLAGER_DATA
         }
 
         fun LivingEntity.skin() = race.let { r ->
@@ -102,12 +107,13 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
         val player   = event.player
         val humanoid = event.entity
         val provider = event.humanoidInfo
-        val metadata = event.metadata.toMutableList().also {
-            it.add(EntityData(if (newIndexing) 16 else 17, EntityDataTypes.BYTE, SkinSection.ALL.mask))
+
+        // Метадата игрока на 26.1.2: слои скина лежат строго на индексе 16
+        val metadata = event.metadata.filterNot(MUST_BE_REMOVED).toMutableList().also {
+            it.add(EntityData(16, EntityDataTypes.BYTE, SkinSection.ALL.mask))
         }
 
         // === INJECT LEADER HIGHLIGHT ===
-        // If the player has debug mode on, and the entity is a leader, apply the 0x40 (Glowing) bitmask
         if (LeaderHighlightManager.highlightingPlayers.contains(player.uniqueId) && humanoid is Villager && humanoid.isSettlementLeader()) {
             var foundStatus = false
             for (i in metadata.indices) {
@@ -283,7 +289,6 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                     val forced      = if (ADAPTIVE_PACKET_MANIPULATOR) humanoidProvider?.forcedViewers?.contains(player) ?: false else false
 
                     // === INJECT LEADER HIGHLIGHT ===
-                    // Dynamically apply glowing effect to outgoing metadata for leaders if debug mode is ON
                     if (LeaderHighlightManager.highlightingPlayers.contains(player.uniqueId) && entity.isSettlementLeader()) {
                         var foundStatus = false
                         for (i in metadata.indices) {
@@ -366,8 +371,8 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
                 if (!HUMANOID_VILLAGERS_ENABLED)
                     return
 
-                val packet   = WrapperPlayServerEntityHeadLook(event)
-                val entity   = SpigotConversionUtil.getEntityById(world, packet.entityId) ?: return
+                val packet = WrapperPlayServerEntityHeadLook(event)
+                val entity = SpigotConversionUtil.getEntityById(world, packet.entityId) ?: return
                 val location = entity.location
 
                 if (humanoidRegistry.keys.contains(entity)) {

@@ -2,19 +2,20 @@ import xyz.jpenilla.resourcefactory.bukkit.BukkitPluginYaml
 import xyz.jpenilla.resourcefactory.bukkit.Permission
 
 plugins {
-  kotlin("jvm") version "2.0.0"
-  id("io.papermc.paperweight.userdev") version "2.0.0-beta.17"
-  id("xyz.jpenilla.run-paper") version "2.3.1"
-  id("xyz.jpenilla.resource-factory-bukkit-convention") version "1.3.0"
+  kotlin("jvm") version "2.3.0"
+  id("io.papermc.paperweight.userdev") version "2.0.0-beta.21"
+  id("xyz.jpenilla.run-paper") version "3.0.2" // Adds runServer and runMojangMappedServer tasks for testing
+  id("xyz.jpenilla.resource-factory-bukkit-convention") version "1.3.1" // Generates plugin.yml based on the Gradle config
   id("com.gradleup.shadow") version "9.2.2"
   id("com.github.gmazzo.buildconfig") version "5.4.0"
 }
 
 val isPremiumBuild = project.findProperty("premium")?.toString()?.toBoolean() ?: true
 val buildSuffix = if (isPremiumBuild) "premium" else "free"
+val javaVersion = 25
 
 group = "souverainete"
-version = "0.8.2.1"
+version = "0.9.0.1"
 description = "The definitive overhaul of villager intelligence and society."
 
 buildConfig {
@@ -29,7 +30,7 @@ bukkitPluginYaml {
   depend = listOf("packetevents")
   softDepend = listOf("MythicMobs")
   authors.add("vxquid")
-  apiVersion = "1.21"
+  apiVersion = "26.1" // Обновлено под формат версионирования 26.1.x
 
   permissions {
     register("sv.player.settings") {
@@ -66,25 +67,23 @@ repositories {
 }
 
 dependencies {
-  paperweight.paperDevBundle("1.21.11-R0.1-SNAPSHOT")
+  paperweight.paperDevBundle("26.1.2.build.+")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")
-  implementation("com.github.cryptomorin:XSeries:13.3.3")
+  implementation("com.github.cryptomorin:XSeries:13.7.0") // Обновлено до 13.7.0 (поддержка MC 26)
   implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT")
-  implementation("org.yaml:snakeyaml:1.33")
-  implementation(project(":nms-support"))
-  implementation(project(":nms-support:base"))
+  implementation("org.yaml:snakeyaml:1.33") // Специфическая версия YAML сохранена
   compileOnly(files("libs/vivaldi-1.0.0-all.jar"))
-  compileOnly("com.github.retrooper:packetevents-spigot:2.11.1")
-  compileOnly("io.lumine:Mythic-Dist:5.10.0")
+  compileOnly("com.github.retrooper:packetevents-spigot:2.12.2") // Обновлено до 2.12.2 (поддержка 26.1.2)
+  compileOnly("io.lumine:Mythic-Dist:5.12.1") // Обновлено до 5.12.1 (поддержка 26.1.2)
   compileOnly("org.geysermc.geyser:api:2.9.0-SNAPSHOT")
   compileOnly("org.geysermc.floodgate:api:2.2.4-SNAPSHOT")
 }
 
 tasks {
   compileJava {
-    options.release = 21
+    options.release = javaVersion
   }
 
   javadoc {
@@ -105,11 +104,11 @@ tasks {
 }
 
 java {
-  toolchain.languageVersion = JavaLanguageVersion.of(21)
+  toolchain.languageVersion = JavaLanguageVersion.of(javaVersion)
 }
 
 kotlin {
-  jvmToolchain(21)
+  jvmToolchain(javaVersion)
 }
 
 

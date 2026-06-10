@@ -9,5 +9,3 @@ plugins {
 }
 
 rootProject.name = "souverainete"
-include("nms-support", "nms-support:v1_21_R7", "nms-support:v1_21_R6", "nms-support:v1_21_R5", "nms-support:v1_21_R3", "nms-support:v1_21_R1")
-include("nms-support:base")
