@@ -16,17 +16,17 @@ class ProviderConfiguration {
         "CHATGPT (chatgpt.com) is default OpenAI API.",
         "ANYTHINGLLM (useanything.com) - Self-hosted solution. Requires running the software locally or on a server. Fully private and free (depending on your local backend like Ollama)."
     )
-    var providerType: ProviderType = ProviderType.CEREBRAS
+    var providerType: ProviderType = ProviderType.GEMINI
 
     @Comment(
-        "For CEREBRAS, default model is \"qwen-3-235b-a22b-instruct-2507\".",
+        "For CEREBRAS, default model is \"gpt-oss-120b\".",
         "For GEMINI, default model is \"gemini-2.5-flash-lite\".",
         "For OPENROUTER, default model is \"google/gemini-2.5-flash-lite\".",
         "For GROQ, I recommend \"openai/gpt-oss-120b\".",
         "For DEEPSEEK, default model is \"deepseek-chat\".",
         "For ANYTHINGLLM, this usually depends on your workspace settings. You can often leave it as \"gpt-3.5-turbo\" for compatibility."
     )
-    var model = "qwen-3-235b-a22b-instruct-2507"
+    var model = "gemini-3.1-flash-lite"
 
     @Comment(
         "The API Endpoint URL. Required ONLY for self-hosted providers like ANYTHINGLLM.",

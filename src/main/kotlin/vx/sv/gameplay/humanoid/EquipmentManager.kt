@@ -43,7 +43,6 @@ class EquipmentManager : Listener {
     private fun startQueueFiller() {
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
             plugin.gameplayManager.allowedWorlds.forEach { world ->
-                // Быстрый сбор сущностей. Bukkit кэширует getEntitiesByClass, это работает быстро.
                 val villagers = world.getEntitiesByClass(Villager::class.java)
                 for (villager in villagers) {
                     if (villager.isValid && !evaluationQueue.contains(villager)) {
@@ -56,15 +55,14 @@ class EquipmentManager : Listener {
 
     /**
      * ASYNC THREAD: Воркер, который "откусывает" от очереди по BATCH_SIZE штук каждый тик.
-     * Это полностью сглаживает нагрузку, убирая микрофризы.
+     * Оценка инвентаря и предметов по-прежнему происходит асинхронно!
      */
     private fun startQueueProcessor() {
         plugin.server.scheduler.runTaskTimerAsynchronously(plugin, Runnable {
             if (evaluationQueue.isEmpty()) return@Runnable
 
-            // Обрабатываем не больше BATCH_SIZE мобов за 1 тик
             for (i in 0 until BATCH_SIZE) {
-                val villager = evaluationQueue.poll() ?: break // Если очередь опустела - прерываем цикл
+                val villager = evaluationQueue.poll() ?: break
 
                 if (villager.isValid && !villager.isDead) {
                     equipBestEquipmentFor(villager)
@@ -77,12 +75,13 @@ class EquipmentManager : Listener {
     private fun onWorldLoad(event: WorldLoadEvent) {
         if (!plugin.gameplayManager.allowedWorlds.contains(event.world)) return
 
-        // Просто закидываем в очередь, чтобы не вешать главный поток при запуске мира
         val villagers = event.world.getEntitiesByClass(Villager::class.java)
         villagers.forEach {
             if (it.isValid && !evaluationQueue.contains(it)) {
-                // removeEquipment вызовем асинхронно прямо перед экипировкой, чтобы не спамить в Main Thread
-                plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable { removeEquipment(it) })
+                // Очистку экипировки принудительно делаем на ГЛАВНОМ потоке
+                plugin.server.scheduler.runTask(plugin, Runnable {
+                    if (it.isValid) removeEquipment(it)
+                })
                 evaluationQueue.offer(it)
             }
         }
@@ -92,12 +91,13 @@ class EquipmentManager : Listener {
     private fun onChunkLoad(event: ChunkLoadEvent) {
         if (!plugin.gameplayManager.allowedWorlds.contains(event.world)) return
 
-        // Если игрок летит на элитрах, этот ивент спамит страшно.
-        // Мы НЕ процессим инвентари тут, только добавляем в очередь.
         val villagers = event.chunk.entities.filterIsInstance<Villager>()
         villagers.forEach {
             if (it.isValid && !evaluationQueue.contains(it)) {
-                plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable { removeEquipment(it) })
+                // Очистку экипировки принудительно делаем на ГЛАВНОМ потоке
+                plugin.server.scheduler.runTask(plugin, Runnable {
+                    if (it.isValid) removeEquipment(it)
+                })
                 evaluationQueue.offer(it)
             }
         }
@@ -110,8 +110,8 @@ class EquipmentManager : Listener {
 
         val slot = event.hand ?: return
 
-        // Тотем срабатывает мгновенно, поэтому эту операцию выполняем вне очереди, но асинхронно
-        plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+        // Тотем срабатывает мгновенно, выполняем операцию строго на ГЛАВНОМ потоке на следующем тике
+        plugin.server.scheduler.runTask(plugin, Runnable {
             if (villager.isValid) {
                 villager.asHumanoid()?.equip(slot, ItemStack(AIR))
                 villager.takeItemFromQuillInventory(ItemStack(TOTEM_OF_UNDYING), 1)
@@ -143,8 +143,14 @@ class EquipmentManager : Listener {
             }
         }
 
+        // КРИТИЧЕСКИЙ ФИКС: Если лучшая экипировка найдена,
+        // перенаправляем ее применение на ГЛАВНЫЙ ПОТОК (Main Thread)
         if (bestItems.isNotEmpty()) {
-            applyEquipmentChanges(villager, bestItems)
+            plugin.server.scheduler.runTask(plugin, Runnable {
+                if (villager.isValid && !villager.isDead) {
+                    applyEquipmentChanges(villager, bestItems)
+                }
+            })
         }
     }
 
@@ -213,7 +219,7 @@ class EquipmentManager : Listener {
     private fun applyEquipmentChanges(villager: Villager, changes: Map<EquipmentSlot, ItemStack>) {
         val loc = villager.location
 
-        // Собираем игроков в радиусе 16 блоков асинхронно
+        // Метод выполняется на главном потоке, сбор игроков безопасен и быстр
         val nearbyPlayers = plugin.server.onlinePlayers.filter {
             it.world == loc.world && it.location.distanceSquared(loc) <= 256.0
         }

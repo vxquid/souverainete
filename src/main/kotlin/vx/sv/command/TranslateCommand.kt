@@ -120,8 +120,8 @@ class TranslateCommand : BaseCommand(), Listener {
 
         // Configuration and URL mapping
         val (url, defaultModel) = when (providerType) {
-            ProviderType.CEREBRAS -> "https://cloud.cerebras.ai" to "qwen-3-235b-a22b-instruct-2507"
-            ProviderType.GEMINI -> "https://aistudio.google.com/app/apikey" to "google/gemini-2.5-flash-lite"
+            ProviderType.CEREBRAS -> "https://cloud.cerebras.ai" to "gpt-oss-120b"
+            ProviderType.GEMINI -> "https://aistudio.google.com/app/apikey" to "gemini-3.1-flash-lite"
             ProviderType.GROQ -> "https://console.groq.com/keys" to "openai/gpt-oss-120b"
             ProviderType.OPENROUTER -> "https://openrouter.ai/keys" to "deepseek/deepseek-r1-0528:free"
             ProviderType.DEEPSEEK -> "https://platform.deepseek.com/api_keys" to "deepseek-chat"
