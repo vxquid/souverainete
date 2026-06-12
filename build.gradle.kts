@@ -67,7 +67,7 @@ repositories {
 }
 
 dependencies {
-  paperweight.paperDevBundle("26.1.2.construct.+")
+  paperweight.paperDevBundle("26.1.2.build.+")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")

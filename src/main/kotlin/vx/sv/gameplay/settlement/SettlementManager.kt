@@ -1,6 +1,9 @@
 package vx.sv.gameplay.settlement
 
 import com.google.gson.reflect.TypeToken
+import net.kyori.adventure.bossbar.BossBar
+import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.*
 import org.bukkit.block.Bell
@@ -22,14 +25,19 @@ import vx.sv.gameplay.humanoid.race.RaceManager.Race
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
+import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 
 class SettlementManager : Listener {
 
     private val config = plugin.gameplayManager.config.settlement
     private val repConfig = plugin.gameplayManager.config.reputation
+
+    // Хранилище активных боссбаров для зданий по UUID игроков
+    private val buildingBossBars = ConcurrentHashMap<UUID, BossBar>()
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
@@ -62,10 +70,10 @@ class SettlementManager : Listener {
     }
 
     private fun handlePlayerMovement(player: Player, world: World, enterMsg: String, leaveMsg: String) {
-        val playerLocation = player.location.toVector()
+        val playerLocationVector = player.location.toVector()
         val currentWorldSettlements = settlements[world] ?: return
 
-        val activeSettlement = currentWorldSettlements.find { it.territory.contains(playerLocation) }
+        val activeSettlement = currentWorldSettlements.find { it.territory.contains(playerLocationVector) }
         val lastSettlementName = player.currentSettlement
 
         if (activeSettlement != null) {
@@ -77,13 +85,37 @@ class SettlementManager : Listener {
             }
 
             sendReputationActionBar(player, activeSettlement)
-        }
 
-        if (activeSettlement == null && lastSettlementName != null) {
-            val leavingName = currentWorldSettlements.find { it.data.settlementName == lastSettlementName }?.data?.settlementName
-                ?: lastSettlementName
-            player.sendTitle("${config.titleColor}$leavingName", leaveMsg, config.titleFadeIn, config.titleStay, config.titleFadeOut)
-            player.currentSettlement = null
+            // === ЛОГИКА БОССБАРА ЗДАНИЙ ===
+            val buildings = SettlementPlanner.buildings[activeSettlement] ?: emptyList()
+            // Проверяем, находится ли игрок внутри BoundingBox какого-либо здания
+            val currentBuilding = buildings.find { it.box.contains(playerLocationVector) }
+
+            if (currentBuilding != null) {
+                val bar = buildingBossBars.getOrPut(player.uniqueId) {
+                    val newBar = BossBar.bossBar(Component.empty(), 1.0f, BossBar.Color.BLUE, BossBar.Overlay.PROGRESS)
+                    player.showBossBar(newBar)
+                    newBar
+                }
+
+                // Форматируем название: "TOWN_HALL" -> "Town Hall"
+                val formattedName = currentBuilding.type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
+                bar.name(Component.text("🏛 $formattedName", NamedTextColor.AQUA))
+            } else {
+                // Если игрок вышел из здания, прячем боссбар
+                buildingBossBars.remove(player.uniqueId)?.let { player.hideBossBar(it) }
+            }
+
+        } else {
+            // Если игрок вышел из поселения
+            buildingBossBars.remove(player.uniqueId)?.let { player.hideBossBar(it) }
+
+            if (lastSettlementName != null) {
+                val leavingName = currentWorldSettlements.find { it.data.settlementName == lastSettlementName }?.data?.settlementName
+                    ?: lastSettlementName
+                player.sendTitle("${config.titleColor}$leavingName", leaveMsg, config.titleFadeIn, config.titleStay, config.titleFadeOut)
+                player.currentSettlement = null
+            }
         }
     }
 

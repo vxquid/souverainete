@@ -2,15 +2,18 @@ package vx.sv
 
 import net.minecraft.core.BlockPos
 import org.bukkit.Material
+import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.inventory.ItemStack
-import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.settlement.Settlement
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import vx.sv.nms.v1_21_R7.entity.ai.construct.SchematicBuildJob
+import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
 import vx.sv.nms.v1_21_R7.entity.ai.construct.toBaseIngredient
 import vx.sv.util.SchematicLoader
 import java.util.*
@@ -22,6 +25,9 @@ class BuildTestListener : Listener {
     fun onPlayerInteract(event: PlayerInteractEvent) {
         val player = event.player
 
+        // =========================================================================
+        // === ИНСТРУМЕНТ 1: ПАЛКА (STICK) - Запуск строительства схематика      ===
+        // =========================================================================
         if (event.action == Action.RIGHT_CLICK_BLOCK && event.material == Material.STICK) {
             val clickedBlock = event.clickedBlock ?: return
             event.isCancelled = true
@@ -68,15 +74,9 @@ class BuildTestListener : Listener {
 
             player.sendMessage("§aНайдено ${nearbyVillagers.size} рабочих. Запуск строительства...")
 
-            // Генерируем уникальный ID для новой задачи
-            val jobId = UUID.randomUUID()
-            BuildJobManager.activeJobs[jobId] = buildJob
-            BuildJobManager.saveJobsToWorld() // Записываем в PDC
-
             nearbyVillagers.forEach { npc ->
                 val bukkitNpc = npc.bukkitEntity as BukkitVillager
 
-                // Выдаем все нужные блоки из шематика, конвертируя их в базовые
                 relativeBlocks.forEach { block ->
                     bukkitNpc.inventory.addItem(ItemStack(block.blockData.material.toBaseIngredient()))
                 }
@@ -86,16 +86,62 @@ class BuildTestListener : Listener {
                 npc.digTicks = 0
                 npc.buildTicks = 0
 
-                // Записываем UUID задачи в PDC жителя для персистентности
-                bukkitNpc.persistentDataContainer.set(
-                    org.bukkit.NamespacedKey(plugin, "active_build_job_uuid"),
-                    org.bukkit.persistence.PersistentDataType.STRING,
-                    jobId.toString()
-                )
-
                 npc.brain.eraseMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)
                 npc.brain.eraseMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.LOOK_TARGET)
             }
+        }
+
+        // =========================================================================
+        // === ИНСТРУМЕНТ 2: КОСТЬ (BONE) - МГНОВЕННЫЙ СПАВН ДЕРЕВНИ ПОД СЕБЯ     ===
+        // =========================================================================
+        if (event.action == Action.RIGHT_CLICK_BLOCK && event.material == Material.BONE) {
+            val clickedBlock = event.clickedBlock ?: return
+            event.isCancelled = true
+
+            val world = clickedBlock.world
+            val centerLoc = clickedBlock.location.add(0.0, 1.0, 0.0)
+
+            player.sendMessage("§a§l[Souverainete] §fМгновенная генерация тестового поселения в точке клика...")
+
+            // 1. Устанавливаем плиту и колокол в центре
+            val slabBlock = centerLoc.block
+            slabBlock.type = Material.STONE_SLAB
+
+            val bellBlock = slabBlock.getRelative(BlockFace.UP)
+            bellBlock.type = Material.BELL
+
+            // 2. Спавним 4 стартовых кастомных безработных жителя
+            val citizens = mutableSetOf<BukkitVillager>()
+            for (i in 0 until 4) {
+                val v = world.spawn(centerLoc, BukkitVillager::class.java) { villager ->
+                    villager.profession = BukkitVillager.Profession.NONE
+                    villager.villagerLevel = 1
+                }
+                citizens.add(v)
+            }
+
+            // 3. Формируем пакет данных нового поселения
+            val newData = Settlement.SettlementData(
+                UUID.randomUUID(),
+                world.uid,
+                "Settlement",
+                centerLoc,
+                System.currentTimeMillis(),
+                "VILLAGER_RACE"
+            )
+            val settlement = Settlement(newData, citizens)
+
+            // 4. Регистрируем поселение и запускаем подбор имени (через ИИ или расу)
+            val manager = SettlementManager()
+            manager.generateSettlementName(settlement)
+
+            // 5. Инициализируем планировщик постройки и размечаем тестовые площадки
+            val planner = SettlementPlanner(settlement)
+            planner.planBuilding("BAKERY", 12, 12)
+            planner.planBuilding("BLACKSMITH", 14, 14)
+            planner.planBuilding("WOOD_FARM", 8, 9)
+
+            player.sendMessage("§a§l[Souverainete] §aПоселение успешно основано! Рабочие заспавнены и приступили к застройке тестовых плит.")
         }
     }
 }

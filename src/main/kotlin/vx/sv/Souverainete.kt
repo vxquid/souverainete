@@ -22,6 +22,8 @@ import vx.sv.gameplay.GameplayManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
 import vx.sv.gameplay.trade.ScoreCalculator
+import vx.sv.nms.v1_21_R7.entity.ai.construct.VillageGenerationListener
+import vx.sv.nms.v1_21_R7.entity.ai.construct.WoodFarmManager
 import vx.sv.serialization.ItemStackSerializer
 import vx.sv.serialization.LocationSerializer
 import vx.sv.serialization.UUIDSerializer
@@ -171,8 +173,12 @@ class Souverainete : JavaPlugin(), Listener {
 
             // Register GUI listener
             server.pluginManager.registerEvents(SettingsGUIListener(), this)
+
+            // build test
             server.pluginManager.registerEvents(BuildTestListener(), this)
             server.pluginManager.registerEvents(BuildSaveListener(), this)
+            server.pluginManager.registerEvents(VillageGenerationListener(), this)
+            server.pluginManager.registerEvents(WoodFarmManager(), this)
         }
     }
 

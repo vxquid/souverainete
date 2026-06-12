@@ -11,10 +11,17 @@ import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
 import org.bukkit.Material
 import org.bukkit.Particle
+import org.bukkit.Sound
+import org.bukkit.block.Block
+import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import java.util.*
+import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.sqrt
 import org.bukkit.entity.Villager as BukkitVillager
 
 class ConstructionBehavior(
@@ -23,9 +30,9 @@ class ConstructionBehavior(
     ImmutableMap.of(
         MemoryModuleType.WALK_TARGET, MemoryStatus.REGISTERED,
         MemoryModuleType.LOOK_TARGET, MemoryStatus.REGISTERED,
-        MemoryModuleType.ATTACK_TARGET, MemoryStatus.VALUE_ABSENT // Останавливает стройку, если рядом враги
+        MemoryModuleType.ATTACK_TARGET, MemoryStatus.VALUE_ABSENT
     ),
-    1200 // Максимальное время непрерывного выполнения тика
+    1200
 ) {
 
     private fun takeItem(inventory: Inventory, material: Material, amount: Int) {
@@ -45,22 +52,59 @@ class ConstructionBehavior(
         return temp
     }
 
-    override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
-        // 1. Не строим и не ломаем ночью
-        if (!world.world.isDayTime) return false
+    private fun removeWholeTree(startBlock: Block) {
+        val checked = mutableSetOf<Block>()
+        val queue = ArrayDeque<Block>()
+        queue.add(startBlock)
 
-        // 2. Проверяем кулдаун после предыдущего действия
+        var processedCount = 0
+        while (queue.isNotEmpty() && processedCount++ < 250) {
+            val current = queue.poll()
+            if (!checked.add(current)) continue
+
+            val type = current.type
+            val isLog = type.name.contains("LOG") || type.name.contains("WOOD")
+            val isLeaves = type.name.contains("LEAVES")
+
+            if (isLog || isLeaves) {
+                if (isLog) {
+                    current.breakNaturally()
+                } else {
+                    current.type = Material.AIR
+                }
+
+                for (face in BlockFace.entries) {
+                    if (face == BlockFace.SELF) continue
+                    val neighbor = current.getRelative(face)
+                    if (neighbor.location.distanceSquared(startBlock.location) <= 225.0) {
+                        queue.add(neighbor)
+                    }
+                }
+            }
+        }
+    }
+
+    override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
+        if (!world.world.isDayTime) return false
         if (world.gameTime < villager.nextBuildAvailableTime) return false
 
         val job = villager.activeBuildJob ?: return false
+        if (job.isFinished()) {
+            villager.activeBuildJob = null
+            return false
+        }
 
-        // 3. Ищем или резервируем следующий блок
         val assigned = villager.assignedBlock ?: job.claimNextBlock(villager) ?: return false
         villager.assignedBlock = assigned
 
         val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
-        if (currentBlock.type == Material.AIR && !bukkitInv.contains(assigned.material)) {
+
+        val isClear = currentBlock.type.isAir || currentBlock.isLiquid
+        // Если это трансформация травы в тропинку — ресурсы инвентаря не требуются для старта задачи!
+        val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
+
+        if (isClear && !isPathTransformation && !assigned.material.isAir && !bukkitInv.contains(assigned.material)) {
             job.unclaimBlock(assigned)
             villager.assignedBlock = null
             return false
@@ -70,13 +114,18 @@ class ConstructionBehavior(
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
         val job = villager.activeBuildJob ?: return false
+        if (job.isFinished()) return false
+
         val assigned = villager.assignedBlock ?: return false
 
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
         val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
-        val hasResources = currentBlock.type != Material.AIR || bukkitInv.contains(assigned.material)
 
-        return world.world.isDayTime && hasResources && !job.isFinished()
+        val isClear = currentBlock.type.isAir || currentBlock.isLiquid
+        val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
+        val hasResources = !isClear || isPathTransformation || assigned.material.isAir || bukkitInv.contains(assigned.material)
+
+        return world.world.isDayTime && hasResources
     }
 
     override fun start(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -84,10 +133,25 @@ class ConstructionBehavior(
         villager.previousMainHandItem = villager.mainHandItem.copy()
 
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
-        val tool = if (currentBlock.type != Material.AIR) {
-            ItemStack(Material.STONE_PICKAXE)
+
+        val tool = if (!currentBlock.type.isAir && !currentBlock.isLiquid) {
+            if (currentBlock.type.isShovelable()) {
+                ItemStack(Material.STONE_SHOVEL)
+            } else {
+                ItemStack(Material.STONE_PICKAXE)
+            }
+        } else if (assigned.material.isAir) {
+            ItemStack(Material.BUCKET)
         } else {
-            val itemToHold = if (assigned.blockData.material.isItem) assigned.blockData.material else assigned.material
+            // Если мы трансформируем траву в тропинку лопатой — берем в руки лопату
+            val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
+            val itemToHold = if (isPathTransformation) {
+                Material.STONE_SHOVEL
+            } else if (assigned.blockData.material.isItem) {
+                assigned.blockData.material
+            } else {
+                assigned.material
+            }
             ItemStack(itemToHold)
         }
 
@@ -106,41 +170,49 @@ class ConstructionBehavior(
         val blockPos = assigned.pos
         val block = bukkitWorld.getBlockAt(blockPos.x, blockPos.y, blockPos.z)
 
-        // Блокировка взгляда на цель
         villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(blockPos))
 
         val dX = blockPos.x + 0.5 - villager.x
         val dY = blockPos.y + 0.5 - villager.eyeY
         val dZ = blockPos.z + 0.5 - villager.z
-        val distance = kotlin.math.sqrt(dX * dX + dZ * dZ)
-        val targetYaw = (Math.toDegrees(kotlin.math.atan2(dZ, dX)) - 90.0).toFloat()
-        val targetPitch = (-Math.toDegrees(kotlin.math.atan2(dY, distance))).toFloat()
+        val distance = sqrt(dX * dX + dZ * dZ)
 
-        villager.yRot = targetYaw
-        villager.yHeadRot = targetYaw
-        villager.yBodyRot = targetYaw
-        villager.xRot = targetPitch
+        villager.yRot = (Math.toDegrees(atan2(dZ, dX)) - 90.0).toFloat()
+        villager.yHeadRot = villager.yRot
+        villager.yBodyRot = villager.yRot
+        villager.xRot = (-Math.toDegrees(atan2(dY, distance))).toFloat()
         villager.lookControl.setLookAt(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5)
 
         val npcPos = villager.blockPosition()
-        val distSqr = npcPos.distSqr(blockPos)
+        val diffX = abs(blockPos.x - npcPos.x)
+        val diffZ = abs(blockPos.z - npcPos.z)
+        val diffY = abs(blockPos.y - npcPos.y)
 
-        // Дистанция строительства больше не ограничивает работу ИИ
-        val isWithinReach = true
+        // Лимитируем только дороги (isRoad == true). Обычные структуры строим с бесконечной дистанции!
+        val isWithinReach = if (assigned.isRoad) {
+            (diffX * diffX + diffZ * diffZ <= 25.0) && (diffY <= 4)
+        } else {
+            true
+        }
 
         if (isWithinReach) {
-            // Нам больше не нужны проверки на застревание, так как работа продолжается в любом случае
             villager.stuckTicks = 0
             villager.lastPosition = null
 
-            // Останавливаем движение только в том случае, если подошли достаточно близко
-            if (distSqr <= 9.0) {
+            if (distance <= 3.0) {
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
             }
 
-            if (block.type != Material.AIR) {
-                // === РЕЖИМ РАЗРУШЕНИЯ ПРЕПЯТСТВИЙ (Digging) ===
-                val expectedTool = CraftItemStack.asNMSCopy(ItemStack(Material.IRON_PICKAXE))
+            if (!block.type.isAir && !block.isLiquid) {
+                if (block.type.name.contains("LOG") || block.type.name.contains("WOOD")) {
+                    removeWholeTree(block)
+                    villager.digTicks = 0
+                    doStop(world, villager, time)
+                    return
+                }
+
+                val expectedToolType = if (block.type.isShovelable()) Material.IRON_SHOVEL else Material.IRON_PICKAXE
+                val expectedTool = CraftItemStack.asNMSCopy(ItemStack(expectedToolType))
                 if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, expectedTool)) {
                     villager.setItemInHand(InteractionHand.MAIN_HAND, expectedTool)
                 }
@@ -157,25 +229,52 @@ class ConstructionBehavior(
                     block.breakNaturally()
                     villager.digTicks = 0
                     villager.nextBuildAvailableTime = world.gameTime + 2L
-
-                    val itemToHold = if (assigned.blockData.material.isItem) assigned.blockData.material else assigned.material
-                    villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(itemToHold)))
+                    doStop(world, villager, time)
                 }
             } else {
-                // === РЕЖИМ УСТАНОВКИ БЛОКА (Placing) ===
+                // === РЕЖИМ УСТАНОВКИ БЛОКА ===
                 val material = assigned.material
+
+                // Осушение жидкости пустым ведром
+                if (material.isAir) {
+                    if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+                    villager.buildTicks++
+
+                    if (villager.buildTicks >= 10) {
+                        block.type = Material.AIR
+                        bukkitWorld.playSound(block.location, Sound.ITEM_BUCKET_FILL, 1.0f, 1.0f)
+
+                        job.completeBlock(assigned)
+                        villager.assignedBlock = null
+                        villager.buildTicks = 0
+                        villager.nextBuildAvailableTime = world.gameTime + 2L
+                        doStop(world, villager, time)
+                    }
+                    return
+                }
+
                 val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
 
-                if (!bukkitInv.contains(material)) {
+                // Проверяем: если это трансформация земли в тропинку лопатой — доски/блоки DIRT не требуются!
+                val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
+
+                if (!isPathTransformation && !bukkitInv.contains(material)) {
                     job.unclaimBlock(assigned)
                     villager.assignedBlock = null
-                    villager.digTicks = 0
                     villager.buildTicks = 0
                     doStop(world, villager, time)
                     return
                 }
 
-                val itemToHold = if (assigned.blockData.material.isItem) assigned.blockData.material else assigned.material
+                // Экипируем лопату при трансформации, иначе держим в руке целевой блок
+                val itemToHold = if (isPathTransformation) {
+                    Material.STONE_SHOVEL
+                } else if (assigned.blockData.material.isItem) {
+                    assigned.blockData.material
+                } else {
+                    assigned.material
+                }
+
                 val expectedBlock = CraftItemStack.asNMSCopy(ItemStack(itemToHold))
                 if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, expectedBlock)) {
                     villager.setItemInHand(InteractionHand.MAIN_HAND, expectedBlock)
@@ -186,12 +285,18 @@ class ConstructionBehavior(
 
                 if (villager.buildTicks >= 10) {
                     block.setBlockData(assigned.blockData, true)
-                    bukkitWorld.playSound(block.location, assigned.blockData.soundGroup.placeSound, 1.0f, 1.0f)
-                    takeItem(bukkitInv, material, 1)
+
+                    if (isPathTransformation) {
+                        // Нативный звук разравнивания земли лопатой (ресурсы НЕ тратятся)
+                        bukkitWorld.playSound(block.location, Sound.ITEM_SHOVEL_FLATTEN, 1.0f, 1.0f)
+                    } else {
+                        // Обычная установка блока со звуком материала и списанием 1 ресурса
+                        bukkitWorld.playSound(block.location, assigned.blockData.soundGroup.placeSound, 1.0f, 1.0f)
+                        takeItem(bukkitInv, material, 1)
+                    }
 
                     job.completeBlock(assigned)
                     villager.assignedBlock = null
-                    villager.digTicks = 0
                     villager.buildTicks = 0
                     villager.nextBuildAvailableTime = world.gameTime + 2L
                     doStop(world, villager, time)
@@ -199,19 +304,26 @@ class ConstructionBehavior(
             }
         }
 
-        // Если NPC находится далеко, он все равно будет пытаться подойти ближе для естественного вида
-        if (distSqr > 9.0 && !villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
+        val needsWalk = (assigned.isRoad && !isWithinReach) || (!assigned.isRoad && distance > 3.0)
+        if (needsWalk && !villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
             val groundPos = getGroundPos(world, blockPos)
             villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(groundPos), speedModifier, 2))
         }
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
+        val job = villager.activeBuildJob
         val assigned = villager.assignedBlock
+
         if (assigned != null) {
-            villager.activeBuildJob?.unclaimBlock(assigned)
+            job?.unclaimBlock(assigned)
             villager.assignedBlock = null
         }
+
+        if (job?.isFinished() == true) {
+            villager.activeBuildJob = null
+        }
+
         villager.digTicks = 0
         villager.buildTicks = 0
 
