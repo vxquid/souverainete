@@ -170,6 +170,7 @@ class Souverainete : JavaPlugin(), Listener {
 
             // Register GUI listener
             server.pluginManager.registerEvents(SettingsGUIListener(), this)
+            server.pluginManager.registerEvents(BuildTestListener(), this)
         }
     }
 
