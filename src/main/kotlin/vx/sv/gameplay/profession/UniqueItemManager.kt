@@ -1,10 +1,10 @@
 package vx.sv.gameplay.profession
 
-import com.cryptomorin.xseries.XAttribute
 import io.papermc.paper.registry.RegistryAccess
 import io.papermc.paper.registry.RegistryKey
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
+import org.bukkit.attribute.Attribute
 import org.bukkit.attribute.AttributeModifier
 import org.bukkit.entity.Villager
 import org.bukkit.inventory.EquipmentSlotGroup
@@ -19,10 +19,8 @@ import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
-import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.professionLevelName
 import vx.sv.persistent.LivingEntityExtend.settlement
-import vx.sv.persistent.LivingEntityExtend.subInventory
 import vx.sv.util.HexColorLib.color
 import java.util.*
 import kotlin.random.Random
@@ -40,6 +38,19 @@ class UniqueItemManager {
         // Keys for PersistentDataContainer
         val attributeKey = NamespacedKey(plugin, "Attribute")
         val rarityKey = NamespacedKey(plugin, "Rarity")
+
+        // Map for Allowed Attribute names to Bukkit Attributes
+        val allowedAttributesMap = mapOf(
+            "ATTACK_SPEED" to Attribute.ATTACK_SPEED,
+            "ATTACK_DAMAGE" to Attribute.ATTACK_DAMAGE,
+            "BLOCK_BREAK_SPEED" to Attribute.BLOCK_BREAK_SPEED,
+            "BLOCK_INTERACTION_RANGE" to Attribute.BLOCK_INTERACTION_RANGE,
+            "ENTITY_INTERACTION_RANGE" to Attribute.ENTITY_INTERACTION_RANGE,
+            "MAX_HEALTH" to Attribute.MAX_HEALTH,
+            "ARMOR" to Attribute.ARMOR,
+            "ARMOR_TOUGHNESS" to Attribute.ARMOR_TOUGHNESS,
+            "SCALE" to Attribute.SCALE
+        )
 
         /**
          * Entry point to create a unique item with stats and put it in villager's inventory (or handle it).
@@ -120,11 +131,11 @@ class UniqueItemManager {
          */
         fun resetAndApplyBaseStats(): UniqueItemBuilder {
             val allowedAttributes = AttributeConfigProvider.getAllowedAttributes(typeName)
-            val attributesToCheck = XAttribute.getValues().filter { allowedAttributes.contains(it.name().uppercase()) }
+            val attributesToCheck = allowedAttributesMap.filter { (name, _) -> allowedAttributes.contains(name) }.values
 
             // Clear existing
-            attributesToCheck.forEach { xAttr ->
-                xAttr.get()?.let { meta.removeAttributeModifier(it) }
+            attributesToCheck.forEach { attr ->
+                meta.removeAttributeModifier(attr)
             }
             return this
         }
@@ -134,13 +145,13 @@ class UniqueItemManager {
          */
         fun rollAndApplyBonusAttributes(): UniqueItemBuilder {
             val allowedAttributes = AttributeConfigProvider.getAllowedAttributes(typeName)
-            val availableXAttributes = XAttribute.getValues().filter { allowedAttributes.contains(it.name().uppercase()) }
+            val availableAttributes = allowedAttributesMap.filter { (name, _) -> allowedAttributes.contains(name) }
 
             repeat(rolls) {
-                val attribute = availableXAttributes.randomOrNull() ?: return@repeat
+                val (name, attribute) = availableAttributes.entries.randomOrNull() ?: return@repeat
 
                 // Store pretty name for Lore/AI
-                val prettyName = attribute.get()!!.key.key
+                val prettyName = attribute.key.key
                     .replace("generic.", "")
                     .replace("player.", "")
                     .replace("_", " ")
@@ -148,15 +159,15 @@ class UniqueItemManager {
                 addedAttributeNames.add(prettyName)
 
                 // Accumulate bonuses
-                when (attribute) {
-                    XAttribute.ATTACK_SPEED -> attackSpeed += 0.3
-                    XAttribute.ATTACK_DAMAGE -> attackDamage += 1.5
-                    XAttribute.BLOCK_BREAK_SPEED -> blockBreakSpeed += 0.4
-                    XAttribute.BLOCK_INTERACTION_RANGE -> blockInteractionRange += 0.5
-                    XAttribute.MAX_HEALTH -> maxHealth += 2.0
-                    XAttribute.ARMOR -> armor += 1.0
-                    XAttribute.ARMOR_TOUGHNESS -> armorToughness += 1.0
-                    XAttribute.SCALE -> {
+                when (name) {
+                    "ATTACK_SPEED" -> attackSpeed += 0.3
+                    "ATTACK_DAMAGE" -> attackDamage += 1.5
+                    "BLOCK_BREAK_SPEED" -> blockBreakSpeed += 0.4
+                    "BLOCK_INTERACTION_RANGE" -> blockInteractionRange += 0.5
+                    "MAX_HEALTH" -> maxHealth += 2.0
+                    "ARMOR" -> armor += 1.0
+                    "ARMOR_TOUGHNESS" -> armorToughness += 1.0
+                    "SCALE" -> {
                         scale += 0.1
                         blockInteractionRange += 0.5
                         entityInteractionRange += 0.5
@@ -184,20 +195,18 @@ class UniqueItemManager {
             val slot = EquipmentSlotProvider.getSlot(typeName)
 
             // Helper to add modifier if value changed/valid
-            fun apply(xAttr: XAttribute, value: Double, baseValue: Double = 0.0, op: AttributeModifier.Operation = AttributeModifier.Operation.ADD_NUMBER) {
-                val attr = xAttr.get() ?: return
+            fun apply(attribute: Attribute, value: Double, baseValue: Double = 0.0, op: AttributeModifier.Operation = AttributeModifier.Operation.ADD_NUMBER) {
                 // Add if value is distinct from base OR (if ADD_NUMBER and > 0)
-                // Logic strictly follows original: checks base mismatch or positive value depending on attribute
-                val shouldAdd = if (xAttr == XAttribute.ATTACK_SPEED) value != baseValue else value > 0.0
+                val shouldAdd = if (attribute == Attribute.ATTACK_SPEED) value != baseValue else value > 0.0
 
-                // Attack Damage and Armor are special cases in original code: they are always added if they exist in base stats logic
-                val isBaseStat = (xAttr == XAttribute.ATTACK_DAMAGE || xAttr == XAttribute.ARMOR) && value > 0.0
+                // Attack Damage and Armor are special cases: they are always added if they exist in base stats logic
+                val isBaseStat = (attribute == Attribute.ATTACK_DAMAGE || attribute == Attribute.ARMOR) && value > 0.0
 
                 if (shouldAdd || isBaseStat) {
-                    val finalOp = if(xAttr == XAttribute.ATTACK_SPEED && value != baseValue) AttributeModifier.Operation.ADD_NUMBER else op
+                    val finalOp = if(attribute == Attribute.ATTACK_SPEED && value != baseValue) AttributeModifier.Operation.ADD_NUMBER else op
 
                     meta.addAttributeModifier(
-                        attr,
+                        attribute,
                         AttributeModifier(
                             NamespacedKey(plugin, UUID.randomUUID().toString()),
                             value,
@@ -209,15 +218,15 @@ class UniqueItemManager {
             }
 
             // Apply all accumulated stats
-            apply(XAttribute.ATTACK_SPEED, attackSpeed, BaseStatsProvider.getBaseAttackSpeed(typeName))
-            apply(XAttribute.ATTACK_DAMAGE, attackDamage)
-            apply(XAttribute.BLOCK_BREAK_SPEED, blockBreakSpeed, 1.0)
-            apply(XAttribute.BLOCK_INTERACTION_RANGE, blockInteractionRange)
-            apply(XAttribute.ENTITY_INTERACTION_RANGE, entityInteractionRange)
-            apply(XAttribute.MAX_HEALTH, maxHealth)
-            apply(XAttribute.ARMOR, armor)
-            apply(XAttribute.ARMOR_TOUGHNESS, armorToughness)
-            apply(XAttribute.SCALE, scale)
+            apply(Attribute.ATTACK_SPEED, attackSpeed, BaseStatsProvider.getBaseAttackSpeed(typeName))
+            apply(Attribute.ATTACK_DAMAGE, attackDamage)
+            apply(Attribute.BLOCK_BREAK_SPEED, blockBreakSpeed, 1.0)
+            apply(Attribute.BLOCK_INTERACTION_RANGE, blockInteractionRange)
+            apply(Attribute.ENTITY_INTERACTION_RANGE, entityInteractionRange)
+            apply(Attribute.MAX_HEALTH, maxHealth)
+            apply(Attribute.ARMOR, armor)
+            apply(Attribute.ARMOR_TOUGHNESS, armorToughness)
+            apply(Attribute.SCALE, scale)
 
             // Save attribute names for AI prompt
             meta.persistentDataContainer.set(attributeKey, PersistentDataType.STRING, addedAttributeNames.joinToString(", "))
@@ -359,7 +368,7 @@ class UniqueItemManager {
             return if (cachedProfessionsConfig.getBoolean("villager-item-producing.forced-armor-trims")) {
                 RegistryAccess.registryAccess().getRegistry(RegistryKey.TRIM_PATTERN).toList().random()
             } else {
-                villager.subInventory.filterNotNull()
+                villager.inventory.filterNotNull()
                     .filter { it.type.toString().contains("TRIM_SMITHING_TEMPLATE") }
                     .randomOrNull()?.let { trimTemplates[it.type] }
             }
@@ -392,7 +401,7 @@ class UniqueItemManager {
             item.itemMeta = meta
 
             // Give to villager
-            villager.addItemToQuillInventory(item)
+            villager.inventory.addItem(item)
         }
 
         private fun formatLore(description: String): MutableList<String> {

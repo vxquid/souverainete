@@ -1,7 +1,6 @@
 @file:Suppress("DEPRECATION")
 package vx.sv.gameplay.dialogue
 
-import com.cryptomorin.xseries.XSound
 import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.event.PacketListenerAbstract
 import com.github.retrooper.packetevents.event.PacketListenerPriority
@@ -10,6 +9,7 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientChatMessage
 import net.md_5.bungee.api.ChatMessageType
 import net.md_5.bungee.api.chat.TextComponent
+import org.bukkit.Sound
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
@@ -18,6 +18,7 @@ import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.event.player.PlayerDropItemEvent
 import org.bukkit.inventory.EquipmentSlot
+import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
 import org.bukkit.scheduler.BukkitTask
 import vx.sv.Souverainete.Companion.plugin
@@ -30,12 +31,10 @@ import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
-import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
 import vx.sv.persistent.LivingEntityExtend.professionLevelName
 import vx.sv.persistent.LivingEntityExtend.settlement
-import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import vx.sv.util.Daytime
 import vx.sv.util.VivaldiHook
 import vx.vivaldi.season.Season
@@ -78,6 +77,15 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
     var lastMessageTime = System.currentTimeMillis()
     val dialogueHistory = mutableListOf<String>()
 
+    private fun takeItem(inventory: Inventory, item: ItemStack, amount: Int) {
+        val found = inventory.filterNotNull().find { it.isSimilar(item) } ?: return
+        if (found.amount <= amount) {
+            inventory.removeItem(found)
+        } else {
+            found.amount -= amount
+        }
+    }
+
     private fun keepAlive(task: BukkitTask) {
 
         if (cancelled) {
@@ -101,7 +109,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
     private fun onPlayerDropItem(event: PlayerDropItemEvent) {
         if (giftAwaiting && event.player == player && !cancelled) {
             if (readyToSend) {
-                entity.addItemToQuillInventory(event.itemDrop.itemStack)
+                entity.inventory.addItem(event.itemDrop.itemStack)
                 this.cooldown()
                 this.generateGiftReaction(player, entity, event.itemDrop.itemStack.clone(), dialogueHistory)
                 plugin.gameplayManager.humanoidManager.protocolListener.actionController.temporaryEquip(entity, EquipmentSlot.HAND, event.itemDrop.itemStack, 60)
@@ -171,7 +179,6 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else if (VivaldiHook.getCurrentSeasonName() == Season.WINTER.name) "snowing" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.toString() }.toString()
 
-        // CHANGED: Безопасное получение сезона. Если плагина нет, подставляем "Unknown"
         val currentSeason  = VivaldiHook.getCurrentSeasonName() ?: "Unknown"
         val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
 
@@ -190,7 +197,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "currentBiome"       to currentBiome,
             "currentTime"        to currentDaytime,
             "currentWeather"     to currentWeather,
-            "currentSeason"      to currentSeason, // Плейсхолдер теперь всегда имеет строковое значение
+            "currentSeason"      to currentSeason,
             "activeEffects"      to activeEffects,
             "playerMessage"      to playerMessage,
             "dialogueHistory"    to if (dialogue.isEmpty()) "[NO PREVIOUS MESSAGES. IT IS THE START OF THE DIALOGUE. GREET THE PLAYER IF NEEDED.]" else dialogue.toString(),
@@ -235,7 +242,6 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val currentWeather = villager.world.let { if (it.isThundering) return@let "thunder" else if (it.isClearWeather) "clear" else if (VivaldiHook.getCurrentSeasonName() == Season.WINTER.name) "snowing" else "raining" }
         val activeEffects  = villager.activePotionEffects.map { it.type.key.key }.toString()
 
-        // CHANGED: Безопасное получение сезона. Если плагина нет, подставляем "Unknown"
         val currentSeason  = VivaldiHook.getCurrentSeasonName() ?: "Unknown"
 
         val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
@@ -255,7 +261,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             "currentTime"        to currentDaytime,
             "settlementName"     to (villager.settlement?.data?.settlementName ?: "[NPC is homeless.]"),
             "currentWeather"     to currentWeather,
-            "currentSeason"      to currentSeason, // Плейсхолдер теперь всегда имеет строковое значение
+            "currentSeason"      to currentSeason,
             "activeEffects"      to activeEffects,
             "itemType"           to gift.type.toString().lowercase().replace("_", " "),
             "itemAmount"         to gift.amount.toString(),
@@ -322,10 +328,10 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
                     }
 
                     player.sendFormattedMessage(formattedMessage)
-                    player.playSound(player.eyeLocation, XSound.UI_TOAST_IN.get() ?: throw NullPointerException(), 1F, 1.25F)
+                    player.playSound(player.eyeLocation, Sound.UI_TOAST_IN, 1F, 1.25F)
                     if (reaction.npcResponse.last() == message) {
                         if (!reaction.keepTheGift) {
-                            entity.takeItemFromQuillInventory(gift, gift.amount)
+                            takeItem(entity.inventory, gift, gift.amount)
                             entity.world.dropItem(entity.location, gift)
                         }
                         readyToSend = true
@@ -371,7 +377,7 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
                     }
 
                     player.sendFormattedMessage(formattedMessage)
-                    player.playSound(player.eyeLocation, XSound.UI_TOAST_IN.get() ?: throw NullPointerException(), 1F, 1.25F)
+                    player.playSound(player.eyeLocation, Sound.UI_TOAST_IN, 1F, 1.25F)
                     if (responseData.npcResponse.last() == message) {
                         plugin.gameplayManager.reputationManager.addReputation(entity, player, impression.score)
                         readyToSend = true

@@ -22,7 +22,6 @@ import vx.sv.gameplay.humanoid.race.RaceManager.Race
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.currentSettlement
-import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import kotlin.math.cos
@@ -243,7 +242,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         val world = defender.world
 
         // Математически вычисляем координаты чанка (сдвиг вправо на 4 эквивалентен делению на 16).
-        // Мы убрали вызов .chunk, так как он тоже синхронно грузит центральный чанк!
         val centerChunkX = center.blockX shr 4
         val centerChunkZ = center.blockZ shr 4
 
@@ -253,15 +251,10 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 val cz = centerChunkZ + z
 
                 if (load) {
-                    // Решение вашего FIXME: проверяем, существует ли чанк.
-                    // Метод isChunkGenerated читает только заголовки файлов и работает моментально.
                     if (world.isChunkGenerated(cx, cz)) {
-                        // Добавляем тикет плагина. Эта операция НЕ вызывает getChunkAt() и
-                        // ставит чанк в очередь на асинхронную загрузку, спасая TPS сервера.
                         world.addPluginChunkTicket(cx, cz, plugin)
                     }
                 } else {
-                    // Плагинный тикет безопасно удаляется
                     world.removePluginChunkTicket(cx, cz, plugin)
                 }
             }
@@ -598,8 +591,10 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
             }
         }
 
-        loadout.values.forEach { itemStack ->
-            raider.addItemToQuillInventory(itemStack)
+        if (raider is Villager) {
+            loadout.values.forEach { itemStack ->
+                raider.inventory.addItem(itemStack)
+            }
         }
 
         try {

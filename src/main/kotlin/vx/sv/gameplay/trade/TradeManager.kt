@@ -11,6 +11,7 @@ import org.bukkit.event.Listener
 import org.bukkit.event.inventory.InventoryClickEvent
 import org.bukkit.event.inventory.InventoryType
 import org.bukkit.event.server.MapInitializeEvent
+import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.MerchantRecipe
 import org.bukkit.inventory.meta.MapMeta
@@ -28,11 +29,8 @@ import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.trade.ScoreCalculator.calculateScore
 import vx.sv.gameplay.trade.ScoreCalculator.getBasicScore
-import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.quests
 import vx.sv.persistent.LivingEntityExtend.settlement
-import vx.sv.persistent.LivingEntityExtend.subInventory
-import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.cos
@@ -44,6 +42,15 @@ import kotlin.math.sin
  * and procedural map generation for cartographers.
  */
 class TradeManager : Listener {
+
+    private fun takeItem(inventory: Inventory, item: ItemStack, amount: Int) {
+        val found = inventory.filterNotNull().find { it.isSimilar(item) } ?: return
+        if (found.amount <= amount) {
+            inventory.removeItem(found)
+        } else {
+            found.amount -= amount
+        }
+    }
 
     @EventHandler
     private fun handleMerchantInventoryClick(event: InventoryClickEvent) {
@@ -76,10 +83,12 @@ class TradeManager : Listener {
     private fun handleTrade(event: MerchantTradeEvent) {
         (event.merchant as? Villager)?.let { villager: Villager ->
             event.recipe.let { recipe ->
-                villager.quests().find {it.questItem.getItemStack().isSimilar(recipe.ingredients[0])}
-                villager.addItemToQuillInventory(recipe.ingredients[0])
-                if (recipe.ingredients.size > 1) villager.addItemToQuillInventory(recipe.ingredients[1])
-                villager.takeItemFromQuillInventory(recipe.result, recipe.result.amount)
+                val inv = villager.inventory
+                inv.addItem(recipe.ingredients[0])
+                if (recipe.ingredients.size > 1) {
+                    inv.addItem(recipe.ingredients[1])
+                }
+                takeItem(inv, recipe.result, recipe.result.amount)
             }
         }
     }
@@ -171,7 +180,6 @@ class TradeManager : Listener {
             view.renderers.toList().forEach { view.removeRenderer(it) }
 
             view.addRenderer(object : MapRenderer(true) {
-                // To prevent infinite repainting per player, we save unique UUIDs of those who already painted the pixels
                 val renderedPlayers = mutableSetOf<UUID>()
 
                 fun getSmoothNoise(x: Double, y: Double): Double {
@@ -192,7 +200,6 @@ class TradeManager : Listener {
                         return (diff / 8).coerceIn(-128, 127).toByte()
                     }
 
-                    // --- 1. RENDER PROCEDURAL PIXELS ONLY ONCE PER PLAYER ---
                     if (!renderedPlayers.contains(playerId)) {
                         renderedPlayers.add(playerId)
 
@@ -211,7 +218,6 @@ class TradeManager : Listener {
 
                         val isParchment = Array(128) { BooleanArray(128) }
 
-                        // Draw Map Textures
                         for (x in 0..127) {
                             for (y in 0..127) {
                                 val nx = x.toDouble()
@@ -291,7 +297,6 @@ class TradeManager : Listener {
                             }
                         }
 
-                        // Draw Map Decorations
                         val decorDark = parchmentPalette[26]
                         val decorLight = parchmentPalette[14]
 
@@ -352,7 +357,6 @@ class TradeManager : Listener {
                             drawSafe(hx - 1, hy, decorDark); drawSafe(hx + 1, hy, decorDark)
                         }
 
-                        // Draw Route Path
                         fun getPixelCoord(block: Int, mid: Int): Int {
                             val diff = block - mid
                             return (64 + diff / 16).coerceIn(0, 127)
@@ -396,13 +400,11 @@ class TradeManager : Listener {
                         }
                     }
 
-                    // --- 2. UPDATE CURSORS MANUALLY EVERY TICK ---
                     val cursors = canvas.cursors
                     while (cursors.size() > 0) {
                         cursors.removeCursor(cursors.getCursor(0))
                     }
 
-                    // Add static markers back
                     cursors.addCursor(MapCursor(
                         getCursorCoord(origin.data.center.blockX, midX),
                         getCursorCoord(origin.data.center.blockZ, midZ),
@@ -415,14 +417,10 @@ class TradeManager : Listener {
                         0.toByte(), MapCursor.Type.RED_X, true
                     ))
 
-                    // Intercept tracking logic and manually draw Player cursor
                     val pLoc = player.location
                     if (pLoc.world == map.world) {
                         val px = getCursorCoord(pLoc.blockX, midX)
                         val pz = getCursorCoord(pLoc.blockZ, midZ)
-
-                        // Converting Minecraft Yaw to MapCursor direction (0..15) using vanilla algorithm
-                        // Bitwise AND 15 gracefully wraps negative or massive angles!
                         val direction = ((pLoc.yaw / 22.5f).roundToInt() and 15).toByte()
 
                         cursors.addCursor(MapCursor(px, pz, direction, MapCursor.Type.PLAYER, true))
@@ -461,7 +459,7 @@ class TradeManager : Listener {
         private val Villager.producedItems: List<ItemStack>
             get() {
                 val itemsToProduce = plugin.professions.getStringList("villager-item-producing.profession.${this.profession.key.key.uppercase()}.item-produce")
-                return subInventory.filterNotNull().filter { itemStack -> itemsToProduce.contains(itemStack.type.toString()) }.toList()
+                return this.inventory.filterNotNull().filter { itemStack -> itemsToProduce.contains(itemStack.type.toString()) }.toList()
             }
 
         val playerTradingInventories = mutableMapOf<Player, Villager>()
@@ -507,7 +505,7 @@ class TradeManager : Listener {
             }
 
             val tradeProfessionItemsOnly = plugin.professions.getBoolean("villager-item-producing.trade-profession-items-only")
-            val itemsToTrade = if (tradeProfessionItemsOnly) producedItems else subInventory.filterNotNull()
+            val itemsToTrade = if (tradeProfessionItemsOnly) producedItems else this.inventory.filterNotNull()
 
             val settlement = settlement
             val multiplier = if (settlement != null) this.opinionOn(player).priceMultiplier.toFloat() else 1F

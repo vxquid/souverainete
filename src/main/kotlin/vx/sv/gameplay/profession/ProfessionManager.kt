@@ -13,9 +13,6 @@ import org.bukkit.inventory.meta.PotionMeta
 import org.bukkit.potion.PotionType
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.event.VillagerProduceItemEvent
-import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
-import vx.sv.persistent.LivingEntityExtend.subInventory
-import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import kotlin.random.Random
 
 /**
@@ -49,6 +46,18 @@ class ProfessionManager : Listener {
     }
 
     private val uniqueItemProduceQueue = mutableMapOf<Villager, ItemStack>()
+
+    /**
+     * Helper to safely consume items from standard Bukkit inventory.
+     */
+    private fun takeItem(inventory: Inventory, item: ItemStack, amount: Int) {
+        val found = inventory.filterNotNull().find { it.isSimilar(item) } ?: return
+        if (found.amount <= amount) {
+            inventory.removeItem(found)
+        } else {
+            found.amount -= amount
+        }
+    }
 
     /**
      * Initiates item production for all eligible villagers across allowed worlds.
@@ -88,11 +97,13 @@ class ProfessionManager : Listener {
      */
     private fun handleClericBrewing(villager: Villager) {
         val maxPotions = gameplayConfig.profession.clericMaxPotionsBase * villager.villagerLevel + 1
-        if (villager.subInventory.filterNotNull().count { it.type == Material.POTION } >= maxPotions) return
+        val inv = villager.inventory
+        if (inv.filterNotNull().count { it.type == Material.POTION } >= maxPotions) return
 
         val ingredients = cachedProfessionsConfig.getStringList("villager-item-producing.profession.CLERIC.item-priority").map { it.split("~")[0] }
-        villager.subInventory.filterNotNull().find { ingredients.contains(it.type.toString()) }?.let { brewingIngredient ->
-            villager.takeItemFromQuillInventory(brewingIngredient, gameplayConfig.profession.clericBrewingIngredientMin + Random.Default.nextInt(gameplayConfig.profession.clericBrewingIngredientMaxRandom))
+        inv.filterNotNull().find { ingredients.contains(it.type.toString()) }?.let { brewingIngredient ->
+            val amountToTake = gameplayConfig.profession.clericBrewingIngredientMin + Random.Default.nextInt(gameplayConfig.profession.clericBrewingIngredientMaxRandom)
+            takeItem(inv, brewingIngredient, amountToTake)
 
             val potion = ItemStack(Material.POTION).apply {
                 itemMeta = (itemMeta as PotionMeta).apply {
@@ -100,7 +111,6 @@ class ProfessionManager : Listener {
                 }
             }
 
-            //plugin.logger.info("Brewing a potion. Villager: ${villager.customName}, potion is ${potion.itemMeta?.let { (it as PotionMeta).basePotionType }}.")
             plugin.server.scheduler.runTask(plugin, Runnable {
                 plugin.server.pluginManager.callEvent(VillagerProduceItemEvent(villager, potion))
                 villager.world.playSound(villager, Sound.ENTITY_VILLAGER_WORK_CLERIC, 1F, 1F)
@@ -114,6 +124,8 @@ class ProfessionManager : Listener {
     private fun handleGeneralCrafting(villager: Villager, professionKey: String) {
         val itemsToProduce = cachedProfessionsConfig.getStringList("villager-item-producing.profession.$professionKey.item-produce").shuffled()
         if (itemsToProduce.isEmpty()) return
+
+        val inv = villager.inventory
 
         for (itemString in itemsToProduce) {
             val material = resolveMaterial(itemString) ?: continue
@@ -179,7 +191,7 @@ class ProfessionManager : Listener {
      */
     private fun canCraftRecipe(villager: Villager, ingredients: List<Material>): Boolean {
         ingredients.groupBy { it }.forEach { (material, list) ->
-            if (!villager.subInventory.contains(material, list.size)) return false
+            if (!villager.inventory.contains(material, list.size)) return false
         }
         return true
     }
@@ -189,8 +201,8 @@ class ProfessionManager : Listener {
      */
     private fun consumeIngredients(villager: Villager, ingredients: List<Material>) {
         ingredients.forEach { material ->
-            villager.subInventory.filterNotNull().find { it.type == material }?.let {
-                villager.takeItemFromQuillInventory(it, 1)
+            villager.inventory.filterNotNull().find { it.type == material }?.let {
+                takeItem(villager.inventory, it, 1)
             }
         }
     }
@@ -213,7 +225,7 @@ class ProfessionManager : Listener {
 
         // TODO: Apply random enchantment on books for librarians with low chance
 
-        villager.addItemToQuillInventory(item)
+        villager.inventory.addItem(item)
     }
 
     companion object {

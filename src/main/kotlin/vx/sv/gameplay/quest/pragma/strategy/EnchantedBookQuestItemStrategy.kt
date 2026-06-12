@@ -11,7 +11,6 @@ import org.bukkit.inventory.meta.EnchantmentStorageMeta
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.quest.QuestItemStack
 import vx.sv.gameplay.quest.pragma.QuestItemStrategy
-import vx.sv.persistent.LivingEntityExtend.subInventory
 
 class EnchantedBookQuestItemStrategy : QuestItemStrategy() {
 
@@ -29,7 +28,7 @@ class EnchantedBookQuestItemStrategy : QuestItemStrategy() {
 
         val allowedEnchantments = plugin.prompts.getStringList("enchanted-book-quest.allowed-enchantments").apply {
             removeIf { enchantName ->
-                questGiver.subInventory.contents.filterNotNull().any { item ->
+                questGiver.inventory.contents.filterNotNull().any { item ->
                     item.itemMeta is EnchantmentStorageMeta && (item.itemMeta as EnchantmentStorageMeta).hasStoredEnchant(enchantName)
                 }
             }

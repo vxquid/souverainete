@@ -10,13 +10,10 @@ import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
-import vx.sv.persistent.LivingEntityExtend.addItemToQuillInventory
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
 import vx.sv.persistent.LivingEntityExtend.hasEdibleItem
 import vx.sv.persistent.LivingEntityExtend.hunger
-import vx.sv.persistent.LivingEntityExtend.subInventory
-import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import kotlin.random.Random
 
 object HungerManager {
@@ -70,7 +67,10 @@ object HungerManager {
     }
 
     fun LivingEntity.eat() {
-        subInventory.filterNotNull().find { it.type.isEdible }?.let { food ->
+        val villager = this as? Villager ?: return
+        val inv = villager.inventory
+
+        inv.filterNotNull().find { it.type.isEdible }?.let { food ->
             val sound = when (food.type) {
                 Material.HONEY_BOTTLE -> Sound.ITEM_HONEY_BOTTLE_DRINK
                 Material.MUSHROOM_STEW, Material.RABBIT_STEW, Material.SUSPICIOUS_STEW, Material.BEETROOT_SOUP -> Sound.ENTITY_GENERIC_DRINK
@@ -80,12 +80,24 @@ object HungerManager {
             // Use the Humanoid consume method
             val humanoid = this.asHumanoid() ?: return
             humanoid.consume(world, food, sound, 7, location) {
-                takeItemFromQuillInventory(food, 1)
+                // Нативное списание съеденного предмета
+                val found = inv.filterNotNull().find { it.isSimilar(food) }
+                if (found != null) {
+                    if (found.amount <= 1) {
+                        inv.removeItem(found)
+                    } else {
+                        found.amount -= 1
+                    }
+                }
+
                 if (food.type.toString().contains("STEW") || food.type == Material.BEETROOT_SOUP) {
-                    addItemToQuillInventory(ItemStack(Material.BOWL))
+                    inv.addItem(ItemStack(Material.BOWL))
                     (food.itemMeta as? SuspiciousStewMeta)?.customEffects?.forEach { addPotionEffect(it) }
                 }
-                if (food.type == Material.HONEY_BOTTLE) addItemToQuillInventory(ItemStack(Material.GLASS_BOTTLE))
+                if (food.type == Material.HONEY_BOTTLE) {
+                    inv.addItem(ItemStack(Material.GLASS_BOTTLE))
+                }
+
                 world.playSound(location, getVoiceSound(), 1F, getVoicePitch())
                 world.playSound(location, Sound.ENTITY_PLAYER_BURP, 1F, 1F)
                 hunger = (hunger + calculateFoodRestoration(food)).coerceAtMost(hungerMax)

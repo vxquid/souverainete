@@ -1,7 +1,6 @@
 package vx.sv.gameplay.quest
 
 import com.cryptomorin.xseries.XMaterial
-import net.kyori.adventure.key.Key
 import org.bukkit.*
 import org.bukkit.entity.*
 import org.bukkit.entity.Villager.Profession
@@ -46,7 +45,6 @@ import vx.sv.persistent.LivingEntityExtend.professionLevelName
 import vx.sv.persistent.LivingEntityExtend.questDataKey
 import vx.sv.persistent.LivingEntityExtend.quests
 import vx.sv.persistent.LivingEntityExtend.settlement
-import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import vx.sv.util.VivaldiHook
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -439,11 +437,13 @@ class QuestManager : Listener {
 
     @EventHandler
     fun onMerchantTrade(event: MerchantTradeEvent) {
+        val villager = event.merchant as? Villager ?: return
+
         event.player.quests().find { it.questItem.getItemStack().isSimilar(event.recipe.ingredients.first()) }?.let { quest ->
             event.player.closeInventory()
             when (quest.type) {
                 QuestType.PROFESSION_ITEM_GATHERING, QuestType.SMITHING_TEMPLATE_ORDER, QuestType.ENCHANTED_BOOK_ORDER, QuestType.TREASURE_HUNT, QuestType.MESSAGE_DELIVERY -> {
-                    this.finishQuest(event.player, event.merchant, quest)
+                    this.finishQuest(event.player, villager, quest)
                 }
                 QuestType.MUSIC_DISC -> {
                     fun getSoundKeyFromMaterial(material: Material): String? {
@@ -454,28 +454,38 @@ class QuestManager : Listener {
                     }
                     val recordKey = getSoundKeyFromMaterial(quest.questItem.getItemStack().type)!!
                     fun playRecordFollowingNpc(npc: Entity, recordKey: String, source: net.kyori.adventure.sound.Sound.Source = net.kyori.adventure.sound.Sound.Source.RECORD, volume: Float = 1.5f, pitch: Float = 1.0f, radius: Double = 32.0) {
-                        val sound = net.kyori.adventure.sound.Sound.sound(Key.key(recordKey), source, volume, pitch)
+                        val sound = net.kyori.adventure.sound.Sound.sound(net.kyori.adventure.key.Key.key(recordKey), source, volume, pitch)
                         val nearbyPlayers = npc.world.getNearbyEntities(npc.location, radius, radius, radius).filterIsInstance<Player>()
                         if (nearbyPlayers.isEmpty()) return
                         nearbyPlayers.forEach { it.playSound(sound, npc) }
                     }
-                    playRecordFollowingNpc(event.merchant, recordKey)
-                    this.finishQuest(event.player, event.merchant, quest)
+                    playRecordFollowingNpc(villager, recordKey)
+                    this.finishQuest(event.player, villager, quest)
                 }
                 QuestType.FOOD_SEARCH -> {
-                    event.merchant.eat()
-                    this.finishQuest(event.player, event.merchant, quest)
+                    villager.eat()
+                    this.finishQuest(event.player, villager, quest)
                 }
                 QuestType.BOOZE -> {
-                    event.merchant.asHumanoid()?.let { humanoid ->
+                    villager.asHumanoid()?.let { humanoid ->
                         val potion = quest.questItem.getItemStack()
                         val effect = (potion.itemMeta as PotionMeta).basePotionType?.potionEffects?.firstOrNull()
-                        humanoid.consume(event.merchant.world, potion, Sound.ENTITY_GENERIC_DRINK, 7, event.merchant.location, 7) {
-                            effect?.let { event.merchant.addPotionEffect(it) }
-                            event.merchant.takeItemFromQuillInventory(potion, 1)
-                            this.finishQuest(event.player, event.merchant, quest)
+                        humanoid.consume(villager.world, potion, Sound.ENTITY_GENERIC_DRINK, 7, villager.location, 7) {
+                            effect?.let { villager.addPotionEffect(it) }
+
+                            // Нативное списание предмета из инвентаря
+                            val inv = villager.inventory
+                            val found = inv.filterNotNull().find { it.isSimilar(potion) }
+                            if (found != null) {
+                                if (found.amount <= 1) {
+                                    inv.removeItem(found)
+                                } else {
+                                    found.amount -= 1
+                                }
+                            }
+                            this.finishQuest(event.player, villager, quest)
                         }
-                    } ?: this.finishQuest(event.player, event.merchant, quest)
+                    } ?: this.finishQuest(event.player, villager, quest)
                 }
             }
         }

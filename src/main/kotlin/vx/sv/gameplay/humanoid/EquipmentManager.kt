@@ -10,12 +10,11 @@ import org.bukkit.event.entity.EntityResurrectEvent
 import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.event.world.WorldLoadEvent
 import org.bukkit.inventory.EquipmentSlot
+import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.Damageable
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
-import vx.sv.persistent.LivingEntityExtend.subInventory
-import vx.sv.persistent.LivingEntityExtend.takeItemFromQuillInventory
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 
@@ -27,13 +26,21 @@ class EquipmentManager : Listener {
         private const val BATCH_SIZE = 10 // Сколько NPC обрабатывать за 1 тику
     }
 
-    // Потокобезопасная очередь для распределения нагрузки (FAWE style)
     private val evaluationQueue = ConcurrentLinkedQueue<Villager>()
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
         startQueueFiller()
         startQueueProcessor()
+    }
+
+    private fun takeItem(inventory: Inventory, item: ItemStack, amount: Int) {
+        val found = inventory.filterNotNull().find { it.isSimilar(item) } ?: return
+        if (found.amount <= amount) {
+            inventory.removeItem(found)
+        } else {
+            found.amount -= amount
+        }
     }
 
     /**
@@ -55,7 +62,6 @@ class EquipmentManager : Listener {
 
     /**
      * ASYNC THREAD: Воркер, который "откусывает" от очереди по BATCH_SIZE штук каждый тик.
-     * Оценка инвентаря и предметов по-прежнему происходит асинхронно!
      */
     private fun startQueueProcessor() {
         plugin.server.scheduler.runTaskTimerAsynchronously(plugin, Runnable {
@@ -78,7 +84,6 @@ class EquipmentManager : Listener {
         val villagers = event.world.getEntitiesByClass(Villager::class.java)
         villagers.forEach {
             if (it.isValid && !evaluationQueue.contains(it)) {
-                // Очистку экипировки принудительно делаем на ГЛАВНОМ потоке
                 plugin.server.scheduler.runTask(plugin, Runnable {
                     if (it.isValid) removeEquipment(it)
                 })
@@ -94,7 +99,6 @@ class EquipmentManager : Listener {
         val villagers = event.chunk.entities.filterIsInstance<Villager>()
         villagers.forEach {
             if (it.isValid && !evaluationQueue.contains(it)) {
-                // Очистку экипировки принудительно делаем на ГЛАВНОМ потоке
                 plugin.server.scheduler.runTask(plugin, Runnable {
                     if (it.isValid) removeEquipment(it)
                 })
@@ -110,11 +114,10 @@ class EquipmentManager : Listener {
 
         val slot = event.hand ?: return
 
-        // Тотем срабатывает мгновенно, выполняем операцию строго на ГЛАВНОМ потоке на следующем тике
         plugin.server.scheduler.runTask(plugin, Runnable {
             if (villager.isValid) {
                 villager.asHumanoid()?.equip(slot, ItemStack(AIR))
-                villager.takeItemFromQuillInventory(ItemStack(TOTEM_OF_UNDYING), 1)
+                takeItem(villager.inventory, ItemStack(TOTEM_OF_UNDYING), 1)
             }
         })
     }
@@ -126,7 +129,7 @@ class EquipmentManager : Listener {
     }
 
     fun equipBestEquipmentFor(villager: Villager) {
-        val availableItems = villager.subInventory.filterNotNull()
+        val availableItems = villager.inventory.filterNotNull()
         if (availableItems.isEmpty()) return
 
         val bestItems = mutableMapOf<EquipmentSlot, ItemStack>()
@@ -143,8 +146,6 @@ class EquipmentManager : Listener {
             }
         }
 
-        // КРИТИЧЕСКИЙ ФИКС: Если лучшая экипировка найдена,
-        // перенаправляем ее применение на ГЛАВНЫЙ ПОТОК (Main Thread)
         if (bestItems.isNotEmpty()) {
             plugin.server.scheduler.runTask(plugin, Runnable {
                 if (villager.isValid && !villager.isDead) {
@@ -219,7 +220,6 @@ class EquipmentManager : Listener {
     private fun applyEquipmentChanges(villager: Villager, changes: Map<EquipmentSlot, ItemStack>) {
         val loc = villager.location
 
-        // Метод выполняется на главном потоке, сбор игроков безопасен и быстр
         val nearbyPlayers = plugin.server.onlinePlayers.filter {
             it.world == loc.world && it.location.distanceSquared(loc) <= 256.0
         }

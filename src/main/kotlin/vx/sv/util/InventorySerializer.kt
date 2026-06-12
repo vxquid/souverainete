@@ -18,6 +18,7 @@ class InventorySerializer {
 
     companion object {
 
+        @Deprecated("Use default entity inventory instead of this.")
         fun inventoryToJSON(inventory: Inventory): JsonObject {
             val obj = JsonObject()
 
@@ -39,6 +40,7 @@ class InventorySerializer {
             return obj
         }
 
+        @Deprecated("Use default entity inventory instead of this.")
         fun inventoryFromJSON(jsonInventory: String): Inventory {
             try {
                 val jsonObject = JsonParser.parseString(jsonInventory).asJsonObject
