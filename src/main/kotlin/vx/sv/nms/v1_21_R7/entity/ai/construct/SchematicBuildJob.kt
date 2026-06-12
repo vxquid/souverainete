@@ -22,8 +22,6 @@ class SchematicBuildJob(val world: World) {
     fun getBlocks(): List<BlockToPlace> {
         synchronized(lock) {
             if (sortedBlocksCache == null) {
-                // Сначала полностью строим все здания (isRoad = false),
-                // и только после их готовности прокладываем дороги (isRoad = true).
                 sortedBlocksCache = blocksMap.values.sortedWith(
                     compareBy<BlockToPlace> { it.isRoad }.thenBy { it.pos.y }
                 )
@@ -52,10 +50,11 @@ class SchematicBuildJob(val world: World) {
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
                 val currentType = currentBlock.type
 
-                if (currentType.isAir || currentType == it.blockData.material) return@filter false
+                // Если текущий блок — трава или цветы, пропускаем их в фазе расчистки
+                if (currentBlock.isIgnorableObstacle()) return@filter false
 
-                // Если мы прокладываем дорогу (DIRT_PATH) поверх земельного блока (травы/грязи) —
-                // он НЕ является препятствием. Мы трансформируем его лопатой прямо во 2 фазе.
+                if (currentType == it.blockData.material) return@filter false
+
                 if (currentType.isShovelable() && it.blockData.material == Material.DIRT_PATH) return@filter false
 
                 if (currentBlock.isLiquid) {
@@ -65,7 +64,6 @@ class SchematicBuildJob(val world: World) {
                 }
             }
 
-            // Расчищаем препятствия строго сверху вниз
             if (obstacles.isNotEmpty()) {
                 val maxY = obstacles.maxOf { it.pos.y }
                 val highestObstacles = obstacles.filter { it.pos.y == maxY }
@@ -76,8 +74,8 @@ class SchematicBuildJob(val world: World) {
 
             // 2. ФАЗА СТРОИТЕЛЬСТВА
             val buildCandidates = blocksList.filter {
-                // Если мы трансформируем траву в дорогу лопатой — ресурс DIRT не требуется
-                val isPathTransformation = it.isRoad && it.material == Material.DIRT_PATH && world.getBlockAt(it.pos.x, it.pos.y, it.pos.z).type.isShovelable()
+                val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
+                val isPathTransformation = it.isRoad && it.material == Material.DIRT_PATH && currentBlock.type.isShovelable()
 
                 !it.isPlaced && it.claimedBy == null && (isPathTransformation || bukkitInv.contains(it.material))
             }

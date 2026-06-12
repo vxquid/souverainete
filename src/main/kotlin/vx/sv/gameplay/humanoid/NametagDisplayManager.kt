@@ -1,6 +1,5 @@
 package vx.sv.gameplay.humanoid
 
-import com.cryptomorin.xseries.XAttribute
 import com.github.retrooper.packetevents.PacketEvents
 import com.github.retrooper.packetevents.event.PacketListenerPriority
 import com.github.retrooper.packetevents.event.SimplePacketListenerAbstract
@@ -17,6 +16,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.Color
 import org.bukkit.NamespacedKey
+import org.bukkit.attribute.Attribute
 import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
@@ -234,9 +234,9 @@ class NametagDisplayManager : Listener {
                             val isRaider = npc.persistentDataContainer.has(RAIDER_KEY, PersistentDataType.BYTE)
                             val settlementData = npc.settlement?.data
 
-                            // Динамически заменяем профессию на "Builder", если запущен процесс строительства
+                            // УЛУЧШЕНИЕ: Заменяем профессию на "Builder" только если у жителя есть задача И он физически выполняет её (работает с блоком)
                             val nmsVillager = (npc as? CraftVillager)?.handle as? HumanoidVillager
-                            val isBuilding = nmsVillager?.activeBuildJob != null
+                            val isBuilding = nmsVillager?.activeBuildJob != null && nmsVillager.assignedBlock != null
 
                             val profName = if (isBuilding) "builder" else npc.profession.key.key.lowercase()
                             val customProf = if (npc.isSettlementLeader()) npc.race.leaderTitle else null
@@ -252,7 +252,7 @@ class NametagDisplayManager : Listener {
                                 isRaider = isRaider,
                                 settlementName = settlementData?.settlementName,
                                 health = npc.health,
-                                maxHealth = npc.getAttribute(XAttribute.MAX_HEALTH.get()!!)?.value ?: 20.0,
+                                maxHealth = npc.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0, // Заменено на нативный Bukkit API
                                 hungerValue = npc.hunger.toInt(),
                                 partyLeaderUuid = plugin.gameplayManager.partyManager.getLeaderUUID(npc),
                                 randomYOffset = (npc.uniqueId.hashCode() % 16) / 100f, // Adds slight variance to prevent z-fighting

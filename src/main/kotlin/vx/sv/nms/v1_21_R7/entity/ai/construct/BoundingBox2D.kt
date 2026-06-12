@@ -153,7 +153,7 @@ class SettlementPlanner(val settlement: Settlement) {
         val buildJob = masterBuildJobs.getOrPut(settlement) { SchematicBuildJob(world) }
         val center = settlement.data.center
 
-        // === 1. ГЕНЕРАЦИЯ ШИРОКОЙ РЕЛЬЕФНОЙ ДОРОГИ ===
+        // === 1. ГЕНЕРАЦИЯ ИНТЕРПОЛИРОВАННОЙ ШИРОКОЙ ДОРОГИ ===
         var currentX = center.blockX
         var currentZ = center.blockZ
 
@@ -183,14 +183,9 @@ class SettlementPlanner(val settlement: Settlement) {
                         buildJob.addBlock(BlockPos(px, roadY + dy, pz), airData, isRoad = true)
                     }
 
+                    // УЛУЧШЕНИЕ: Кладем мост строго на самый верхний уровень воды без постройки опор вниз!
                     if (currentBlock.isLiquid) {
-                        var groundY = roadY
-                        while (groundY > world.minHeight && !world.getBlockAt(px, groundY, pz).type.isSolid) {
-                            groundY--
-                        }
-                        for (dy in groundY..roadY) {
-                            buildJob.addBlock(BlockPos(px, dy, pz), cobbleData, isRoad = true)
-                        }
+                        buildJob.addBlock(BlockPos(px, roadY, pz), cobbleData, isRoad = true)
                     } else {
                         buildJob.addBlock(BlockPos(px, roadY, pz), roadBlockData, isRoad = true)
                     }
@@ -249,7 +244,6 @@ class SettlementPlanner(val settlement: Settlement) {
             "WOOD_FARM" -> Material.STONECUTTER
             else -> Material.CRAFTING_TABLE
         }
-        // Рабочая станция ставится на +1 блок выше уровня пола платформы
         buildJob.addBlock(BlockPos(cx, baseY + 1, cz), workstation.createBlockData(), isRoad = false)
 
         // === 4. ПОДКЛЮЧЕНИЕ РАБОЧИХ ===

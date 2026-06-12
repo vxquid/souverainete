@@ -100,8 +100,8 @@ class ConstructionBehavior(
         val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
 
-        val isClear = currentBlock.type.isAir || currentBlock.isLiquid
-        // Если это трансформация травы в тропинку — ресурсы инвентаря не требуются для старта задачи!
+        // Трава, кусты и жидкости считаются "свободным местом" для ИИ
+        val isClear = currentBlock.isIgnorableObstacle()
         val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
 
         if (isClear && !isPathTransformation && !assigned.material.isAir && !bukkitInv.contains(assigned.material)) {
@@ -121,7 +121,7 @@ class ConstructionBehavior(
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
         val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
 
-        val isClear = currentBlock.type.isAir || currentBlock.isLiquid
+        val isClear = currentBlock.isIgnorableObstacle()
         val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
         val hasResources = !isClear || isPathTransformation || assigned.material.isAir || bukkitInv.contains(assigned.material)
 
@@ -134,7 +134,7 @@ class ConstructionBehavior(
 
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
 
-        val tool = if (!currentBlock.type.isAir && !currentBlock.isLiquid) {
+        val tool = if (!currentBlock.isIgnorableObstacle()) {
             if (currentBlock.type.isShovelable()) {
                 ItemStack(Material.STONE_SHOVEL)
             } else {
@@ -143,7 +143,6 @@ class ConstructionBehavior(
         } else if (assigned.material.isAir) {
             ItemStack(Material.BUCKET)
         } else {
-            // Если мы трансформируем траву в тропинку лопатой — берем в руки лопату
             val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
             val itemToHold = if (isPathTransformation) {
                 Material.STONE_SHOVEL
@@ -188,7 +187,6 @@ class ConstructionBehavior(
         val diffZ = abs(blockPos.z - npcPos.z)
         val diffY = abs(blockPos.y - npcPos.y)
 
-        // Лимитируем только дороги (isRoad == true). Обычные структуры строим с бесконечной дистанции!
         val isWithinReach = if (assigned.isRoad) {
             (diffX * diffX + diffZ * diffZ <= 25.0) && (diffY <= 4)
         } else {
@@ -203,7 +201,8 @@ class ConstructionBehavior(
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
             }
 
-            if (!block.type.isAir && !block.isLiquid) {
+            // Мелкая трава, кусты и цветы полностью игнорируются при раскопке
+            if (!block.isIgnorableObstacle()) {
                 if (block.type.name.contains("LOG") || block.type.name.contains("WOOD")) {
                     removeWholeTree(block)
                     villager.digTicks = 0
@@ -235,15 +234,24 @@ class ConstructionBehavior(
                 // === РЕЖИМ УСТАНОВКИ БЛОКА ===
                 val material = assigned.material
 
-                // Осушение жидкости пустым ведром
+                // Осушение жидкости
                 if (material.isAir) {
-                    if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
-                    villager.buildTicks++
+                    if (block.isLiquid) {
+                        if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+                        villager.buildTicks++
 
-                    if (villager.buildTicks >= 10) {
-                        block.type = Material.AIR
-                        bukkitWorld.playSound(block.location, Sound.ITEM_BUCKET_FILL, 1.0f, 1.0f)
+                        if (villager.buildTicks >= 10) {
+                            block.type = Material.AIR
+                            bukkitWorld.playSound(block.location, Sound.ITEM_BUCKET_FILL, 1.0f, 1.0f)
 
+                            job.completeBlock(assigned)
+                            villager.assignedBlock = null
+                            villager.buildTicks = 0
+                            villager.nextBuildAvailableTime = world.gameTime + 2L
+                            doStop(world, villager, time)
+                        }
+                    } else {
+                        // Трава и цветы просто мгновенно заменяются воздухом без пауз
                         job.completeBlock(assigned)
                         villager.assignedBlock = null
                         villager.buildTicks = 0
@@ -255,7 +263,7 @@ class ConstructionBehavior(
 
                 val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
 
-                // Проверяем: если это трансформация земли в тропинку лопатой — доски/блоки DIRT не требуются!
+                // Проверяем: если это трансформация земли в дорогу лопатой — доски/блоки DIRT не требуются!
                 val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
 
                 if (!isPathTransformation && !bukkitInv.contains(material)) {
@@ -287,10 +295,8 @@ class ConstructionBehavior(
                     block.setBlockData(assigned.blockData, true)
 
                     if (isPathTransformation) {
-                        // Нативный звук разравнивания земли лопатой (ресурсы НЕ тратятся)
                         bukkitWorld.playSound(block.location, Sound.ITEM_SHOVEL_FLATTEN, 1.0f, 1.0f)
                     } else {
-                        // Обычная установка блока со звуком материала и списанием 1 ресурса
                         bukkitWorld.playSound(block.location, assigned.blockData.soundGroup.placeSound, 1.0f, 1.0f)
                         takeItem(bukkitInv, material, 1)
                     }

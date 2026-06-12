@@ -2,6 +2,7 @@ package vx.sv.nms.v1_21_R7.entity.ai.construct
 
 import net.minecraft.core.BlockPos
 import org.bukkit.Material
+import org.bukkit.block.Block
 import org.bukkit.block.data.BlockData
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 
@@ -16,8 +17,16 @@ data class BlockToPlace(
 }
 
 /**
- * Проверяет, относится ли материал к земельным блокам, требующим лопаты.
+ * Определяет, является ли блок незначительным препятствием, которое можно игнорировать (трава, цветы).
  */
+fun Block.isIgnorableObstacle(): Boolean {
+    val type = this.type
+    if (type.isAir || this.isLiquid) return true
+    // Не твердые блоки (трава, цветы) игнорируются, за исключением опасных роз визера
+    if (!type.isSolid && type != Material.WITHER_ROSE) return true
+    return false
+}
+
 fun Material.isShovelable(): Boolean {
     val name = this.name
     return name.contains("DIRT") ||

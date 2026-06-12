@@ -47,6 +47,9 @@ class SettlementManager : Listener {
         settlements[world] = mutableListOf()
         this.loadSettlements(world)
 
+        // Восстанавливаем 3D разметку всех спланированных зданий из базы данных
+        SettlementPlanner.loadBuildingsFromWorld(world)
+
         val worldSettlements = settlements[world] ?: emptyList()
         plugin.gameplayManager.raidManager.restoreRaidsFromData(worldSettlements)
 
@@ -406,6 +409,9 @@ class SettlementManager : Listener {
         fun saveSettlements(world: World) {
             val data = settlements[world]?.map { it.data } ?: return
             world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.STRING, gson.toJson(data))
+
+            // Нативное сохранение 3D разметки зданий при сохранении мира
+            SettlementPlanner.saveBuildingsToWorld(world)
         }
 
         fun getById(id: UUID): Settlement? {
