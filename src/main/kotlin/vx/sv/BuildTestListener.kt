@@ -8,8 +8,12 @@ import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.inventory.ItemStack
+import vx.sv.Souverainete.Companion.plugin
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
-import vx.sv.nms.v1_21_R7.entity.ai.build.SchematicBuildJob
+import vx.sv.nms.v1_21_R7.entity.ai.construct.SchematicBuildJob
+import vx.sv.nms.v1_21_R7.entity.ai.construct.toBaseIngredient
+import vx.sv.util.SchematicLoader
+import java.util.*
 import org.bukkit.entity.Villager as BukkitVillager
 
 class BuildTestListener : Listener {
@@ -17,38 +21,43 @@ class BuildTestListener : Listener {
     @EventHandler
     fun onPlayerInteract(event: PlayerInteractEvent) {
         val player = event.player
-        
-        // Срабатывает при клике ПРАВОЙ кнопкой мыши обычной ПАЛКОЙ по блоку
+
         if (event.action == Action.RIGHT_CLICK_BLOCK && event.material == Material.STICK) {
             val clickedBlock = event.clickedBlock ?: return
             event.isCancelled = true
 
+            player.sendMessage("§7[DEBUG] Клик палкой по блоку обнаружен успешно.")
+
             val origin = clickedBlock.location
             val world = origin.world ?: return
 
-            // 1. Создаем задачу постройки стены 3x3 из дубовых досок (OAK_PLANKS)
-            val buildJob = SchematicBuildJob(world)
-
-            for (yOffset in 1..3) { // 3 блока в высоту
-                for (xOffset in -1..1) { // 3 блока в ширину (влево-вправо от клика)
-                    val targetLoc = origin.clone().add(xOffset.toDouble(), yOffset.toDouble(), 0.0)
-                    
-                    // Тест разрушения препятствия: установим землю (DIRT) в центральный нижний слот
-                    if (yOffset == 1 && xOffset == 0) {
-                        targetLoc.block.type = Material.DIRT
-                    } else {
-                        targetLoc.block.type = Material.AIR
-                    }
-
-                    // Целевой блок для установки
-                    val blockData = Material.OAK_PLANKS.createBlockData()
-                    val nmsPos = BlockPos(targetLoc.blockX, targetLoc.blockY, targetLoc.blockZ)
-                    buildJob.addBlock(nmsPos, blockData)
-                }
+            val relativeBlocks = try {
+                SchematicLoader.loadSchematicFromJar("orc_hall_t1.schem")
+            } catch (e: Exception) {
+                player.sendMessage("§c[DEBUG] Ошибка при распаковке NBT файла: ${e.message}")
+                e.printStackTrace()
+                return
             }
 
-            // 2. Ищем ваших кастомных HumanoidVillager в радиусе 20 блоков
-            val nearbyVillagers = player.getNearbyEntities(20.0, 20.0, 20.0)
+            if (relativeBlocks.isEmpty()) {
+                player.sendMessage("§c[DEBUG] Схематик пуст или не найден!")
+                return
+            }
+
+            player.sendMessage("§a[DEBUG] Схематик загружен! Найдено блоков для установки: ${relativeBlocks.size}")
+
+            val buildJob = SchematicBuildJob(world)
+            relativeBlocks.forEach { relBlock ->
+                val absolutePos = BlockPos(
+                    origin.blockX + relBlock.relativePos.x,
+                    origin.blockY + relBlock.relativePos.y,
+                    origin.blockZ + relBlock.relativePos.z
+                )
+                buildJob.addBlock(absolutePos, relBlock.blockData)
+            }
+
+            val nearbyEntities = player.getNearbyEntities(20.0, 20.0, 20.0)
+            val nearbyVillagers = nearbyEntities
                 .filterIsInstance<BukkitVillager>()
                 .mapNotNull { (it as? CraftVillager)?.handle as? HumanoidVillager }
 
@@ -59,19 +68,31 @@ class BuildTestListener : Listener {
 
             player.sendMessage("§aНайдено ${nearbyVillagers.size} рабочих. Запуск строительства...")
 
-            // 3. Выдаем им блоки дубовых досок в нативный инвентарь и назначаем задачу
+            // Генерируем уникальный ID для новой задачи
+            val jobId = UUID.randomUUID()
+            BuildJobManager.activeJobs[jobId] = buildJob
+            BuildJobManager.saveJobsToWorld() // Записываем в PDC
+
             nearbyVillagers.forEach { npc ->
                 val bukkitNpc = npc.bukkitEntity as BukkitVillager
-                
-                // Выдаем стак досок
-                bukkitNpc.inventory.addItem(ItemStack(Material.OAK_PLANKS, 64))
-                
-                // Назначаем задачу и сбрасываем предыдущие состояния
+
+                // Выдаем все нужные блоки из шематика, конвертируя их в базовые
+                relativeBlocks.forEach { block ->
+                    bukkitNpc.inventory.addItem(ItemStack(block.blockData.material.toBaseIngredient()))
+                }
+
                 npc.activeBuildJob = buildJob
                 npc.assignedBlock = null
                 npc.digTicks = 0
-                
-                // Очищаем старые цели ИИ, чтобы форсировать пересчет планировщика
+                npc.buildTicks = 0
+
+                // Записываем UUID задачи в PDC жителя для персистентности
+                bukkitNpc.persistentDataContainer.set(
+                    org.bukkit.NamespacedKey(plugin, "active_build_job_uuid"),
+                    org.bukkit.persistence.PersistentDataType.STRING,
+                    jobId.toString()
+                )
+
                 npc.brain.eraseMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)
                 npc.brain.eraseMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.LOOK_TARGET)
             }

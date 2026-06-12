@@ -154,6 +154,7 @@ class Souverainete : JavaPlugin(), Listener {
             gameplayManager.actualQuests.toLongArray()
         )
         gameplayManager.raidManager.disable()
+        BuildJobManager.saveJobsToWorld()
     }
 
     @EventHandler
@@ -171,6 +172,7 @@ class Souverainete : JavaPlugin(), Listener {
             // Register GUI listener
             server.pluginManager.registerEvents(SettingsGUIListener(), this)
             server.pluginManager.registerEvents(BuildTestListener(), this)
+            server.pluginManager.registerEvents(BuildSaveListener(), this)
         }
     }
 

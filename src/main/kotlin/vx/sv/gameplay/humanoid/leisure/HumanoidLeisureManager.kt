@@ -5,6 +5,7 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.block.BlockFace
+import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
@@ -18,6 +19,7 @@ import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.dialogue.DialogueSession
 import vx.sv.gameplay.dialogue.menu.InteractionHandler
 import vx.sv.gameplay.party.PartyManager.Companion.partyLeaderUUID
+import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.random.Random
@@ -52,8 +54,6 @@ class HumanoidLeisureManager : Listener {
         val startTime: Long = System.currentTimeMillis()
     )
 
-    // Using ConcurrentHashMap prevents CMEs if an event (like EntityDamageEvent) removes
-    // an entity during the ticker's iterator loop.
     private val activeSessions = ConcurrentHashMap<Villager, LeisureSession>()
     private val occupiedSeats = mutableSetOf<Location>()
 
@@ -71,6 +71,8 @@ class HumanoidLeisureManager : Listener {
                 .flatMap { it.entities }
                 .filterIsInstance<Villager>()
                 .filter {
+                    val nmsVillager = (it as? CraftVillager)?.handle as? HumanoidVillager
+
                     it.isValid &&
                             !activeSessions.containsKey(it) &&
                             it.vehicle == null &&
@@ -82,7 +84,9 @@ class HumanoidLeisureManager : Listener {
                             // Ignore NPCs that are interacting via a menu.
                             InteractionHandler.openedMenuList.none { menu -> menu.villager == it } &&
                             // Игнорируем жителей, которые уже находятся в пати с игроком
-                            it.partyLeaderUUID == null
+                            it.partyLeaderUUID == null &&
+                            // Игнорируем жителей, у которых есть активная задача строительства
+                            nmsVillager?.activeBuildJob == null
                 }
                 .randomOrNull() ?: return@runTaskTimer
 
@@ -97,9 +101,10 @@ class HumanoidLeisureManager : Listener {
             while (iterator.hasNext()) {
                 val session = iterator.next()
                 val npc = session.villager
+                val nmsVillager = (npc as? CraftVillager)?.handle as? HumanoidVillager
 
-                // Invalidate session if the NPC is dead, no longer valid, somehow changed worlds, or joined a party.
-                if (!npc.isValid || npc.isDead || npc.world != session.targetSeat.world || npc.partyLeaderUUID != null) {
+                // Прерываем сессию досуга, если NPC умер, стал невалидным, сменил мир, вступил в пати или начал СТРОИТЬ
+                if (!npc.isValid || npc.isDead || npc.world != session.targetSeat.world || npc.partyLeaderUUID != null || nmsVillager?.activeBuildJob != null) {
                     standUp(npc, session) // Ensures attributes are safely reset
                     iterator.remove()
                     continue
@@ -449,7 +454,7 @@ class HumanoidLeisureManager : Listener {
                             val frontBlockUp = frontBlock.getRelative(BlockFace.UP)
 
                             if (frontBlock.type.isSolid || frontBlockUp.type.isSolid) {
-                                isSeat = false
+                                { isSeat = false }
                             }
                         }
                     }

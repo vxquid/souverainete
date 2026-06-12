@@ -67,7 +67,7 @@ repositories {
 }
 
 dependencies {
-  paperweight.paperDevBundle("26.1.2.build.+")
+  paperweight.paperDevBundle("26.1.2.construct.+")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")
@@ -119,7 +119,7 @@ val isWindows = System.getProperty("os.name").lowercase().contains("windows")
 val gradlewPath = project.rootDir.resolve(if (isWindows) "gradlew.bat" else "gradlew").absolutePath
 
 val buildPremium by tasks.registering(Exec::class) {
-  group = "build variants"
+  group = "construct variants"
   description = "Build Premium plugin version."
 
   // Изолированный запуск сборки
@@ -127,7 +127,7 @@ val buildPremium by tasks.registering(Exec::class) {
 }
 
 val buildFree by tasks.registering(Exec::class) {
-  group = "build variants"
+  group = "construct variants"
   description = "Build Free plugin version."
 
   // Изолированный запуск сборки
@@ -137,7 +137,7 @@ val buildFree by tasks.registering(Exec::class) {
 }
 
 tasks.register("buildAllVariants") {
-  group = "build variants"
+  group = "construct variants"
   description = "Build both versions."
   dependsOn(buildPremium, buildFree)
 }

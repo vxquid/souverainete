@@ -39,16 +39,18 @@ import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
+import vx.sv.BuildJobManager
 import vx.sv.event.VillagerKillTargetEvent
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.nms.EntityProvider.Humanoid
 import vx.sv.nms.v1_21_R7.VersionSpecificHumanoidEntityProvider.Companion.plugin
 import vx.sv.nms.v1_21_R7.entity.ai.*
-import vx.sv.nms.v1_21_R7.entity.ai.build.BlockToPlace
-import vx.sv.nms.v1_21_R7.entity.ai.build.ConstructionBehavior
-import vx.sv.nms.v1_21_R7.entity.ai.build.SchematicBuildJob
+import vx.sv.nms.v1_21_R7.entity.ai.construct.BlockToPlace
+import vx.sv.nms.v1_21_R7.entity.ai.construct.ConstructionBehavior
+import vx.sv.nms.v1_21_R7.entity.ai.construct.SchematicBuildJob
 import vx.sv.util.InventorySerializer
 import vx.sv.util.VillagerBridge
+import java.util.*
 
 class HumanoidVillager(
     type: EntityType<out Villager>?,
@@ -219,6 +221,29 @@ class HumanoidVillager(
             if (!pdc.has(initKey, PersistentDataType.BYTE)) {
                 pdc.set(initKey, PersistentDataType.BYTE, 1.toByte())
             }
+
+            // === ВОССТАНОВЛЕНИЕ СЕССИИ СТРОИТЕЛЬСТВА ПОСЛЕ РЕСТАРТА ===
+            val jobUuidKey = org.bukkit.NamespacedKey(plugin, "active_build_job_uuid")
+            if (pdc.has(jobUuidKey, PersistentDataType.STRING)) {
+                val uuidStr = pdc.get(jobUuidKey, PersistentDataType.STRING)
+                if (!uuidStr.isNullOrEmpty()) {
+                    try {
+                        val jobId = UUID.fromString(uuidStr)
+                        val savedJob = BuildJobManager.activeJobs[jobId]
+
+                        if (savedJob != null && !savedJob.isFinished()) {
+                            // Переподключаем ИИ жителя к задаче
+                            this.activeBuildJob = savedJob
+                        } else {
+                            // Задача уже завершена или была удалена из глобальной памяти
+                            pdc.remove(jobUuidKey)
+                        }
+                    } catch (e: Exception) {
+                        pdc.remove(jobUuidKey)
+                    }
+                }
+            }
+
         }
     }
 

@@ -17,6 +17,7 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.Color
 import org.bukkit.NamespacedKey
+import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
@@ -28,6 +29,7 @@ import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.humanoid.event.HumanoidInitializationEvent
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.settlement.isSettlementLeader
+import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import vx.sv.persistent.LivingEntityExtend.hunger
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.NametagMode
@@ -230,9 +232,13 @@ class NametagDisplayManager : Listener {
                         val snapshot = npcCache.getOrPut(npc.entityId) {
                             val isCeilingLow = npc.location.clone().add(0.0, 2.2, 0.0).block.type.isSolid
                             val isRaider = npc.persistentDataContainer.has(RAIDER_KEY, PersistentDataType.BYTE)
-                            val profName = npc.profession.key.key.lowercase()
                             val settlementData = npc.settlement?.data
 
+                            // Динамически заменяем профессию на "Builder", если запущен процесс строительства
+                            val nmsVillager = (npc as? CraftVillager)?.handle as? HumanoidVillager
+                            val isBuilding = nmsVillager?.activeBuildJob != null
+
+                            val profName = if (isBuilding) "builder" else npc.profession.key.key.lowercase()
                             val customProf = if (npc.isSettlementLeader()) npc.race.leaderTitle else null
 
                             NpcSnapshot(
@@ -508,6 +514,7 @@ class NametagDisplayManager : Listener {
                     "butcher", "leatherworker" -> Color.fromARGB(targetAlpha, 130, 60, 40)
                     "cartographer" -> Color.fromARGB(targetAlpha, 180, 140, 70)
                     "mason" -> Color.fromARGB(targetAlpha, 90, 100, 110)
+                    "builder" -> Color.fromARGB(targetAlpha, 210, 105, 30) // Уникальный цвет фона для Builder
                     "nitwit", "none" -> Color.fromARGB(targetAlpha, 100, 130, 80)
                     else -> Color.fromARGB(targetAlpha, configColor[1], configColor[2], configColor[3])
                 }

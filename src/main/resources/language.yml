@@ -163,6 +163,7 @@ villager-professions:
   none: "Jobless"
   raider: "Raider"
   guard: "Guard"
+  builder: "Builder"
 
 hunger-status:
   hungry: "🍗 Hungry"
