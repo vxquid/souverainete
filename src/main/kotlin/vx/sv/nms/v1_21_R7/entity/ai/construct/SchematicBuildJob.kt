@@ -21,8 +21,6 @@ class SchematicBuildJob(val world: World) {
     fun getBlocks(): List<BlockToPlace> {
         synchronized(lock) {
             if (sortedBlocksCache == null) {
-                // Сначала полностью строим все здания (isRoad = false),
-                // и только после их готовности прокладываем дороги (isRoad = true).
                 sortedBlocksCache = blocksMap.values.sortedWith(
                     compareBy<BlockToPlace> { it.isRoad }.thenBy { it.pos.y }
                 )
@@ -36,8 +34,7 @@ class SchematicBuildJob(val world: World) {
             val npcPos = npc.blockPosition()
             val blocksList = getBlocks()
 
-            // 1. ОЧИСТКА ЗАВИСШИХ КЛЕЙМОВ (Garbage Collection)
-            // Если житель мертв, сменил задачу или строит другой блок — освобождаем ресурс
+            // 1. Очистка зависших клеймов
             blocksList.forEach { block ->
                 val claimer = block.claimedBy
                 if (claimer != null) {
@@ -47,8 +44,7 @@ class SchematicBuildJob(val world: World) {
                 }
             }
 
-            // 2. ГЛОБАЛЬНОЕ АВТО-ЗАВЕРШЕНИЕ ДЛЯ ВСЕХ БЛОКОВ
-            // Если блок в мире уже совпадает с чертежом — закрываем его и сбрасываем клейм
+            // 2. Глобальное авто-завершение
             blocksList.filter { !it.isPlaced }.forEach {
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
                 if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
@@ -57,7 +53,7 @@ class SchematicBuildJob(val world: World) {
                 }
             }
 
-            // 3. ФАЗА РАСЧИСТКИ ПРЕПЯТСТВИЙ
+            // 3. Фаза расчистки
             val obstacles = blocksList.filter {
                 if (it.isPlaced || it.claimedBy != null) return@filter false
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
@@ -82,7 +78,7 @@ class SchematicBuildJob(val world: World) {
                 return closest
             }
 
-            // 4. ФАЗА СТРОИТЕЛЬСТВА
+            // 4. Фаза строительства
             val buildCandidates = blocksList.filter {
                 !it.isPlaced && it.claimedBy == null
             }
@@ -100,7 +96,6 @@ class SchematicBuildJob(val world: World) {
 
     fun unclaimBlock(block: BlockToPlace) {
         synchronized(lock) {
-            // ИСПРАВЛЕНО: Убрана тавтологическая проверка, сброс происходит напрямую
             block.claimedBy = null
         }
     }
@@ -116,7 +111,6 @@ class SchematicBuildJob(val world: World) {
         synchronized(lock) {
             val blocksList = getBlocks()
 
-            // Быстрое авто-завершение перед проверкой статуса готовности
             blocksList.filter { !it.isPlaced }.forEach {
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
                 if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {

@@ -3,10 +3,12 @@ package vx.sv.nms.v1_21_R7.entity.ai.construct
 import org.bukkit.Bukkit
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.block.BlockFace
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.world.AsyncStructureSpawnEvent
+import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
@@ -29,7 +31,6 @@ class VillageGenerationListener : Listener {
                     groundBlock.type = Material.GRASS_BLOCK
                 }
 
-                // Очищаем воздух только над поверхностью плато
                 for (y in 1..4) {
                     val airBlock = world.getBlockAt(blockX, targetY + y, blockZ)
                     if (airBlock.type != Material.AIR && airBlock.type != Material.BEDROCK) {
@@ -37,7 +38,6 @@ class VillageGenerationListener : Listener {
                     }
                 }
 
-                // Заполняем пустоты под плато, чтобы ратуша не висела в воздухе
                 for (y in 1..3) {
                     val dirtBlock = world.getBlockAt(blockX, targetY - y, blockZ)
                     if (dirtBlock.type.isAir) {
@@ -48,12 +48,67 @@ class VillageGenerationListener : Listener {
         }
     }
 
+    /**
+     * Создает начальных деревенских животных с именами вокруг площади
+     * и отмечает их в PDC для последующих игровых механик.
+     */
+    private fun spawnVillageAnimals(center: Location) {
+        val world = center.world ?: return
+        val random = java.util.Random()
+
+        // 1. Спавним 4-6 овец со случайными именами
+        val sheepNames = listOf("Шон", "Кудряш", "Облачко", "Снежок", "Зефир", "Долли", "Пуговка")
+        val sheepCount = 4 + random.nextInt(3) // 4 to 6
+
+        for (i in 0 until sheepCount) {
+            val angle = random.nextDouble() * 2 * Math.PI
+            val distance = 4.0 + random.nextDouble() * 4.0
+            val spawnLoc = center.clone().add(Math.cos(angle) * distance, 1.0, Math.sin(angle) * distance)
+            spawnLoc.y = world.getHighestBlockYAt(spawnLoc.blockX, spawnLoc.blockZ).toDouble() + 1.0
+
+            world.spawn(spawnLoc, org.bukkit.entity.Sheep::class.java) { sheep ->
+                val name = sheepNames.getOrElse(i % sheepNames.size) { "Деревенская овца" }
+                sheep.customName(net.kyori.adventure.text.Component.text("§a$name", net.kyori.adventure.text.format.NamedTextColor.GREEN))
+                sheep.isCustomNameVisible = true
+
+                // Запись PDC маркера для животного
+                sheep.persistentDataContainer.set(
+                    NamespacedKey(plugin, "village_animal"),
+                    PersistentDataType.BYTE,
+                    1.toByte()
+                )
+            }
+        }
+
+        // 2. Спавним 2 деревенских котов около площади
+        val catNames = listOf("Мурзик", "Барсик", "Рыжик", "Уголек", "Пушок")
+        for (i in 0 until 2) {
+            val angle = random.nextDouble() * 2 * Math.PI
+            val distance = 2.0 + random.nextDouble() * 3.0
+            val spawnLoc = center.clone().add(Math.cos(angle) * distance, 1.0, Math.sin(angle) * distance)
+            spawnLoc.y = world.getHighestBlockYAt(spawnLoc.blockX, spawnLoc.blockZ).toDouble() + 1.0
+
+            world.spawn(spawnLoc, org.bukkit.entity.Cat::class.java) { cat ->
+                val name = catNames.getOrElse(i % catNames.size) { "Деревенский кот" }
+                cat.customName(net.kyori.adventure.text.Component.text("§e$name", net.kyori.adventure.text.format.NamedTextColor.YELLOW))
+                cat.isCustomNameVisible = true
+
+                // Запись PDC маркера для кота
+                cat.persistentDataContainer.set(
+                    NamespacedKey(plugin, "village_animal"),
+                    PersistentDataType.BYTE,
+                    1.toByte()
+                )
+            }
+        }
+    }
+
     @EventHandler
     fun onVanillaVillageSpawn(event: AsyncStructureSpawnEvent) {
         val structure = event.structure
 
         if (structure.key.key.lowercase().contains("village")) {
-            event.isCancelled = true // Полностью отменяем ванильную застройку чанка
+            event.isCancelled = true
 
             val world = event.world
             val boundingBox = event.boundingBox
@@ -64,14 +119,12 @@ class VillageGenerationListener : Listener {
             Bukkit.getScheduler().runTaskLater(plugin, Runnable {
                 if (!world.worldFolder.exists()) return@Runnable
 
-                // === УЛУЧШЕННЫЙ АЛГОРИТМ ПОИСКА ПЛОСКОГО ПЛАТО ===
                 var bestX = centerX.toInt()
                 var bestZ = centerZ.toInt()
                 var bestY = world.getHighestBlockYAt(bestX, bestZ)
                 var minHeightDifference = Int.MAX_VALUE
                 var highestElevationOfFlattest = Int.MIN_VALUE
 
-                // Сканируем небольшое смещение в радиусе 6 блоков для поиска оптимальной площадки
                 for (ox in -6..6) {
                     for (oz in -6..6) {
                         val cx = centerX.toInt() + ox
@@ -80,7 +133,6 @@ class VillageGenerationListener : Listener {
                         var minY = Int.MAX_VALUE
                         var maxY = Int.MIN_VALUE
 
-                        // Проверяем footprint центральной площади (радиус 5 -> площадка 11x11)
                         for (px in -5..5) {
                             for (pz in -5..5) {
                                 val hy = SettlementPlanner.getHighestGroundYAt(world, cx + px, cz + pz)
@@ -91,34 +143,26 @@ class VillageGenerationListener : Listener {
 
                         val diff = maxY - minY
 
-                        // Предпочтение отдается:
-                        // 1. Местам с минимальным перепадом высот (flattest)
-                        // 2. При равной плоскости — местам с максимальной высотой (highest elevation / plateau)
                         if (diff < minHeightDifference || (diff == minHeightDifference && maxY > highestElevationOfFlattest)) {
                             minHeightDifference = diff
                             highestElevationOfFlattest = maxY
                             bestX = cx
                             bestZ = cz
-                            bestY = maxY // Базовая высота площади выставляется на самый верхний уровень плато
+                            bestY = maxY
                         }
                     }
                 }
 
-                // Итоговая точка центра поселения на плоской возвышенности
                 val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
 
-                // 1. Терраформинг центральной площади (теперь только выравнивает досыпанием, не копает ям)
                 terraformPlaza(centerLoc, 5)
 
-                // 2. Устанавливаем каменную плиту в центре
                 val slabBlock = centerLoc.block
                 slabBlock.type = Material.STONE_SLAB
 
-                // 3. Устанавливаем колокол поверх плиты
                 val bellBlock = slabBlock.getRelative(BlockFace.UP)
                 bellBlock.type = Material.BELL
 
-                // 4. Создаем стартовых жителей (спавним чуть в стороне, чтобы не застряли в колоколе)
                 val citizens = mutableSetOf<BukkitVillager>()
                 for (i in 0 until 4) {
                     val spawnLoc = centerLoc.clone().add(1.5, 1.0, 1.5)
@@ -129,7 +173,6 @@ class VillageGenerationListener : Listener {
                     citizens.add(v)
                 }
 
-                // 5. Формируем пакет данных кастомного поселения
                 val newData = Settlement.SettlementData(
                     UUID.randomUUID(),
                     world.uid,
@@ -141,19 +184,20 @@ class VillageGenerationListener : Listener {
 
                 val settlement = Settlement(newData, citizens)
 
-                // 6. Запускаем генерацию имени
                 val manager = SettlementManager()
                 manager.generateSettlementName(settlement)
 
-                // 7. Инициализируем планировщик постройки
                 val planner = SettlementPlanner(settlement)
 
-                // 8. Планируем домики (они теперь привяжутся к высокому уровню центра и не будут проваливаться вниз)
-                planner.planBuilding(VanillaBuildingType.BLACKSMITH)
-                planner.planBuilding(VanillaBuildingType.BAKERY)
-                planner.planBuilding(VanillaBuildingType.FARM)
-                planner.planBuilding(VanillaBuildingType.LIBRARY)
-                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)
+                // Спавним овец и котов
+                spawnVillageAnimals(centerLoc)
+
+                // Инициализация стартовой приоритетной застройки (прогрессивно, одна за другой)
+                repeat(5) {
+                    planner.planNextPriorityBuilding()
+                }
+
+                SettlementManager.saveSettlements(world)
             }, 20L)
         }
     }

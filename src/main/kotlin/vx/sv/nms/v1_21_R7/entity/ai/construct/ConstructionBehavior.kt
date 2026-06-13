@@ -9,7 +9,10 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
-import org.bukkit.*
+import org.bukkit.Location
+import org.bukkit.Material
+import org.bukkit.Particle
+import org.bukkit.Sound
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.entity.CraftVillager
@@ -35,12 +38,6 @@ class ConstructionBehavior(
     1200
 ) {
 
-    private fun broadcastDebug(message: String) {
-        val component = net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection()
-            .deserialize("§d[AI-DEBUG] §f$message")
-        Bukkit.broadcast(component)
-    }
-
     private fun takeItem(inventory: Inventory, material: Material, amount: Int) {
         val index = inventory.first(material)
         if (index != -1) {
@@ -50,6 +47,30 @@ class ConstructionBehavior(
             } else {
                 item.amount -= amount
                 inventory.setItem(index, item)
+            }
+        }
+    }
+
+    /**
+     * Вычищает весь строительный мусор из инвентаря, чтобы не забивать слоты
+     * перед следующими схематиками. Оставляет только оружие, инструменты и броню.
+     */
+    private fun clearConstructionBlocks(inventory: Inventory) {
+        for (i in 0 until inventory.size) {
+            val item = inventory.getItem(i) ?: continue
+            val type = item.type
+            val isToolOrWeapon = type.name.contains("SWORD") ||
+                    type.name.contains("BOW") ||
+                    type.name.contains("AXE") ||
+                    type.name.contains("SHOVEL") ||
+                    type.name.contains("PICKAXE") ||
+                    type.name.contains("SHIELD") ||
+                    type.name.contains("HELMET") ||
+                    type.name.contains("CHESTPLATE") ||
+                    type.name.contains("LEGGINGS") ||
+                    type.name.contains("BOOTS")
+            if (!isToolOrWeapon) {
+                inventory.setItem(i, null)
             }
         }
     }
@@ -92,42 +113,20 @@ class ConstructionBehavior(
     }
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
-        val name = villager.bukkitEntity.name
-        val gameTime = world.gameTime
+        if (!world.world.isDayTime) return false
+        if (world.gameTime < villager.nextBuildAvailableTime) return false
+        if (world.gameTime < villager.buildBreakUntilTime) return false
 
-        if (!world.world.isDayTime) {
-            return false
-        }
-        if (gameTime < villager.nextBuildAvailableTime) {
-            return false
-        }
-        if (gameTime < villager.buildBreakUntilTime) {
-            return false
-        }
-
-        val settlement = villager.settlement
-        if (settlement == null) {
-            broadcastDebug("§e$name §cне может начать стройку: поселение равно null!")
-            return false
-        }
-
-        val job = SettlementPlanner.getActiveOrNextJob(settlement)
-        if (job == null) {
-            return false
-        }
+        val settlement = villager.settlement ?: return false
+        val job = SettlementPlanner.getActiveOrNextJob(settlement) ?: return false
         villager.activeBuildJob = job
 
         if (job.isFinished()) {
-            broadcastDebug("§e$name §cзадача на строительство уже завершена!")
             villager.activeBuildJob = null
             return false
         }
 
-        val assigned = villager.assignedBlock ?: job.claimNextBlock(villager)
-        if (assigned == null) {
-            // ИСПРАВЛЕНО: Убран спам лога в чат, когда нет свободных блоков для раздачи
-            return false
-        }
+        val assigned = villager.assignedBlock ?: job.claimNextBlock(villager) ?: return false
         villager.assignedBlock = assigned
 
         val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
@@ -150,33 +149,18 @@ class ConstructionBehavior(
         val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
 
         if (isClear && !isPathTransformation && !assigned.material.isAir && !bukkitInv.contains(assigned.material)) {
-            broadcastDebug("§e$name §cотклонил блок на §f${assigned.pos.x}, ${assigned.pos.y}, ${assigned.pos.z}§c: нет ресурсов для ${assigned.material} в инвентаре!")
             job.unclaimBlock(assigned)
             villager.assignedBlock = null
             return false
         }
-
-        broadcastDebug("§a§l[СТАРТ СТРОЙКИ] §e$name §aначинает работать над блоком §f${assigned.pos.x}, ${assigned.pos.y}, ${assigned.pos.z} §a(${assigned.blockData.material})")
         return true
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
-        val name = villager.bukkitEntity.name
-        val job = villager.activeBuildJob
-        if (job == null) {
-            broadcastDebug("§e$name §cпрервал работу: activeBuildJob стал null!")
-            return false
-        }
-        if (job.isFinished()) {
-            broadcastDebug("§e$name §cпрервал работу: задача завершилась параллельно!")
-            return false
-        }
+        val job = villager.activeBuildJob ?: return false
+        if (job.isFinished()) return false
 
-        val assigned = villager.assignedBlock
-        if (assigned == null) {
-            broadcastDebug("§e$name §cпрервал работу: assignedBlock обнулился!")
-            return false
-        }
+        val assigned = villager.assignedBlock ?: return false
 
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
         val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
@@ -185,17 +169,7 @@ class ConstructionBehavior(
         val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
         val hasResources = !isClear || isPathTransformation || assigned.material.isAir || bukkitInv.contains(assigned.material)
 
-        if (!world.world.isDayTime) {
-            broadcastDebug("§e$name §cпрервал работу: наступила ночь.")
-            return false
-        }
-
-        if (!hasResources) {
-            broadcastDebug("§e$name §cпрервал работу: закончились ресурсы для ${assigned.material}!")
-            return false
-        }
-
-        return true
+        return world.world.isDayTime && hasResources
     }
 
     override fun start(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -232,20 +206,17 @@ class ConstructionBehavior(
         val bukkitWorld = world.world
         val blockPos = assigned.pos
         val block = bukkitWorld.getBlockAt(blockPos.x, blockPos.y, blockPos.z)
-        val name = villager.bukkitEntity.name
 
         val idleTicks = world.gameTime - villager.lastBuildActionTime
 
         if (idleTicks > 120L) {
             if (!villager.isBuildDistanceHackActive) {
                 villager.isBuildDistanceHackActive = true
-                broadcastDebug("§e$name §eзастрял на 6 сек. Включается телекинетический режим дальности!")
                 bukkitWorld.spawnParticle(Particle.GLOW, villager.bukkitEntity.location.add(0.0, 1.5, 0.0), 6, 0.2, 0.2, 0.2)
             }
         }
 
         if (idleTicks > 240L) {
-            broadcastDebug("§e$name §cзастрял на 12 сек. Освобождает блок и вешает штрафной кулдаун!")
             villager.isBuildDistanceHackActive = false
             job.unclaimBlock(assigned)
             villager.assignedBlock = null
@@ -331,8 +302,6 @@ class ConstructionBehavior(
                             block.type = Material.AIR
                             bukkitWorld.playSound(block.location, Sound.ITEM_BUCKET_FILL, 1.0f, 1.0f)
 
-                            broadcastDebug("§a§l[ОСУШЕНИЕ] §e$name §aубрал жидкость на §f${assigned.pos.x}, ${assigned.pos.y}, ${assigned.pos.z}")
-
                             job.completeBlock(assigned)
                             villager.assignedBlock = null
                             villager.buildTicks = 0
@@ -405,8 +374,6 @@ class ConstructionBehavior(
                         takeItem(bukkitInv, material, 1)
                     }
 
-                    broadcastDebug("§a§l[УСТАНОВКА] §e$name §aпоставил блок §f${assigned.pos.x}, ${assigned.pos.y}, ${assigned.pos.z} §a(${assigned.blockData.material})")
-
                     job.completeBlock(assigned)
                     villager.assignedBlock = null
                     villager.buildTicks = 0
@@ -427,7 +394,6 @@ class ConstructionBehavior(
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
-        val name = villager.bukkitEntity.name
         val job = villager.activeBuildJob
         val assigned = villager.assignedBlock
 
@@ -438,10 +404,11 @@ class ConstructionBehavior(
 
         if (job?.isFinished() == true) {
             villager.activeBuildJob = null
-            villager.buildBreakUntilTime = world.gameTime + 400L // 20 секунд перекура
-            broadcastDebug("§6§l[ФИНИШ СХЕМЫ] §e$name §6завершил строительство объекта! Перекур 20 сек. до тика ${villager.buildBreakUntilTime}")
-        } else {
-            broadcastDebug("§e$name §7приостановил/завершил работу над блоком.")
+            villager.buildBreakUntilTime = world.gameTime + 400L
+
+            // Очищаем инвентарь жителя от строительного мусора по завершению постройки
+            val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
+            clearConstructionBlocks(bukkitInv)
         }
 
         villager.digTicks = 0

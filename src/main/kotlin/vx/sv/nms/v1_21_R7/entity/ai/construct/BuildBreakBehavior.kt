@@ -8,7 +8,6 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
-import org.bukkit.Bukkit
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 
 class BuildBreakBehavior(
@@ -22,19 +21,8 @@ class BuildBreakBehavior(
     1200
 ) {
 
-    private fun broadcastDebug(message: String) {
-        val component = net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection()
-            .deserialize("§d[AI-DEBUG] §f$message")
-        Bukkit.broadcast(component)
-    }
-
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
-        val name = villager.bukkitEntity.name
-        val check = world.gameTime < villager.buildBreakUntilTime && villager.settlement != null
-        if (check) {
-            broadcastDebug("§d§l[ПЕРЕКУР] §e$name §dначинает перекур до тика ${villager.buildBreakUntilTime} (текущее: ${world.gameTime})")
-        }
-        return check
+        return world.gameTime < villager.buildBreakUntilTime && villager.settlement != null
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
@@ -42,12 +30,9 @@ class BuildBreakBehavior(
     }
 
     override fun start(world: ServerLevel, villager: HumanoidVillager, time: Long) {
-        val name = villager.bukkitEntity.name
         val settlement = villager.settlement ?: return
         val bellLoc = settlement.data.center
         val bellPos = BlockPos(bellLoc.blockX, bellLoc.blockY, bellLoc.blockZ)
-
-        broadcastDebug("§e$name §7направляется к колоколу отдыхать.")
 
         villager.brain.setMemory(
             MemoryModuleType.WALK_TARGET,
@@ -60,7 +45,6 @@ class BuildBreakBehavior(
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
-        val name = villager.bukkitEntity.name
         val settlement = villager.settlement ?: return
         val bellLoc = settlement.data.center
         val bellPos = BlockPos(bellLoc.blockX, bellLoc.blockY, bellLoc.blockZ)
@@ -78,7 +62,6 @@ class BuildBreakBehavior(
                     bellPos.z + world.random.nextInt(7) - 3
                 )
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(randomOffset))
-                broadcastDebug("§e$name §7осматривается вокруг колокола.")
             }
         } else {
             if (!villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
@@ -91,8 +74,6 @@ class BuildBreakBehavior(
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
-        val name = villager.bukkitEntity.name
-        broadcastDebug("§e$name §dзакончил перекур и готов к новым задачам! (текущее время: ${world.gameTime})")
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
     }

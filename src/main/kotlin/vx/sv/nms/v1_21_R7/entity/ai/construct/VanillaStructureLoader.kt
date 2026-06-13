@@ -4,6 +4,7 @@ import net.minecraft.core.BlockPos
 import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
+import org.bukkit.block.data.Ageable
 import vx.sv.util.RelativeBlock
 
 object VanillaStructureLoader {
@@ -24,11 +25,30 @@ object VanillaStructureLoader {
         val palette = structure.palettes.firstOrNull() ?: return emptyList()
 
         palette.blocks.forEach { blockState ->
-            // УЛУЧШЕНИЕ: Игнорируем воздух и технические блоки пазлов (Jigsaw)
             if (blockState.type == Material.AIR || blockState.type == Material.JIGSAW) return@forEach
 
             val relPos = BlockPos(blockState.x, blockState.y, blockState.z)
-            relativeBlocks.add(RelativeBlock(relPos, blockState.blockData))
+            val blockData = blockState.blockData
+
+            // УЛУЧШЕНИЕ: Если блок является растением/урожаем, сбрасываем его возраст на 0,
+            // чтобы жители сажали именно ростки/семена, а не зрелую пшеницу/морковь.
+            if (blockData is Ageable) {
+                val matName = blockData.material.name
+                if (matName.contains("WHEAT") ||
+                    matName.contains("CARROT") ||
+                    matName.contains("POTATO") ||
+                    matName.contains("BEETROOT") ||
+                    matName.contains("SWEET_BERRY") ||
+                    matName.contains("COCOA") ||
+                    matName.contains("NETHER_WART") ||
+                    matName.contains("PUMPKIN_STEM") ||
+                    matName.contains("MELON_STEM")
+                ) {
+                    blockData.age = 0
+                }
+            }
+
+            relativeBlocks.add(RelativeBlock(relPos, blockData))
         }
 
         return relativeBlocks
