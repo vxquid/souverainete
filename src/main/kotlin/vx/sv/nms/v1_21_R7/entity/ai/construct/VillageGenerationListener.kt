@@ -29,6 +29,7 @@ class VillageGenerationListener : Listener {
                     groundBlock.type = Material.GRASS_BLOCK
                 }
 
+                // Очищаем воздух только над поверхностью плато
                 for (y in 1..4) {
                     val airBlock = world.getBlockAt(blockX, targetY + y, blockZ)
                     if (airBlock.type != Material.AIR && airBlock.type != Material.BEDROCK) {
@@ -36,6 +37,7 @@ class VillageGenerationListener : Listener {
                     }
                 }
 
+                // Заполняем пустоты под плато, чтобы ратуша не висела в воздухе
                 for (y in 1..3) {
                     val dirtBlock = world.getBlockAt(blockX, targetY - y, blockZ)
                     if (dirtBlock.type.isAir) {
@@ -62,10 +64,50 @@ class VillageGenerationListener : Listener {
             Bukkit.getScheduler().runTaskLater(plugin, Runnable {
                 if (!world.worldFolder.exists()) return@Runnable
 
-                val centerY = world.getHighestBlockYAt(centerX.toInt(), centerZ.toInt())
-                val centerLoc = Location(world, centerX.toDouble(), centerY.toDouble(), centerZ.toDouble())
+                // === УЛУЧШЕННЫЙ АЛГОРИТМ ПОИСКА ПЛОСКОГО ПЛАТО ===
+                var bestX = centerX.toInt()
+                var bestZ = centerZ.toInt()
+                var bestY = world.getHighestBlockYAt(bestX, bestZ)
+                var minHeightDifference = Int.MAX_VALUE
+                var highestElevationOfFlattest = Int.MIN_VALUE
 
-                // 1. Терраформинг центральной площади
+                // Сканируем небольшое смещение в радиусе 6 блоков для поиска оптимальной площадки
+                for (ox in -6..6) {
+                    for (oz in -6..6) {
+                        val cx = centerX.toInt() + ox
+                        val cz = centerZ.toInt() + oz
+
+                        var minY = Int.MAX_VALUE
+                        var maxY = Int.MIN_VALUE
+
+                        // Проверяем footprint центральной площади (радиус 5 -> площадка 11x11)
+                        for (px in -5..5) {
+                            for (pz in -5..5) {
+                                val hy = SettlementPlanner.getHighestGroundYAt(world, cx + px, cz + pz)
+                                if (hy < minY) minY = hy
+                                if (hy > maxY) maxY = hy
+                            }
+                        }
+
+                        val diff = maxY - minY
+
+                        // Предпочтение отдается:
+                        // 1. Местам с минимальным перепадом высот (flattest)
+                        // 2. При равной плоскости — местам с максимальной высотой (highest elevation / plateau)
+                        if (diff < minHeightDifference || (diff == minHeightDifference && maxY > highestElevationOfFlattest)) {
+                            minHeightDifference = diff
+                            highestElevationOfFlattest = maxY
+                            bestX = cx
+                            bestZ = cz
+                            bestY = maxY // Базовая высота площади выставляется на самый верхний уровень плато
+                        }
+                    }
+                }
+
+                // Итоговая точка центра поселения на плоской возвышенности
+                val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
+
+                // 1. Терраформинг центральной площади (теперь только выравнивает досыпанием, не копает ям)
                 terraformPlaza(centerLoc, 5)
 
                 // 2. Устанавливаем каменную плиту в центре
@@ -76,10 +118,10 @@ class VillageGenerationListener : Listener {
                 val bellBlock = slabBlock.getRelative(BlockFace.UP)
                 bellBlock.type = Material.BELL
 
-                // 4. Создаем стартовых жителей
+                // 4. Создаем стартовых жителей (спавним чуть в стороне, чтобы не застряли в колоколе)
                 val citizens = mutableSetOf<BukkitVillager>()
                 for (i in 0 until 4) {
-                    val spawnLoc = centerLoc.clone().add(0.5, 1.0, 0.5)
+                    val spawnLoc = centerLoc.clone().add(1.5, 1.0, 1.5)
                     val v = world.spawn(spawnLoc, BukkitVillager::class.java) { villager ->
                         villager.profession = BukkitVillager.Profession.NONE
                         villager.villagerLevel = 1
@@ -99,14 +141,14 @@ class VillageGenerationListener : Listener {
 
                 val settlement = Settlement(newData, citizens)
 
-                // 6. Запускаем генерацию имени (метод сам асинхронно зарегистрирует и сохранит поселение)
+                // 6. Запускаем генерацию имени
                 val manager = SettlementManager()
                 manager.generateSettlementName(settlement)
 
                 // 7. Инициализируем планировщик постройки
                 val planner = SettlementPlanner(settlement)
 
-                // 8. ПЛАНИРУЕМ НАСТОЯЩИЕ ВАНИЛЬНЫЕ ДОМИКИ MINECRAFT ПО ТИПАМ!
+                // 8. Планируем домики (они теперь привяжутся к высокому уровню центра и не будут проваливаться вниз)
                 planner.planBuilding(VanillaBuildingType.BLACKSMITH)
                 planner.planBuilding(VanillaBuildingType.BAKERY)
                 planner.planBuilding(VanillaBuildingType.FARM)

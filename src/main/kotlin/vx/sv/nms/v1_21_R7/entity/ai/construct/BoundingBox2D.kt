@@ -24,7 +24,6 @@ import kotlin.math.sin
 
 data class BuildingRecord(val type: String, val box: BoundingBox)
 
-// Облегченная DTO структура для безопасного JSON-сохранения 3D-зон застройки
 data class BuildingSaveData(
     val type: String,
     val minX: Double, val minY: Double, val minZ: Double,
@@ -36,12 +35,10 @@ class SettlementPlanner(val settlement: Settlement) {
     private val world = settlement.world
 
     companion object {
-        val buildings = ConcurrentHashMap<Settlement, MutableList<BuildingRecord>>()
-
-        // Очередь невыполненных строительных задач поселения
-        val pendingJobs = ConcurrentHashMap<Settlement, Queue<SchematicBuildJob>>()
-        // Текущая активная строительная задача поселения
-        val activeJobs = ConcurrentHashMap<Settlement, SchematicBuildJob>()
+        // Заменили Settlement на UUID во избежание багов сравнения ссылок
+        val buildings = ConcurrentHashMap<UUID, MutableList<BuildingRecord>>()
+        val pendingJobs = ConcurrentHashMap<UUID, Queue<SchematicBuildJob>>()
+        val activeJobs = ConcurrentHashMap<UUID, SchematicBuildJob>()
 
         private val worldBuildingsKey = NamespacedKey(plugin, "settlement_buildings")
 
@@ -54,7 +51,10 @@ class SettlementPlanner(val settlement: Settlement) {
                     if (mainHand == Material.SPYGLASS || offHand == Material.SPYGLASS) {
                         val playerLoc = player.location
 
-                        buildings.forEach { (settlement, records) ->
+                        buildings.forEach { (settlementId, records) ->
+                            val worldSettlements = SettlementManager.settlements[player.world] ?: return@forEach
+                            val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
+
                             if (settlement.world == player.world && settlement.data.center.distanceSquared(playerLoc) <= 10000.0) {
                                 records.forEach { record ->
                                     drawBoxOutline(player, record.box)
@@ -108,32 +108,26 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        /**
-         * Получает активную или следующую в очереди задачу строительства для поселения.
-         */
         fun getActiveOrNextJob(settlement: Settlement): SchematicBuildJob? {
-            val active = activeJobs[settlement]
+            val settlementId = settlement.data.id
+            val active = activeJobs[settlementId]
             if (active != null && !active.isFinished()) {
                 return active
             }
-            val queue = pendingJobs[settlement] ?: return null
+            val queue = pendingJobs[settlementId] ?: return null
             synchronized(queue) {
                 val next = queue.poll()
                 if (next != null) {
-                    activeJobs[settlement] = next
+                    activeJobs[settlementId] = next
                     return next
                 } else {
-                    activeJobs.remove(settlement)
+                    activeJobs.remove(settlementId)
                 }
             }
             return null
         }
 
-        /**
-         * Сканирует высоту и спускается вертикально вниз сквозь листву, бревна и растения,
-         * чтобы найти реальную координату грунта (землю/камень).
-         */
-        private fun getHighestGroundYAt(world: World, x: Int, z: Int): Int {
+        fun getHighestGroundYAt(world: World, x: Int, z: Int): Int {
             var y = world.getHighestBlockYAt(x, z)
             while (y > world.minHeight) {
                 val block = world.getBlockAt(x, y, z)
@@ -151,31 +145,26 @@ class SettlementPlanner(val settlement: Settlement) {
             return y
         }
 
-        /**
-         * Сохраняет все спланированные 3D здания из ОЗУ в PDC мира.
-         */
         fun saveBuildingsToWorld(world: World) {
             val pdc = world.persistentDataContainer
             val saveData = mutableMapOf<String, List<BuildingSaveData>>()
 
-            buildings.forEach { (settlement, records) ->
-                if (settlement.world == world) {
-                    val saves = records.map { record ->
-                        BuildingSaveData(
-                            record.type,
-                            record.box.minX, record.box.minY, record.box.minZ,
-                            record.box.maxX, record.box.maxY, record.box.maxZ
-                        )
-                    }
-                    saveData[settlement.data.id.toString()] = saves
+            buildings.forEach { (settlementId, records) ->
+                val worldSettlements = SettlementManager.settlements[world] ?: return@forEach
+                val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
+
+                val saves = records.map { record ->
+                    BuildingSaveData(
+                        record.type,
+                        record.box.minX, record.box.minY, record.box.minZ,
+                        record.box.maxX, record.box.maxY, record.box.maxZ
+                    )
                 }
+                saveData[settlementId.toString()] = saves
             }
             pdc.set(worldBuildingsKey, PersistentDataType.STRING, gson.toJson(saveData))
         }
 
-        /**
-         * Загружает все спланированные здания из PDC мира обратно в ОЗУ.
-         */
         fun loadBuildingsFromWorld(world: World) {
             val pdc = world.persistentDataContainer
             val json = pdc.get(worldBuildingsKey, PersistentDataType.STRING) ?: return
@@ -190,7 +179,7 @@ class SettlementPlanner(val settlement: Settlement) {
                     val settlementId = UUID.fromString(uuidStr)
                     val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
 
-                    val recordList = buildings.computeIfAbsent(settlement) { mutableListOf() }
+                    val recordList = buildings.computeIfAbsent(settlementId) { mutableListOf() }
                     recordList.clear()
 
                     saves.forEach { save ->
@@ -212,7 +201,7 @@ class SettlementPlanner(val settlement: Settlement) {
             center.x - 6.0, center.y - 1.0, center.z - 6.0,
             center.x + 6.0, center.y + 6.0, center.z + 6.0
         )
-        val list = buildings.computeIfAbsent(settlement) { mutableListOf() }
+        val list = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
         if (list.none { it.type == "TOWN_HALL" }) {
             list.add(BuildingRecord("TOWN_HALL", thBox))
         }
@@ -228,7 +217,7 @@ class SettlementPlanner(val settlement: Settlement) {
         val buildingHeight = type.height
 
         val rand = Random()
-        val recordsList = buildings.computeIfAbsent(settlement) { mutableListOf() }
+        val recordsList = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
 
         for (attempt in 0..250) {
             val angle = rand.nextDouble() * 2 * Math.PI
@@ -237,7 +226,6 @@ class SettlementPlanner(val settlement: Settlement) {
             val cx = center.blockX + (cos(angle) * distance).toInt()
             val cz = center.blockZ + (sin(angle) * distance).toInt()
 
-            // 1. Полное сканирование отпечатка (Footprint Scan) с фильтрацией деревьев
             var minY = Int.MAX_VALUE
             var maxY = Int.MIN_VALUE
             var validTerrain = true
@@ -247,7 +235,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     val absX = cx + x
                     val absZ = cz + z
 
-                    // Сканируем высоту именно реального грунта, пропуская кроны деревьев
                     val hy = getHighestGroundYAt(world, absX, absZ)
 
                     val blockType = world.getBlockAt(absX, hy, absZ).type
@@ -264,13 +251,10 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (!validTerrain) continue
 
-            // 2. Требование ровности: перепад высот не должен превышать 4 блоков
             if (maxY - minY > 4) continue
 
-            // 3. Правило Плато: Здание не должно быть на дне каньона или высоко на горе относительно ратуши
             if (abs(maxY - center.blockY) > 8) continue
 
-            // 4. Трассировка дороги: проверяем, что на пути нет обрывов или каньонов
             var pathValid = true
             var px = center.blockX
             var pz = center.blockZ
@@ -283,7 +267,6 @@ class SettlementPlanner(val settlement: Settlement) {
             while (true) {
                 val hy = getHighestGroundYAt(world, px, pz)
 
-                // Если дорога падает в каньон или упирается в отвесную скалу — бракуем место
                 if (abs(hy - center.blockY) > 9) {
                     pathValid = false
                     break
@@ -304,17 +287,15 @@ class SettlementPlanner(val settlement: Settlement) {
                 (cx + width / 2).toDouble(), (baseY + buildingHeight).toDouble(), (cz + length / 2).toDouble()
             )
 
-            // Проверка на пересечение с другими зданиями (с раздутым буфером)
             val collisionCheckBoundedBox = potentialBox.clone().expand(5.0, 0.0, 5.0)
             if (recordsList.any { it.box.overlaps(collisionCheckBoundedBox) }) continue
 
             recordsList.add(BuildingRecord(type.typeName, potentialBox))
 
-            // Начинаем застройку
             val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type)
 
-            // Складываем задачу в очередь поселения
-            val queue = pendingJobs.computeIfAbsent(settlement) { ConcurrentLinkedQueue() }
+            // Используем UUID ключи
+            val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
             synchronized(queue) {
                 queue.offer(buildJob)
             }
@@ -335,7 +316,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val vanillaPath = type.vanillaPath
         val workstation = type.workstation
 
-        // === 1. ГЕНЕРАЦИЯ БЕЗОПАСНЫХ РЕЛЬЕФНЫХ ДОРОГ ===
         var currentX = center.blockX
         var currentZ = center.blockZ
 
@@ -357,7 +337,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
                     if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
 
-                    // Находим именно уровень грунта, пропуская кроны деревьев
                     val roadY = getHighestGroundYAt(world, px, pz)
                     val currentBlock = world.getBlockAt(px, roadY, pz)
 
@@ -366,7 +345,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
 
                     if (currentBlock.isLiquid) {
-                        // Брод поверх воды
                         buildJob.addBlock(BlockPos(px, roadY, pz), cobbleData, isRoad = true)
                     } else {
                         buildJob.addBlock(BlockPos(px, roadY, pz), roadBlockData, isRoad = true)
@@ -386,7 +364,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // === 2. ТЕРРАФОРМИРОВАНИЕ ПЛОЩАДКИ ===
         val halfWidth = width / 2
         val halfLength = length / 2
 
@@ -395,7 +372,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 val absX = cx - width / 2 + x
                 val absZ = cz - length / 2 + z
 
-                // Находим истинный уровень грунта
                 val highest = getHighestGroundYAt(world, absX, absZ)
 
                 for (y in baseY..baseY + height) {
@@ -410,7 +386,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // === 3. СТРОИТЕЛЬСТВО НАСТОЯЩЕГО ВАНИЛЬНОГО ЗДАНИЯ ===
         val relativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
         if (relativeBlocks.isEmpty()) return buildJob
 
@@ -423,10 +398,8 @@ class SettlementPlanner(val settlement: Settlement) {
             buildJob.addBlock(absPos, relBlock.blockData, isRoad = false)
         }
 
-        // === 4. УСТАНОВКА РАБОЧЕЙ СТАНЦИИ ===
         buildJob.addBlock(BlockPos(cx, baseY + 1, cz), workstation.createBlockData(), isRoad = false)
 
-        // === 5. ПОДКЛЮЧЕНИЕ РАБОЧИХ ===
         val citizens = settlement.villagers.mapNotNull {
             (it as? CraftVillager)?.handle as? HumanoidVillager
         }

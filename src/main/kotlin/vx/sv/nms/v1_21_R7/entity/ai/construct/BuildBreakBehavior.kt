@@ -8,6 +8,7 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
+import org.bukkit.Bukkit
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 
 class BuildBreakBehavior(
@@ -16,14 +17,24 @@ class BuildBreakBehavior(
     ImmutableMap.of(
         MemoryModuleType.WALK_TARGET, MemoryStatus.REGISTERED,
         MemoryModuleType.LOOK_TARGET, MemoryStatus.REGISTERED,
-        MemoryModuleType.ATTACK_TARGET, MemoryStatus.VALUE_ABSENT // Отдых прекращается во время боя
+        MemoryModuleType.ATTACK_TARGET, MemoryStatus.VALUE_ABSENT
     ),
-    1200 // Максимальное время непрерывного выполнения тика (1 минута)
+    1200
 ) {
 
+    private fun broadcastDebug(message: String) {
+        val component = net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer.legacySection()
+            .deserialize("§d[AI-DEBUG] §f$message")
+        Bukkit.broadcast(component)
+    }
+
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
-        // Условие старта: только если у жителя активен перекур и он привязан к поселению
-        return world.gameTime < villager.buildBreakUntilTime && villager.settlement != null
+        val name = villager.bukkitEntity.name
+        val check = world.gameTime < villager.buildBreakUntilTime && villager.settlement != null
+        if (check) {
+            broadcastDebug("§d§l[ПЕРЕКУР] §e$name §dначинает перекур до тика ${villager.buildBreakUntilTime} (текущее: ${world.gameTime})")
+        }
+        return check
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
@@ -31,14 +42,16 @@ class BuildBreakBehavior(
     }
 
     override fun start(world: ServerLevel, villager: HumanoidVillager, time: Long) {
+        val name = villager.bukkitEntity.name
         val settlement = villager.settlement ?: return
         val bellLoc = settlement.data.center
         val bellPos = BlockPos(bellLoc.blockX, bellLoc.blockY, bellLoc.blockZ)
 
-        // Прокладываем путь к колоколу поселения (Meeting Point)
+        broadcastDebug("§e$name §7направляется к колоколу отдыхать.")
+
         villager.brain.setMemory(
             MemoryModuleType.WALK_TARGET,
-            WalkTarget(BlockPosTracker(bellPos), speedModifier, 3) // Останавливаемся в радиусе 3 блоков
+            WalkTarget(BlockPosTracker(bellPos), speedModifier, 3)
         )
         villager.brain.setMemory(
             MemoryModuleType.LOOK_TARGET,
@@ -47,6 +60,7 @@ class BuildBreakBehavior(
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
+        val name = villager.bukkitEntity.name
         val settlement = villager.settlement ?: return
         val bellLoc = settlement.data.center
         val bellPos = BlockPos(bellLoc.blockX, bellLoc.blockY, bellLoc.blockZ)
@@ -55,10 +69,8 @@ class BuildBreakBehavior(
         val distSqr = npcPos.distSqr(bellPos)
 
         if (distSqr <= 16.0) {
-            // Пришли к колоколу, останавливаемся и отдыхаем
             villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-            
-            // Время от времени лениво оглядываемся в случайные точки вокруг колокола
+
             if (world.random.nextInt(40) == 0) {
                 val randomOffset = BlockPos(
                     bellPos.x + world.random.nextInt(7) - 3,
@@ -66,9 +78,9 @@ class BuildBreakBehavior(
                     bellPos.z + world.random.nextInt(7) - 3
                 )
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(randomOffset))
+                broadcastDebug("§e$name §7осматривается вокруг колокола.")
             }
         } else {
-            // Если путь сбился — заново ведем жителя к колоколу
             if (!villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
                 villager.brain.setMemory(
                     MemoryModuleType.WALK_TARGET,
@@ -79,6 +91,8 @@ class BuildBreakBehavior(
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
+        val name = villager.bukkitEntity.name
+        broadcastDebug("§e$name §dзакончил перекур и готов к новым задачам! (текущее время: ${world.gameTime})")
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
     }

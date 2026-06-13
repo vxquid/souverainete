@@ -91,7 +91,8 @@ class SettlementManager : Listener {
             sendReputationActionBar(player, activeSettlement)
 
             // === ЛОГИКА БОССБАРА ЗДАНИЙ ===
-            val buildings = SettlementPlanner.buildings[activeSettlement] ?: emptyList()
+            // ИСПРАВЛЕНО: Теперь поиск зданий выполняется по UUID (activeSettlement.data.id)
+            val buildings = SettlementPlanner.buildings[activeSettlement.data.id] ?: emptyList()
             // Проверяем, находится ли игрок внутри BoundingBox какого-либо здания
             val currentBuilding = buildings.find { it.box.contains(playerLocationVector) }
 

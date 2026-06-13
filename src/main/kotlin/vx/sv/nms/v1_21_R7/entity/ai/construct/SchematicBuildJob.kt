@@ -36,25 +36,35 @@ class SchematicBuildJob(val world: World) {
             val npcPos = npc.blockPosition()
             val blocksList = getBlocks()
 
-            // 0. АВТО-ЗАВЕРШЕНИЕ
-            blocksList.filter { !it.isPlaced && it.claimedBy == null }.forEach {
-                val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
-                if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
-                    it.isPlaced = true
+            // 1. ОЧИСТКА ЗАВИСШИХ КЛЕЙМОВ (Garbage Collection)
+            // Если житель мертв, сменил задачу или строит другой блок — освобождаем ресурс
+            blocksList.forEach { block ->
+                val claimer = block.claimedBy
+                if (claimer != null) {
+                    if (!claimer.isAlive || claimer.activeBuildJob != this || claimer.assignedBlock != block) {
+                        block.claimedBy = null
+                    }
                 }
             }
 
-            // 1. ФАЗА РАСЧИСТКИ
+            // 2. ГЛОБАЛЬНОЕ АВТО-ЗАВЕРШЕНИЕ ДЛЯ ВСЕХ БЛОКОВ
+            // Если блок в мире уже совпадает с чертежом — закрываем его и сбрасываем клейм
+            blocksList.filter { !it.isPlaced }.forEach {
+                val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
+                if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
+                    it.isPlaced = true
+                    it.claimedBy = null
+                }
+            }
+
+            // 3. ФАЗА РАСЧИСТКИ ПРЕПЯТСТВИЙ
             val obstacles = blocksList.filter {
                 if (it.isPlaced || it.claimedBy != null) return@filter false
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
                 val currentType = currentBlock.type
 
-                // Если текущий блок — проходимая трава/цветы, это не препятствие!
                 if (currentBlock.isIgnorableObstacle()) return@filter false
-
                 if (currentType == it.blockData.material) return@filter false
-
                 if (currentType.isShovelable() && it.blockData.material == Material.DIRT_PATH) return@filter false
 
                 if (currentBlock.isLiquid) {
@@ -72,8 +82,7 @@ class SchematicBuildJob(val world: World) {
                 return closest
             }
 
-            // 2. ФАЗА СТРОИТЕЛЬСТВА (СТРОГО БЕЗ ПРОВЕРКИ ИНВЕНТАРЯ)
-            // ИИ забирает любые блоки, а ресурсы на них будут выданы динамически в поведении!
+            // 4. ФАЗА СТРОИТЕЛЬСТВА
             val buildCandidates = blocksList.filter {
                 !it.isPlaced && it.claimedBy == null
             }
@@ -91,9 +100,8 @@ class SchematicBuildJob(val world: World) {
 
     fun unclaimBlock(block: BlockToPlace) {
         synchronized(lock) {
-            if (block.claimedBy == block.claimedBy) {
-                block.claimedBy = null
-            }
+            // ИСПРАВЛЕНО: Убрана тавтологическая проверка, сброс происходит напрямую
+            block.claimedBy = null
         }
     }
 
@@ -106,7 +114,18 @@ class SchematicBuildJob(val world: World) {
 
     fun isFinished(): Boolean {
         synchronized(lock) {
-            return getBlocks().all { it.isPlaced }
+            val blocksList = getBlocks()
+
+            // Быстрое авто-завершение перед проверкой статуса готовности
+            blocksList.filter { !it.isPlaced }.forEach {
+                val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
+                if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
+                    it.isPlaced = true
+                    it.claimedBy = null
+                }
+            }
+
+            return blocksList.all { it.isPlaced }
         }
     }
 }
