@@ -7,6 +7,8 @@ import net.minecraft.core.Holder
 import net.minecraft.core.component.DataComponents
 import net.minecraft.resources.ResourceKey
 import net.minecraft.server.level.ServerLevel
+import net.minecraft.sounds.SoundEvents
+import net.minecraft.world.InteractionHand
 import net.minecraft.world.SimpleContainer
 import net.minecraft.world.attribute.EnvironmentAttributes
 import net.minecraft.world.damagesource.DamageSource
@@ -33,6 +35,7 @@ import net.minecraft.world.item.Items
 import net.minecraft.world.item.component.ChargedProjectiles
 import net.minecraft.world.level.Level
 import net.minecraft.world.level.storage.ValueInput
+import net.minecraft.world.phys.Vec3
 import org.bukkit.*
 import org.bukkit.craftbukkit.entity.CraftLivingEntity
 import org.bukkit.craftbukkit.inventory.CraftItemStack
@@ -41,16 +44,17 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.event.VillagerKillTargetEvent
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
+import vx.sv.gameplay.settlement.Settlement
 import vx.sv.nms.EntityProvider.Humanoid
 import vx.sv.nms.v1_21_R7.VersionSpecificHumanoidEntityProvider.Companion.plugin
 import vx.sv.nms.v1_21_R7.entity.ai.*
-import vx.sv.nms.v1_21_R7.entity.ai.construct.BlockToPlace
-import vx.sv.nms.v1_21_R7.entity.ai.construct.BuildJobManager
-import vx.sv.nms.v1_21_R7.entity.ai.construct.ConstructionBehavior
-import vx.sv.nms.v1_21_R7.entity.ai.construct.SchematicBuildJob
+import vx.sv.nms.v1_21_R7.entity.ai.construct.*
+import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.util.InventorySerializer
 import vx.sv.util.VillagerBridge
 import java.util.*
+import kotlin.math.atan2
+import kotlin.math.sqrt
 
 class HumanoidVillager(
     type: EntityType<out Villager>?,
@@ -68,8 +72,11 @@ class HumanoidVillager(
     var nextBuildAvailableTime: Long = 0L
     var digTicks: Int = 0
     var buildTicks: Int = 0
+    var buildBreakUntilTime: Long = 0L
+    var lastBuildActionTime: Long = 0L
+    var isBuildDistanceHackActive: Boolean = false
 
-    var lastPosition: net.minecraft.world.phys.Vec3? = null
+    var lastPosition: Vec3? = null
     var stuckTicks: Int = 0
 
     init {
@@ -223,7 +230,7 @@ class HumanoidVillager(
             }
 
             // === ВОССТАНОВЛЕНИЕ СЕССИИ СТРОИТЕЛЬСТВА ПОСЛЕ РЕСТАРТА ===
-            val jobUuidKey = org.bukkit.NamespacedKey(plugin, "active_build_job_uuid")
+            val jobUuidKey = NamespacedKey(plugin, "active_build_job_uuid")
             if (pdc.has(jobUuidKey, PersistentDataType.STRING)) {
                 val uuidStr = pdc.get(jobUuidKey, PersistentDataType.STRING)
                 if (!uuidStr.isNullOrEmpty()) {
@@ -289,10 +296,8 @@ class HumanoidVillager(
             if (availableBehaviors != null) {
                 for (priorityMap in availableBehaviors.values) {
                     if (priorityMap is MutableMap<*, *>) {
-                        // 1. Вырезаем панику от монстров полностью
                         priorityMap.remove(Activity.PANIC)
 
-                        // 2. Вырезаем ShowTradesToPlayer из абсолютно всех активностей (CORE, IDLE, WORK, MEET и т.д.)
                         for (activityBehaviors in priorityMap.values) {
                             if (activityBehaviors is MutableSet<*>) {
                                 activityBehaviors.removeIf { behavior ->
@@ -312,7 +317,11 @@ class HumanoidVillager(
             Pair.of(1, CrossbowAttackBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(1, BowAttackBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(1, TacticalAttackBehavior(0.65f, 15) as BehaviorControl<Villager>),
+
+            // Взаимоисключающие поведения приоритета 2: перекур и стройка
+            Pair.of(2, BuildBreakBehavior(0.6f) as BehaviorControl<Villager>),
             Pair.of(2, ConstructionBehavior(0.65f) as BehaviorControl<Villager>),
+
             Pair.of(3, FollowLeaderBehavior(0.65f, 4.0f, 32.0f) as BehaviorControl<Villager>),
             Pair.of(4, LookAndFollowDuringConversation(0.65f) as BehaviorControl<Villager>)
         )
@@ -368,8 +377,8 @@ class HumanoidVillager(
         val nmsItem = CraftItemStack.asNMSCopy(item)
         var ticks = 0
 
-        this.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, nmsItem)
-        this.startUsingItem(net.minecraft.world.InteractionHand.MAIN_HAND)
+        this.setItemInHand(InteractionHand.MAIN_HAND, nmsItem)
+        this.startUsingItem(InteractionHand.MAIN_HAND)
 
         plugin.server.scheduler.runTaskTimer(plugin, { task ->
             this.navigation.stop()
@@ -380,7 +389,7 @@ class HumanoidVillager(
             ticks++
             if (ticks >= duration) {
                 this.stopUsingItem()
-                this.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+                this.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
                 onDone.invoke()
                 task.cancel()
             }
@@ -419,7 +428,7 @@ class HumanoidVillager(
 
         val dX = target.x - this.x
         val dZ = target.z - this.z
-        val targetYaw = (Math.toDegrees(kotlin.math.atan2(dZ, dX)) - 90.0).toFloat()
+        val targetYaw = (Math.toDegrees(atan2(dZ, dX)) - 90.0).toFloat()
 
         this.yRot = targetYaw
         this.yHeadRot = targetYaw
@@ -427,18 +436,18 @@ class HumanoidVillager(
         this.hurtMarked = true
 
         val arrowEntity = Arrow(level(), this, net.minecraft.world.item.ItemStack(Items.ARROW), weaponStack)
-        val dist = kotlin.math.sqrt(dX * dX + dZ * dZ)
+        val dist = sqrt(dX * dX + dZ * dZ)
         val targetHeightOffset = target.bbHeight * 0.6
         val targetY = target.y + targetHeightOffset
         val dY = targetY - arrowEntity.y
 
         if (weaponStack.`is`(Items.CROSSBOW)) {
-            this.playSound(net.minecraft.sounds.SoundEvents.CROSSBOW_SHOOT, 1.0f, 1.0f / (this.random.nextFloat() * 0.4f + 0.8f))
+            this.playSound(SoundEvents.CROSSBOW_SHOOT, 1.0f, 1.0f / (this.random.nextFloat() * 0.4f + 0.8f))
             arrowEntity.shoot(dX, dY + dist * 0.05, dZ, 3.5f, 0.5f)
             weaponStack.set(DataComponents.CHARGED_PROJECTILES, ChargedProjectiles.EMPTY)
             this.onCrossbowAttackPerformed()
         } else {
-            this.playSound(net.minecraft.sounds.SoundEvents.SKELETON_SHOOT, 1.0f, 1.0f / (this.random.nextFloat() * 0.4f + 0.8f))
+            this.playSound(SoundEvents.SKELETON_SHOOT, 1.0f, 1.0f / (this.random.nextFloat() * 0.4f + 0.8f))
             val speed = velocity * 2.5f
             arrowEntity.shoot(dX, dY + dist * 0.1, dZ, speed, 1.0f)
         }
@@ -480,4 +489,9 @@ class HumanoidVillager(
     override fun onCrossbowAttackPerformed() {
         this.noActionTime = 0
     }
+
+    // Quick settlement getter
+    val settlement: Settlement?
+        get() = (this.bukkitEntity as org.bukkit.entity.Villager).settlement
+
 }

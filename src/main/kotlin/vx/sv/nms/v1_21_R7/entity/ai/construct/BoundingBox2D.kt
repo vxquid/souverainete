@@ -17,9 +17,9 @@ import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.abs
 import kotlin.math.cos
-import kotlin.math.max
 import kotlin.math.sin
 
 data class BuildingRecord(val type: String, val box: BoundingBox)
@@ -37,7 +37,12 @@ class SettlementPlanner(val settlement: Settlement) {
 
     companion object {
         val buildings = ConcurrentHashMap<Settlement, MutableList<BuildingRecord>>()
-        val masterBuildJobs = ConcurrentHashMap<Settlement, SchematicBuildJob>()
+
+        // Очередь невыполненных строительных задач поселения
+        val pendingJobs = ConcurrentHashMap<Settlement, Queue<SchematicBuildJob>>()
+        // Текущая активная строительная задача поселения
+        val activeJobs = ConcurrentHashMap<Settlement, SchematicBuildJob>()
+
         private val worldBuildingsKey = NamespacedKey(plugin, "settlement_buildings")
 
         init {
@@ -101,6 +106,49 @@ class SettlementPlanner(val settlement: Settlement) {
                 player.spawnParticle(Particle.HAPPY_VILLAGER, loc, 1, 0.0, 0.0, 0.0, 0.0)
                 stepY += 0.5
             }
+        }
+
+        /**
+         * Получает активную или следующую в очереди задачу строительства для поселения.
+         */
+        fun getActiveOrNextJob(settlement: Settlement): SchematicBuildJob? {
+            val active = activeJobs[settlement]
+            if (active != null && !active.isFinished()) {
+                return active
+            }
+            val queue = pendingJobs[settlement] ?: return null
+            synchronized(queue) {
+                val next = queue.poll()
+                if (next != null) {
+                    activeJobs[settlement] = next
+                    return next
+                } else {
+                    activeJobs.remove(settlement)
+                }
+            }
+            return null
+        }
+
+        /**
+         * Сканирует высоту и спускается вертикально вниз сквозь листву, бревна и растения,
+         * чтобы найти реальную координату грунта (землю/камень).
+         */
+        private fun getHighestGroundYAt(world: World, x: Int, z: Int): Int {
+            var y = world.getHighestBlockYAt(x, z)
+            while (y > world.minHeight) {
+                val block = world.getBlockAt(x, y, z)
+                val type = block.type
+                val isTreeOrPlant = type.name.contains("LEAVES") ||
+                        type.name.contains("LOG") ||
+                        type.name.contains("WOOD") ||
+                        block.isIgnorableObstacle()
+                if (isTreeOrPlant) {
+                    y--
+                } else {
+                    break
+                }
+            }
+            return y
         }
 
         /**
@@ -172,7 +220,7 @@ class SettlementPlanner(val settlement: Settlement) {
 
     fun planBuilding(type: VanillaBuildingType): Boolean {
         val center = settlement.data.center
-        val maxRadius = 50
+        val maxRadius = 45
         val minRadius = 15
 
         val width = type.width
@@ -182,20 +230,73 @@ class SettlementPlanner(val settlement: Settlement) {
         val rand = Random()
         val recordsList = buildings.computeIfAbsent(settlement) { mutableListOf() }
 
-        for (attempt in 0..150) {
+        for (attempt in 0..250) {
             val angle = rand.nextDouble() * 2 * Math.PI
             val distance = rand.nextInt(maxRadius - minRadius) + minRadius
 
             val cx = center.blockX + (cos(angle) * distance).toInt()
             val cz = center.blockZ + (sin(angle) * distance).toInt()
 
-            val y1 = world.getHighestBlockYAt(cx - width / 2, cz - length / 2)
-            val y2 = world.getHighestBlockYAt(cx + width / 2, cz - length / 2)
-            val y3 = world.getHighestBlockYAt(cx - width / 2, cz + length / 2)
-            val y4 = world.getHighestBlockYAt(cx + width / 2, cz + length / 2)
-            val yC = world.getHighestBlockYAt(cx, cz)
+            // 1. Полное сканирование отпечатка (Footprint Scan) с фильтрацией деревьев
+            var minY = Int.MAX_VALUE
+            var maxY = Int.MIN_VALUE
+            var validTerrain = true
 
-            val maxY = max(max(y1, y2), max(y3, max(y4, yC)))
+            for (x in -width / 2..width / 2) {
+                for (z in -length / 2..length / 2) {
+                    val absX = cx + x
+                    val absZ = cz + z
+
+                    // Сканируем высоту именно реального грунта, пропуская кроны деревьев
+                    val hy = getHighestGroundYAt(world, absX, absZ)
+
+                    val blockType = world.getBlockAt(absX, hy, absZ).type
+                    if (blockType == Material.WATER || blockType == Material.LAVA) {
+                        validTerrain = false
+                        break
+                    }
+
+                    if (hy < minY) minY = hy
+                    if (hy > maxY) maxY = hy
+                }
+                if (!validTerrain) break
+            }
+
+            if (!validTerrain) continue
+
+            // 2. Требование ровности: перепад высот не должен превышать 4 блоков
+            if (maxY - minY > 4) continue
+
+            // 3. Правило Плато: Здание не должно быть на дне каньона или высоко на горе относительно ратуши
+            if (abs(maxY - center.blockY) > 8) continue
+
+            // 4. Трассировка дороги: проверяем, что на пути нет обрывов или каньонов
+            var pathValid = true
+            var px = center.blockX
+            var pz = center.blockZ
+            val dX = abs(cx - px)
+            val dZ = abs(cz - pz)
+            val sX = if (px < cx) 1 else -1
+            val sZ = if (pz < cz) 1 else -1
+            var err = dX - dZ
+
+            while (true) {
+                val hy = getHighestGroundYAt(world, px, pz)
+
+                // Если дорога падает в каньон или упирается в отвесную скалу — бракуем место
+                if (abs(hy - center.blockY) > 9) {
+                    pathValid = false
+                    break
+                }
+
+                if (px == cx && pz == cz) break
+                val e2 = 2 * err
+                if (e2 > -dZ) { err -= dZ; px += sX }
+                if (e2 < dX) { err += dX; pz += sZ }
+            }
+
+            if (!pathValid) continue
+
             val baseY = maxY
 
             val potentialBox = BoundingBox(
@@ -203,19 +304,29 @@ class SettlementPlanner(val settlement: Settlement) {
                 (cx + width / 2).toDouble(), (baseY + buildingHeight).toDouble(), (cz + length / 2).toDouble()
             )
 
-            if (recordsList.any { it.box.overlaps(potentialBox) }) continue
+            // Проверка на пересечение с другими зданиями (с раздутым буфером)
+            val collisionCheckBoundedBox = potentialBox.clone().expand(5.0, 0.0, 5.0)
+            if (recordsList.any { it.box.overlaps(collisionCheckBoundedBox) }) continue
 
             recordsList.add(BuildingRecord(type.typeName, potentialBox))
-            startVanillaStructureConstruction(cx, baseY, cz, type)
+
+            // Начинаем застройку
+            val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type)
+
+            // Складываем задачу в очередь поселения
+            val queue = pendingJobs.computeIfAbsent(settlement) { ConcurrentLinkedQueue() }
+            synchronized(queue) {
+                queue.offer(buildJob)
+            }
             return true
         }
 
-        plugin.logger.warning("Не удалось найти место для здания ${type.displayName} в поселении ${settlement.data.settlementName}.")
+        plugin.logger.warning("Не удалось найти безопасное место для здания ${type.displayName} в поселении ${settlement.data.settlementName}.")
         return false
     }
 
-    private fun startVanillaStructureConstruction(cx: Int, baseY: Int, cz: Int, type: VanillaBuildingType) {
-        val buildJob = masterBuildJobs.getOrPut(settlement) { SchematicBuildJob(world) }
+    private fun startVanillaStructureConstruction(cx: Int, baseY: Int, cz: Int, type: VanillaBuildingType): SchematicBuildJob {
+        val buildJob = SchematicBuildJob(world)
         val center = settlement.data.center
 
         val width = type.width
@@ -224,7 +335,7 @@ class SettlementPlanner(val settlement: Settlement) {
         val vanillaPath = type.vanillaPath
         val workstation = type.workstation
 
-        // === 1. ГЕНЕРАЦИЯ ШИРОКОЙ РЕЛЬЕФНОЙ ДОРОГИ ===
+        // === 1. ГЕНЕРАЦИЯ БЕЗОПАСНЫХ РЕЛЬЕФНЫХ ДОРОГ ===
         var currentX = center.blockX
         var currentZ = center.blockZ
 
@@ -246,15 +357,16 @@ class SettlementPlanner(val settlement: Settlement) {
 
                     if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
 
-                    val roadY = world.getHighestBlockYAt(px, pz)
+                    // Находим именно уровень грунта, пропуская кроны деревьев
+                    val roadY = getHighestGroundYAt(world, px, pz)
                     val currentBlock = world.getBlockAt(px, roadY, pz)
 
                     for (dy in 1..3) {
                         buildJob.addBlock(BlockPos(px, roadY + dy, pz), airData, isRoad = true)
                     }
 
-                    // Плоские мосты строго по уровню воды без опор ко дну
                     if (currentBlock.isLiquid) {
+                        // Брод поверх воды
                         buildJob.addBlock(BlockPos(px, roadY, pz), cobbleData, isRoad = true)
                     } else {
                         buildJob.addBlock(BlockPos(px, roadY, pz), roadBlockData, isRoad = true)
@@ -274,35 +386,47 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // === 2. СТРОИТЕЛЬСТВО ВАНИЛЬНОГО ЗДАНИЯ С ФУНДАМЕНТОМ ===
-        val relativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
-        if (relativeBlocks.isEmpty()) return
+        // === 2. ТЕРРАФОРМИРОВАНИЕ ПЛОЩАДКИ ===
+        val halfWidth = width / 2
+        val halfLength = length / 2
 
-        relativeBlocks.forEach { relBlock ->
-            val absoluteX = cx + relBlock.relativePos.x
-            val absoluteY = baseY + relBlock.relativePos.y
-            val absoluteZ = cz + relBlock.relativePos.z
-            val absPos = BlockPos(absoluteX, absoluteY, absoluteZ)
+        for (x in 0 until width) {
+            for (z in 0 until length) {
+                val absX = cx - width / 2 + x
+                val absZ = cz - length / 2 + z
 
-            val highest = world.getHighestBlockYAt(absoluteX, absoluteZ)
+                // Находим истинный уровень грунта
+                val highest = getHighestGroundYAt(world, absX, absZ)
 
-            for (y in absoluteY..absoluteY + 6) {
-                if (y <= highest) {
-                    buildJob.addBlock(BlockPos(absoluteX, y, absoluteZ), airData, isRoad = false)
+                for (y in baseY..baseY + height) {
+                    if (y <= highest) {
+                        buildJob.addBlock(BlockPos(absX, y, absZ), airData, isRoad = false)
+                    }
+                }
+
+                for (y in highest + 1 until baseY) {
+                    buildJob.addBlock(BlockPos(absX, y, absZ), cobbleData, isRoad = false)
                 }
             }
+        }
 
-            for (y in highest + 1 until absoluteY) {
-                buildJob.addBlock(BlockPos(absoluteX, y, absoluteZ), cobbleData, isRoad = false)
-            }
+        // === 3. СТРОИТЕЛЬСТВО НАСТОЯЩЕГО ВАНИЛЬНОГО ЗДАНИЯ ===
+        val relativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
+        if (relativeBlocks.isEmpty()) return buildJob
+
+        relativeBlocks.forEach { relBlock ->
+            val absoluteX = cx - width / 2 + relBlock.relativePos.x
+            val absoluteY = baseY + relBlock.relativePos.y
+            val absoluteZ = cz - length / 2 + relBlock.relativePos.z
+            val absPos = BlockPos(absoluteX, absoluteY, absoluteZ)
 
             buildJob.addBlock(absPos, relBlock.blockData, isRoad = false)
         }
 
-        // === 3. УСТАНОВКА РАБОЧЕЙ СТАНЦИИ ===
+        // === 4. УСТАНОВКА РАБОЧЕЙ СТАНЦИИ ===
         buildJob.addBlock(BlockPos(cx, baseY + 1, cz), workstation.createBlockData(), isRoad = false)
 
-        // === 4. ПОДКЛЮЧЕНИЕ РАБОЧИХ ===
+        // === 5. ПОДКЛЮЧЕНИЕ РАБОЧИХ ===
         val citizens = settlement.villagers.mapNotNull {
             (it as? CraftVillager)?.handle as? HumanoidVillager
         }
@@ -334,5 +458,7 @@ class SettlementPlanner(val settlement: Settlement) {
                 npc.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
             }
         }
+
+        return buildJob
     }
 }

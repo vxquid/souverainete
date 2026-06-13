@@ -178,6 +178,7 @@ class Souverainete : JavaPlugin(), Listener {
             server.pluginManager.registerEvents(BuildSaveListener(), this)
             server.pluginManager.registerEvents(VillageGenerationListener(), this)
             server.pluginManager.registerEvents(WoodFarmManager(), this)
+            server.pluginManager.registerEvents(BuilderSafetyListener(), this)
         }
     }
 

@@ -5,7 +5,6 @@ import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.data.BlockData
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
-import org.bukkit.entity.Villager as BukkitVillager
 
 class SchematicBuildJob(val world: World) {
     private val blocksMap = mutableMapOf<BlockPos, BlockToPlace>()
@@ -22,6 +21,8 @@ class SchematicBuildJob(val world: World) {
     fun getBlocks(): List<BlockToPlace> {
         synchronized(lock) {
             if (sortedBlocksCache == null) {
+                // Сначала полностью строим все здания (isRoad = false),
+                // и только после их готовности прокладываем дороги (isRoad = true).
                 sortedBlocksCache = blocksMap.values.sortedWith(
                     compareBy<BlockToPlace> { it.isRoad }.thenBy { it.pos.y }
                 )
@@ -33,7 +34,6 @@ class SchematicBuildJob(val world: World) {
     fun claimNextBlock(npc: HumanoidVillager): BlockToPlace? {
         synchronized(lock) {
             val npcPos = npc.blockPosition()
-            val bukkitInv = (npc.bukkitEntity as BukkitVillager).inventory
             val blocksList = getBlocks()
 
             // 0. АВТО-ЗАВЕРШЕНИЕ
@@ -50,7 +50,7 @@ class SchematicBuildJob(val world: World) {
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
                 val currentType = currentBlock.type
 
-                // Если текущий блок — трава или цветы, пропускаем их в фазе расчистки
+                // Если текущий блок — проходимая трава/цветы, это не препятствие!
                 if (currentBlock.isIgnorableObstacle()) return@filter false
 
                 if (currentType == it.blockData.material) return@filter false
@@ -72,12 +72,10 @@ class SchematicBuildJob(val world: World) {
                 return closest
             }
 
-            // 2. ФАЗА СТРОИТЕЛЬСТВА
+            // 2. ФАЗА СТРОИТЕЛЬСТВА (СТРОГО БЕЗ ПРОВЕРКИ ИНВЕНТАРЯ)
+            // ИИ забирает любые блоки, а ресурсы на них будут выданы динамически в поведении!
             val buildCandidates = blocksList.filter {
-                val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
-                val isPathTransformation = it.isRoad && it.material == Material.DIRT_PATH && currentBlock.type.isShovelable()
-
-                !it.isPlaced && it.claimedBy == null && (isPathTransformation || bukkitInv.contains(it.material))
+                !it.isPlaced && it.claimedBy == null
             }
 
             if (buildCandidates.isEmpty()) return null

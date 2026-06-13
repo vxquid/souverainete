@@ -11,18 +11,15 @@ data class BlockToPlace(
     val blockData: BlockData,
     var claimedBy: HumanoidVillager? = null,
     var isPlaced: Boolean = false,
-    val isRoad: Boolean = false
+    val isRoad: Boolean = false,
+    val priority: Int = 0 // Очередь застройки: чем меньше число, тем раньше строится
 ) {
     val material: Material get() = blockData.material.toBaseIngredient()
 }
 
-/**
- * Определяет, является ли блок незначительным препятствием, которое можно игнорировать (трава, цветы).
- */
 fun Block.isIgnorableObstacle(): Boolean {
     val type = this.type
     if (type.isAir || this.isLiquid) return true
-    // Не твердые блоки (трава, цветы) игнорируются, за исключением опасных роз визера
     if (!type.isSolid && type != Material.WITHER_ROSE) return true
     return false
 }
