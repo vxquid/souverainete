@@ -39,13 +39,13 @@ import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
-import vx.sv.BuildJobManager
 import vx.sv.event.VillagerKillTargetEvent
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.nms.EntityProvider.Humanoid
 import vx.sv.nms.v1_21_R7.VersionSpecificHumanoidEntityProvider.Companion.plugin
 import vx.sv.nms.v1_21_R7.entity.ai.*
 import vx.sv.nms.v1_21_R7.entity.ai.construct.BlockToPlace
+import vx.sv.nms.v1_21_R7.entity.ai.construct.BuildJobManager
 import vx.sv.nms.v1_21_R7.entity.ai.construct.ConstructionBehavior
 import vx.sv.nms.v1_21_R7.entity.ai.construct.SchematicBuildJob
 import vx.sv.util.InventorySerializer

@@ -1,24 +1,35 @@
 package vx.sv.nms.v1_21_R7.entity.ai.construct
 
+import com.google.gson.reflect.TypeToken
 import net.minecraft.core.BlockPos
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
-import org.bukkit.Bukkit
-import org.bukkit.Location
-import org.bukkit.Material
-import org.bukkit.Particle
+import org.bukkit.*
 import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
+import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.Settlement
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.*
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.sin
 
 data class BuildingRecord(val type: String, val box: BoundingBox)
+
+// Облегченная DTO структура для безопасного JSON-сохранения 3D-зон застройки
+data class BuildingSaveData(
+    val type: String,
+    val minX: Double, val minY: Double, val minZ: Double,
+    val maxX: Double, val maxY: Double, val maxZ: Double
+)
 
 class SettlementPlanner(val settlement: Settlement) {
 
@@ -27,6 +38,7 @@ class SettlementPlanner(val settlement: Settlement) {
     companion object {
         val buildings = ConcurrentHashMap<Settlement, MutableList<BuildingRecord>>()
         val masterBuildJobs = ConcurrentHashMap<Settlement, SchematicBuildJob>()
+        private val worldBuildingsKey = NamespacedKey(plugin, "settlement_buildings")
 
         init {
             Bukkit.getScheduler().runTaskTimer(plugin, Runnable {
@@ -90,6 +102,60 @@ class SettlementPlanner(val settlement: Settlement) {
                 stepY += 0.5
             }
         }
+
+        /**
+         * Сохраняет все спланированные 3D здания из ОЗУ в PDC мира.
+         */
+        fun saveBuildingsToWorld(world: World) {
+            val pdc = world.persistentDataContainer
+            val saveData = mutableMapOf<String, List<BuildingSaveData>>()
+
+            buildings.forEach { (settlement, records) ->
+                if (settlement.world == world) {
+                    val saves = records.map { record ->
+                        BuildingSaveData(
+                            record.type,
+                            record.box.minX, record.box.minY, record.box.minZ,
+                            record.box.maxX, record.box.maxY, record.box.maxZ
+                        )
+                    }
+                    saveData[settlement.data.id.toString()] = saves
+                }
+            }
+            pdc.set(worldBuildingsKey, PersistentDataType.STRING, gson.toJson(saveData))
+        }
+
+        /**
+         * Загружает все спланированные здания из PDC мира обратно в ОЗУ.
+         */
+        fun loadBuildingsFromWorld(world: World) {
+            val pdc = world.persistentDataContainer
+            val json = pdc.get(worldBuildingsKey, PersistentDataType.STRING) ?: return
+
+            try {
+                val typeToken = object : TypeToken<Map<String, List<BuildingSaveData>>>() {}.type
+                val loadedData: Map<String, List<BuildingSaveData>> = gson.fromJson(json, typeToken) ?: return
+
+                val worldSettlements = SettlementManager.settlements[world] ?: return
+
+                loadedData.forEach { (uuidStr, saves) ->
+                    val settlementId = UUID.fromString(uuidStr)
+                    val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
+
+                    val recordList = buildings.computeIfAbsent(settlement) { mutableListOf() }
+                    recordList.clear()
+
+                    saves.forEach { save ->
+                        val box = BoundingBox(save.minX, save.minY, save.minZ, save.maxX, save.maxY, save.maxZ)
+                        recordList.add(BuildingRecord(save.type, box))
+                    }
+                }
+                plugin.logger.info("[SettlementPlanner] Успешно загружено зданий из PDC мира: ${buildings.values.sumOf { it.size }}")
+            } catch (e: Exception) {
+                plugin.logger.severe("[SettlementPlanner] Ошибка при загрузке зданий из PDC:")
+                e.printStackTrace()
+            }
+        }
     }
 
     init {
@@ -104,11 +170,14 @@ class SettlementPlanner(val settlement: Settlement) {
         }
     }
 
-    fun planBuilding(buildingType: String, width: Int, length: Int): Boolean {
+    fun planBuilding(type: VanillaBuildingType): Boolean {
         val center = settlement.data.center
         val maxRadius = 50
         val minRadius = 15
-        val buildingHeight = 6
+
+        val width = type.width
+        val length = type.length
+        val buildingHeight = type.height
 
         val rand = Random()
         val recordsList = buildings.computeIfAbsent(settlement) { mutableListOf() }
@@ -127,10 +196,6 @@ class SettlementPlanner(val settlement: Settlement) {
             val yC = world.getHighestBlockYAt(cx, cz)
 
             val maxY = max(max(y1, y2), max(y3, max(y4, yC)))
-            val minY = min(min(y1, y2), min(y3, min(y4, yC)))
-
-            if (maxY - minY > 6) continue
-
             val baseY = maxY
 
             val potentialBox = BoundingBox(
@@ -140,20 +205,26 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (recordsList.any { it.box.overlaps(potentialBox) }) continue
 
-            recordsList.add(BuildingRecord(buildingType, potentialBox))
-            startProceduralPlatformConstruction(cx, baseY, cz, buildingType, width, length, buildingHeight)
+            recordsList.add(BuildingRecord(type.typeName, potentialBox))
+            startVanillaStructureConstruction(cx, baseY, cz, type)
             return true
         }
 
-        plugin.logger.warning("Не удалось найти плоское место для здания $buildingType в поселении ${settlement.data.settlementName}.")
+        plugin.logger.warning("Не удалось найти место для здания ${type.displayName} в поселении ${settlement.data.settlementName}.")
         return false
     }
 
-    private fun startProceduralPlatformConstruction(cx: Int, baseY: Int, cz: Int, buildingType: String, width: Int, length: Int, height: Int) {
+    private fun startVanillaStructureConstruction(cx: Int, baseY: Int, cz: Int, type: VanillaBuildingType) {
         val buildJob = masterBuildJobs.getOrPut(settlement) { SchematicBuildJob(world) }
         val center = settlement.data.center
 
-        // === 1. ГЕНЕРАЦИЯ ИНТЕРПОЛИРОВАННОЙ ШИРОКОЙ ДОРОГИ ===
+        val width = type.width
+        val length = type.length
+        val height = type.height
+        val vanillaPath = type.vanillaPath
+        val workstation = type.workstation
+
+        // === 1. ГЕНЕРАЦИЯ ШИРОКОЙ РЕЛЬЕФНОЙ ДОРОГИ ===
         var currentX = center.blockX
         var currentZ = center.blockZ
 
@@ -178,12 +249,11 @@ class SettlementPlanner(val settlement: Settlement) {
                     val roadY = world.getHighestBlockYAt(px, pz)
                     val currentBlock = world.getBlockAt(px, roadY, pz)
 
-                    // Срезаем воздух над дорогой
                     for (dy in 1..3) {
                         buildJob.addBlock(BlockPos(px, roadY + dy, pz), airData, isRoad = true)
                     }
 
-                    // УЛУЧШЕНИЕ: Кладем мост строго на самый верхний уровень воды без постройки опор вниз!
+                    // Плоские мосты строго по уровню воды без опор ко дну
                     if (currentBlock.isLiquid) {
                         buildJob.addBlock(BlockPos(px, roadY, pz), cobbleData, isRoad = true)
                     } else {
@@ -204,46 +274,32 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // === 2. СТРОИТЕЛЬСТВО ПЛАТФОРМЫ И ФУНДАМЕНТА ===
-        val targetMaterial = when (buildingType) {
-            "BAKERY" -> Material.OAK_PLANKS
-            "BLACKSMITH" -> Material.STONE
-            "WOOD_FARM" -> Material.SPRUCE_PLANKS
-            else -> Material.OAK_PLANKS
-        }
-        val blockData = targetMaterial.createBlockData()
+        // === 2. СТРОИТЕЛЬСТВО ВАНИЛЬНОГО ЗДАНИЯ С ФУНДАМЕНТОМ ===
+        val relativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
+        if (relativeBlocks.isEmpty()) return
 
-        val halfWidth = width / 2
-        val halfLength = length / 2
+        relativeBlocks.forEach { relBlock ->
+            val absoluteX = cx + relBlock.relativePos.x
+            val absoluteY = baseY + relBlock.relativePos.y
+            val absoluteZ = cz + relBlock.relativePos.z
+            val absPos = BlockPos(absoluteX, absoluteY, absoluteZ)
 
-        for (x in -halfWidth..halfWidth) {
-            for (z in -halfLength..halfLength) {
-                val absX = cx + x
-                val absZ = cz + z
-                val highest = world.getHighestBlockYAt(absX, absZ)
+            val highest = world.getHighestBlockYAt(absoluteX, absoluteZ)
 
-                for (y in baseY..baseY + height) {
-                    if (y <= highest) {
-                        buildJob.addBlock(BlockPos(absX, y, absZ), airData, isRoad = false)
-                    }
+            for (y in absoluteY..absoluteY + 6) {
+                if (y <= highest) {
+                    buildJob.addBlock(BlockPos(absoluteX, y, absoluteZ), airData, isRoad = false)
                 }
-
-                for (y in highest + 1 until baseY) {
-                    buildJob.addBlock(BlockPos(absX, y, absZ), cobbleData, isRoad = false)
-                }
-
-                val absolutePos = BlockPos(absX, baseY, absZ)
-                buildJob.addBlock(absolutePos, blockData, isRoad = false)
             }
+
+            for (y in highest + 1 until absoluteY) {
+                buildJob.addBlock(BlockPos(absoluteX, y, absoluteZ), cobbleData, isRoad = false)
+            }
+
+            buildJob.addBlock(absPos, relBlock.blockData, isRoad = false)
         }
 
-        // === 3. УСТАНОВКА ТЕМАТИЧЕСКИХ РАБОЧИХ СТАНЦИЙ В ЦЕНТРЕ ===
-        val workstation = when (buildingType) {
-            "BAKERY" -> Material.SMOKER
-            "BLACKSMITH" -> Material.BLAST_FURNACE
-            "WOOD_FARM" -> Material.STONECUTTER
-            else -> Material.CRAFTING_TABLE
-        }
+        // === 3. УСТАНОВКА РАБОЧЕЙ СТАНЦИИ ===
         buildJob.addBlock(BlockPos(cx, baseY + 1, cz), workstation.createBlockData(), isRoad = false)
 
         // === 4. ПОДКЛЮЧЕНИЕ РАБОЧИХ ===
@@ -251,10 +307,18 @@ class SettlementPlanner(val settlement: Settlement) {
             (it as? CraftVillager)?.handle as? HumanoidVillager
         }
 
+        val targetMaterial = when (type) {
+            VanillaBuildingType.BAKERY, VanillaBuildingType.HOUSE_SMALL, VanillaBuildingType.HOUSE_MEDIUM -> Material.OAK_PLANKS
+            else -> Material.STONE
+        }
+
         citizens.forEach { npc ->
             val bukkitNpc = npc.bukkitEntity as Villager
             val baseIngredient = targetMaterial.toBaseIngredient()
 
+            relativeBlocks.forEach { block ->
+                bukkitNpc.inventory.addItem(ItemStack(block.blockData.material.toBaseIngredient()))
+            }
             bukkitNpc.inventory.addItem(ItemStack(baseIngredient, 640))
             bukkitNpc.inventory.addItem(ItemStack(Material.COBBLESTONE, 640))
             bukkitNpc.inventory.addItem(ItemStack(Material.DIRT, 640))

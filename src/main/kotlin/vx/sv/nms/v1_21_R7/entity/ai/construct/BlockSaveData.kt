@@ -1,13 +1,11 @@
-package vx.sv
+package vx.sv.nms.v1_21_R7.entity.ai.construct
 
-import com.google.gson.reflect.TypeToken
 import net.minecraft.core.BlockPos
 import org.bukkit.Bukkit
 import org.bukkit.NamespacedKey
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.nms.v1_21_R7.entity.ai.construct.SchematicBuildJob
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -62,7 +60,7 @@ object BuildJobManager {
 
         val json = pdc.get(worldJobsKey, PersistentDataType.STRING) ?: return
         try {
-            val typeToken = object : TypeToken<List<JobSaveData>>() {}.type
+            val typeToken = object : com.google.gson.reflect.TypeToken<List<JobSaveData>>() {}.type
             val savedList: List<JobSaveData> = gson.fromJson(json, typeToken) ?: return
 
             activeJobs.clear()

@@ -26,6 +26,7 @@ import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
 import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
+import vx.sv.nms.v1_21_R7.entity.ai.construct.VanillaBuildingType
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -101,11 +102,12 @@ class SettlementManager : Listener {
                     newBar
                 }
 
-                // Форматируем название: "TOWN_HALL" -> "Town Hall"
-                val formattedName = currentBuilding.type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
-                bar.name(Component.text("🏛 $formattedName", NamedTextColor.AQUA))
+                // Извлекаем красивое название типа здания (если не найдено — форматируем raw строку)
+                val buildingEnum = VanillaBuildingType.byTypeName(currentBuilding.type)
+                val displayName = buildingEnum?.displayName ?: currentBuilding.type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
+
+                bar.name(Component.text("🏛 $displayName", NamedTextColor.AQUA))
             } else {
-                // Если игрок вышел из здания, прячем боссбар
                 buildingBossBars.remove(player.uniqueId)?.let { player.hideBossBar(it) }
             }
 

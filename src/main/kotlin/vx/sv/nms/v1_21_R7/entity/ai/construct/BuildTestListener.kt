@@ -1,6 +1,7 @@
-package vx.sv
+package vx.sv.nms.v1_21_R7.entity.ai.construct
 
 import net.minecraft.core.BlockPos
+import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import org.bukkit.Material
 import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.entity.CraftVillager
@@ -12,9 +13,6 @@ import org.bukkit.inventory.ItemStack
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
-import vx.sv.nms.v1_21_R7.entity.ai.construct.SchematicBuildJob
-import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
-import vx.sv.nms.v1_21_R7.entity.ai.construct.toBaseIngredient
 import vx.sv.util.SchematicLoader
 import java.util.*
 import org.bukkit.entity.Villager as BukkitVillager
@@ -86,8 +84,8 @@ class BuildTestListener : Listener {
                 npc.digTicks = 0
                 npc.buildTicks = 0
 
-                npc.brain.eraseMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.WALK_TARGET)
-                npc.brain.eraseMemory(net.minecraft.world.entity.ai.memory.MemoryModuleType.LOOK_TARGET)
+                npc.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                npc.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
             }
         }
 
@@ -135,11 +133,11 @@ class BuildTestListener : Listener {
             val manager = SettlementManager()
             manager.generateSettlementName(settlement)
 
-            // 5. Инициализируем планировщик постройки и размечаем тестовые площадки
+            // 5. Инициализируем планировщик постройки и размечаем тестовые площадки по нативным типам
             val planner = SettlementPlanner(settlement)
-            planner.planBuilding("BAKERY", 12, 12)
-            planner.planBuilding("BLACKSMITH", 14, 14)
-            planner.planBuilding("WOOD_FARM", 8, 9)
+            planner.planBuilding(VanillaBuildingType.BAKERY)
+            planner.planBuilding(VanillaBuildingType.BLACKSMITH)
+            planner.planBuilding(VanillaBuildingType.FARM)
 
             player.sendMessage("§a§l[Souverainete] §aПоселение успешно основано! Рабочие заспавнены и приступили к застройке тестовых плит.")
         }
