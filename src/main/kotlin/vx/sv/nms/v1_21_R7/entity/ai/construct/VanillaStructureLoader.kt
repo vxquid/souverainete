@@ -7,6 +7,9 @@ import org.bukkit.NamespacedKey
 import org.bukkit.block.data.Ageable
 import vx.sv.util.RelativeBlock
 
+// Модель кандидата входа для расчета вектора разворота
+data class EntranceCandidate(val pos: BlockPos, val weight: Double)
+
 object VanillaStructureLoader {
 
     /**
@@ -30,8 +33,6 @@ object VanillaStructureLoader {
             val relPos = BlockPos(blockState.x, blockState.y, blockState.z)
             val blockData = blockState.blockData
 
-            // УЛУЧШЕНИЕ: Если блок является растением/урожаем, сбрасываем его возраст на 0,
-            // чтобы жители сажали именно ростки/семена, а не зрелую пшеницу/морковь.
             if (blockData is Ageable) {
                 val matName = blockData.material.name
                 if (matName.contains("WHEAT") ||
@@ -52,5 +53,32 @@ object VanillaStructureLoader {
         }
 
         return relativeBlocks
+    }
+
+    /**
+     * Сканирует структуру и собирает все блоки, которые могут указывать на вход
+     * (Jigsaw-блоки, Двери, Ступени крыльца) с назначением весовых коэффициентов.
+     */
+    fun getRawEntranceCandidates(structurePath: String): List<EntranceCandidate> {
+        val key = NamespacedKey.minecraft(structurePath)
+        val structureManager = Bukkit.getStructureManager()
+        val structure = structureManager.getStructure(key)
+            ?: structureManager.loadStructure(key)
+            ?: return emptyList()
+        val palette = structure.palettes.firstOrNull() ?: return emptyList()
+
+        val candidates = mutableListOf<EntranceCandidate>()
+        palette.blocks.forEach { blockState ->
+            val type = blockState.type
+            val name = type.name
+            val pos = BlockPos(blockState.x, blockState.y, blockState.z)
+
+            when {
+                type == Material.JIGSAW -> candidates.add(EntranceCandidate(pos, 10.0))
+                name.contains("DOOR") -> candidates.add(EntranceCandidate(pos, 5.0))
+                name.contains("STAIRS") -> candidates.add(EntranceCandidate(pos, 1.0))
+            }
+        }
+        return candidates
     }
 }

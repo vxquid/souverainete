@@ -18,11 +18,28 @@ class SchematicBuildJob(val world: World) {
         }
     }
 
+    /**
+     * Возвращает вес приоритета установки блока.
+     * Твёрдые блоки строятся первыми, декор — после них, жидкости — строго в самом конце.
+     */
+    private fun getPlacementPriority(material: Material): Int {
+        val name = material.name
+        return when {
+            material == Material.WATER || material == Material.LAVA -> 100 // Жидкости разливаются строго последними
+            name.contains("DOOR") || name.contains("BED") -> 50 // Двухблочные структуры
+            name.contains("TORCH") || name.contains("LANTERN") || name.contains("CARPET") || name.contains("SIGN") -> 20 // Навесной декор
+            else -> 0 // Твердый каркас, несущие стены и фундамент строятся в первую очередь
+        }
+    }
+
     fun getBlocks(): List<BlockToPlace> {
         synchronized(lock) {
             if (sortedBlocksCache == null) {
+                // Сортировка: Сначала здания (isRoad = false) -> Снизу-вверх по Y -> По приоритету материала
                 sortedBlocksCache = blocksMap.values.sortedWith(
-                    compareBy<BlockToPlace> { it.isRoad }.thenBy { it.pos.y }
+                    compareBy<BlockToPlace> { it.isRoad }
+                        .thenBy { it.pos.y }
+                        .thenBy { getPlacementPriority(it.blockData.material) }
                 )
             }
             return sortedBlocksCache!!
@@ -53,7 +70,7 @@ class SchematicBuildJob(val world: World) {
                 }
             }
 
-            // 3. Фаза расчистки
+            // 3. Фаза расчистки препятствий
             val obstacles = blocksList.filter {
                 if (it.isPlaced || it.claimedBy != null) return@filter false
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
@@ -78,7 +95,7 @@ class SchematicBuildJob(val world: World) {
                 return closest
             }
 
-            // 4. Фаза строительства
+            // 4. ФАЗА СТРОИТЕЛЬСТВА
             val buildCandidates = blocksList.filter {
                 !it.isPlaced && it.claimedBy == null
             }
@@ -87,7 +104,15 @@ class SchematicBuildJob(val world: World) {
 
             val minY = buildCandidates.minOf { it.pos.y }
             val lowestYBlocks = buildCandidates.filter { it.pos.y == minY }
-            val closest = lowestYBlocks.minByOrNull { it.pos.distSqr(npcPos) }
+
+            // ИСПРАВЛЕНО: Находим минимальный приоритет среди оставшихся блоков на текущем слое Y
+            val minPriority = lowestYBlocks.minOf { getPlacementPriority(it.blockData.material) }
+
+            // Оставляем только те блоки, у которых приоритет равен минимальному (сначала 0, затем 20, 50, 100)
+            val priorityBlocks = lowestYBlocks.filter { getPlacementPriority(it.blockData.material) == minPriority }
+
+            // Среди блоков наивысшего приоритета на слое выбираем ближайший к жителю
+            val closest = priorityBlocks.minByOrNull { it.pos.distSqr(npcPos) }
 
             closest?.claimedBy = npc
             return closest

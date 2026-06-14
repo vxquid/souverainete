@@ -17,48 +17,12 @@ import org.bukkit.entity.Villager as BukkitVillager
 
 class VillageGenerationListener : Listener {
 
-    private fun terraformPlaza(center: Location, radius: Int) {
-        val world = center.world ?: return
-        val targetY = center.blockY
-
-        for (x in -radius..radius) {
-            for (z in -radius..radius) {
-                val blockX = center.blockX + x
-                val blockZ = center.blockZ + z
-
-                val groundBlock = world.getBlockAt(blockX, targetY, blockZ)
-                if (groundBlock.type != Material.GRASS_BLOCK) {
-                    groundBlock.type = Material.GRASS_BLOCK
-                }
-
-                for (y in 1..4) {
-                    val airBlock = world.getBlockAt(blockX, targetY + y, blockZ)
-                    if (airBlock.type != Material.AIR && airBlock.type != Material.BEDROCK) {
-                        airBlock.type = Material.AIR
-                    }
-                }
-
-                for (y in 1..3) {
-                    val dirtBlock = world.getBlockAt(blockX, targetY - y, blockZ)
-                    if (dirtBlock.type.isAir) {
-                        dirtBlock.type = Material.DIRT
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Создает начальных деревенских животных с именами вокруг площади
-     * и отмечает их в PDC для последующих игровых механик.
-     */
     private fun spawnVillageAnimals(center: Location) {
         val world = center.world ?: return
         val random = java.util.Random()
 
-        // 1. Спавним 4-6 овец со случайными именами
         val sheepNames = listOf("Шон", "Кудряш", "Облачко", "Снежок", "Зефир", "Долли", "Пуговка")
-        val sheepCount = 4 + random.nextInt(3) // 4 to 6
+        val sheepCount = 4 + random.nextInt(3)
 
         for (i in 0 until sheepCount) {
             val angle = random.nextDouble() * 2 * Math.PI
@@ -71,7 +35,6 @@ class VillageGenerationListener : Listener {
                 sheep.customName(net.kyori.adventure.text.Component.text("§a$name", net.kyori.adventure.text.format.NamedTextColor.GREEN))
                 sheep.isCustomNameVisible = true
 
-                // Запись PDC маркера для животного
                 sheep.persistentDataContainer.set(
                     NamespacedKey(plugin, "village_animal"),
                     PersistentDataType.BYTE,
@@ -80,7 +43,6 @@ class VillageGenerationListener : Listener {
             }
         }
 
-        // 2. Спавним 2 деревенских котов около площади
         val catNames = listOf("Мурзик", "Барсик", "Рыжик", "Уголек", "Пушок")
         for (i in 0 until 2) {
             val angle = random.nextDouble() * 2 * Math.PI
@@ -93,7 +55,6 @@ class VillageGenerationListener : Listener {
                 cat.customName(net.kyori.adventure.text.Component.text("§e$name", net.kyori.adventure.text.format.NamedTextColor.YELLOW))
                 cat.isCustomNameVisible = true
 
-                // Запись PDC маркера для кота
                 cat.persistentDataContainer.set(
                     NamespacedKey(plugin, "village_animal"),
                     PersistentDataType.BYTE,
@@ -155,12 +116,7 @@ class VillageGenerationListener : Listener {
 
                 val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
 
-                terraformPlaza(centerLoc, 5)
-
-                val slabBlock = centerLoc.block
-                slabBlock.type = Material.STONE_SLAB
-
-                val bellBlock = slabBlock.getRelative(BlockFace.UP)
+                val bellBlock = centerLoc.block.getRelative(BlockFace.UP)
                 bellBlock.type = Material.BELL
 
                 val citizens = mutableSetOf<BukkitVillager>()
@@ -189,11 +145,18 @@ class VillageGenerationListener : Listener {
 
                 val planner = SettlementPlanner(settlement)
 
-                // Спавним овец и котов
                 spawnVillageAnimals(centerLoc)
 
-                // Инициализация стартовой приоритетной застройки (прогрессивно, одна за другой)
-                repeat(5) {
+                // === ИСПРАВЛЕНО: Новый порядок планирования ===
+                // 1. Сначала еда и дерево
+                planner.planBuilding(VanillaBuildingType.FARM)
+                planner.planBuilding(VanillaBuildingType.SHEPHERD)
+
+                // 2. Затем Ратуша (Meeting Point) на спавне колокола
+                planner.planTownHallAtCenter()
+
+                // 3. Запускаем прогрессию (спланирует все 4 малых стартовых дома под 4 жителей и начнет кузницы/пекарни)
+                repeat(6) {
                     planner.planNextPriorityBuilding()
                 }
 

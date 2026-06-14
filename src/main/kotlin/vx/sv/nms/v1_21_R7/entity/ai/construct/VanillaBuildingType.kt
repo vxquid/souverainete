@@ -17,8 +17,9 @@ enum class VanillaBuildingType(
     FARM("FARM", "village/plains/houses/plains_large_farm_1", 13, 13, 6, Material.COMPOSTER, "Crop Farm"),
     LIBRARY("LIBRARY", "village/plains/houses/plains_library_1", 9, 9, 7, Material.LECTERN, "Library"),
     ARMORY("ARMORY", "village/plains/houses/plains_armorer_house_1", 10, 10, 7, Material.GRINDSTONE, "Armory"),
-    SHEPHERD("SHEPHERD", "village/plains/houses/plains_shepherd_house_1", 10, 10, 6, Material.LOOM, "Shepherd's Cot"),
-    TEMPLE("TEMPLE", "village/plains/houses/plains_temple_1", 11, 11, 12, Material.BREWING_STAND, "Temple"),
+    SHEPHERD("SHEPHERD", "village/plains/houses/plains_shepherds_house_1", 10, 10, 6, Material.LOOM, "Shepherd's Cot"),
+    TEMPLE("TEMPLE", "village/plains/houses/plains_temple_3", 11, 11, 12, Material.BREWING_STAND, "Temple"),
+
     HOUSE_SMALL("HOUSE_SMALL", "village/plains/houses/plains_small_house_1", 7, 7, 5, Material.CRAFTING_TABLE, "Small House"),
     HOUSE_MEDIUM("HOUSE_MEDIUM", "village/plains/houses/plains_medium_house_1", 9, 9, 6, Material.CRAFTING_TABLE, "Medium House");
 

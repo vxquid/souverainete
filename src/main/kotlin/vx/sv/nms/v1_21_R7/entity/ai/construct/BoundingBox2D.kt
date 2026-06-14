@@ -4,6 +4,7 @@ import com.google.gson.reflect.TypeToken
 import net.minecraft.core.BlockPos
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import org.bukkit.*
+import org.bukkit.block.structure.StructureRotation
 import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Player
 import org.bukkit.persistence.PersistentDataType
@@ -191,6 +192,15 @@ class SettlementPlanner(val settlement: Settlement) {
                 e.printStackTrace()
             }
         }
+
+        fun rotateCoords(pos: BlockPos, rotation: StructureRotation, width: Int, length: Int): BlockPos {
+            return when (rotation) {
+                StructureRotation.NONE -> pos
+                StructureRotation.CLOCKWISE_90 -> BlockPos(length - 1 - pos.z, pos.y, pos.x)
+                StructureRotation.CLOCKWISE_180 -> BlockPos(width - 1 - pos.x, pos.y, length - 1 - pos.z)
+                StructureRotation.COUNTERCLOCKWISE_90 -> BlockPos(pos.z, pos.y, width - 1 - pos.x)
+            }
+        }
     }
 
     init {
@@ -205,24 +215,50 @@ class SettlementPlanner(val settlement: Settlement) {
         }
     }
 
+    fun planTownHallAtCenter(): Boolean {
+        val center = settlement.data.center
+        val cx = center.blockX
+        val cz = center.blockZ
+        val type = VanillaBuildingType.TOWN_HALL
+        val baseY = center.blockY
+
+        val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type, StructureRotation.NONE)
+
+        val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
+        synchronized(queue) {
+            queue.offer(buildJob)
+        }
+        return true
+    }
+
+    /**
+     * Динамическое планирование по лимитам застройки.
+     * Позволяет строить дубликаты зданий (например, 4 обычных дома для стартовых жителей).
+     */
     fun planNextPriorityBuilding(): Boolean {
         val records = buildings[settlement.data.id] ?: mutableListOf()
-        val existingTypes = records.map { it.type }.toSet()
 
+        // Считаем количество существующих зданий по базовым типам (без суффиксов _1, _2...)
+        val existingCounts = records.groupingBy {
+            it.type.substringBefore("_")
+        }.eachCount()
+
+        // План развития: 4 малых дома, 2 средних дома, остальные — по 1.
         val priorityList = listOf(
-            VanillaBuildingType.FARM,
-            VanillaBuildingType.SHEPHERD,
-            VanillaBuildingType.HOUSE_SMALL,
-            VanillaBuildingType.BLACKSMITH,
-            VanillaBuildingType.BAKERY,
-            VanillaBuildingType.HOUSE_MEDIUM,
-            VanillaBuildingType.LIBRARY,
-            VanillaBuildingType.ARMORY,
-            VanillaBuildingType.TEMPLE
+            Pair(VanillaBuildingType.FARM, 1),
+            Pair(VanillaBuildingType.SHEPHERD, 1),
+            Pair(VanillaBuildingType.HOUSE_SMALL, 4), // 4 дома под 4 стартовых жителя
+            Pair(VanillaBuildingType.BLACKSMITH, 1),
+            Pair(VanillaBuildingType.BAKERY, 1),
+            Pair(VanillaBuildingType.HOUSE_MEDIUM, 2),
+            Pair(VanillaBuildingType.LIBRARY, 1),
+            Pair(VanillaBuildingType.ARMORY, 1),
+            Pair(VanillaBuildingType.TEMPLE, 1)
         )
 
-        for (type in priorityList) {
-            if (!existingTypes.contains(type.typeName)) {
+        for ((type, maxCount) in priorityList) {
+            val currentCount = existingCounts[type.typeName] ?: 0
+            if (currentCount < maxCount) {
                 val success = planBuilding(type)
                 if (success) {
                     return true
@@ -237,12 +273,30 @@ class SettlementPlanner(val settlement: Settlement) {
         val maxRadius = 45
         val minRadius = 15
 
-        val width = type.width
-        val length = type.length
+        val rawWidth = type.width
+        val rawLength = type.length
         val buildingHeight = type.height
 
         val rand = Random()
         val recordsList = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
+
+        // === ИСПРАВЛЕНО: Усовершенствованный расчет средневзвешенного вектора входа ===
+        val candidates = VanillaStructureLoader.getRawEntranceCandidates(type.vanillaPath)
+        val jigsawPos = if (candidates.isNotEmpty()) {
+            var totalWeight = 0.0
+            var sumX = 0.0
+            var sumY = 0.0
+            var sumZ = 0.0
+            for (cand in candidates) {
+                sumX += cand.pos.x * cand.weight
+                sumY += cand.pos.y * cand.weight
+                sumZ += cand.pos.z * cand.weight
+                totalWeight += cand.weight
+            }
+            BlockPos((sumX / totalWeight).toInt(), (sumY / totalWeight).toInt(), (sumZ / totalWeight).toInt())
+        } else {
+            BlockPos(rawWidth / 2, 0, 0)
+        }
 
         for (attempt in 0..250) {
             val angle = rand.nextDouble() * 2 * Math.PI
@@ -250,6 +304,49 @@ class SettlementPlanner(val settlement: Settlement) {
 
             val cx = center.blockX + (cos(angle) * distance).toInt()
             val cz = center.blockZ + (sin(angle) * distance).toInt()
+
+            val settlementId = settlement.data.id
+            val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
+            var targetX = center.blockX
+            var targetZ = center.blockZ
+
+            if (roads.isNotEmpty()) {
+                var minRoadDistSq = Double.MAX_VALUE
+                for (pos in roads) {
+                    val dx = pos.x - cx
+                    val dz = pos.z - cz
+                    val distSq = (dx * dx + dz * dz).toDouble()
+                    if (distSq < minRoadDistSq) {
+                        minRoadDistSq = distSq
+                        targetX = pos.x
+                        targetZ = pos.z
+                    }
+                }
+            }
+
+            var bestRotation = StructureRotation.NONE
+            var minJigsawDistSq = Double.MAX_VALUE
+
+            for (rot in StructureRotation.values()) {
+                val rotJigsaw = rotateCoords(jigsawPos, rot, rawWidth, rawLength)
+                val rotWidth = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
+                val rotLength = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
+
+                val absX = cx - rotWidth / 2 + rotJigsaw.x
+                val absZ = cz - rotLength / 2 + rotJigsaw.z
+
+                val dx = absX - targetX
+                val dz = absZ - targetZ
+                val distSq = (dx * dx + dz * dz).toDouble()
+
+                if (distSq < minJigsawDistSq) {
+                    minJigsawDistSq = distSq
+                    bestRotation = rot
+                }
+            }
+
+            val width = if (bestRotation == StructureRotation.CLOCKWISE_90 || bestRotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
+            val length = if (bestRotation == StructureRotation.CLOCKWISE_90 || bestRotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
 
             var minY = Int.MAX_VALUE
             var maxY = Int.MIN_VALUE
@@ -315,11 +412,13 @@ class SettlementPlanner(val settlement: Settlement) {
             val collisionCheckBoundedBox = potentialBox.clone().expand(5.0, 0.0, 5.0)
             if (recordsList.any { it.box.overlaps(collisionCheckBoundedBox) }) continue
 
-            recordsList.add(BuildingRecord(type.typeName, potentialBox))
+            // Запись структуры с суффиксом порядка во избежание дубликатов в мапе
+            val uniqueName = type.typeName + "_" + (recordsList.count { it.type.startsWith(type.typeName) } + 1)
+            recordsList.add(BuildingRecord(uniqueName, potentialBox))
 
             settlement.expandTerritory(15.0)
 
-            val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type)
+            val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type, bestRotation)
 
             val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
             synchronized(queue) {
@@ -332,18 +431,26 @@ class SettlementPlanner(val settlement: Settlement) {
         return false
     }
 
-    private fun startVanillaStructureConstruction(cx: Int, baseY: Int, cz: Int, type: VanillaBuildingType): SchematicBuildJob {
+    private fun startVanillaStructureConstruction(
+        cx: Int, baseY: Int, cz: Int,
+        type: VanillaBuildingType,
+        rotation: StructureRotation
+    ): SchematicBuildJob {
         val buildJob = SchematicBuildJob(world)
         val center = settlement.data.center
 
-        val width = type.width
-        val length = type.length
+        val rawWidth = type.width
+        val rawLength = type.length
         val height = type.height
         val vanillaPath = type.vanillaPath
         val workstation = type.workstation
 
+        val width = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
+        val length = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
+
         val settlementId = settlement.data.id
         val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
+        val records = buildings[settlementId] ?: emptyList()
 
         var currentX = center.blockX
         var currentZ = center.blockZ
@@ -372,13 +479,29 @@ class SettlementPlanner(val settlement: Settlement) {
         val airData = Material.AIR.createBlockData()
         val cobbleData = Material.COBBLESTONE.createBlockData()
 
+        val halfW = width / 2 + 1
+        val halfL = length / 2 + 1
+
         while (true) {
+            if (abs(currentX - cx) <= halfW && abs(currentZ - cz) <= halfL) {
+                break
+            }
+
             for (wx in -1..1) {
                 for (wz in -1..1) {
                     val px = currentX + wx
                     val pz = currentZ + wz
 
                     if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
+
+                    if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
+
+                    val isInsideAnyBuilding = records.any { record ->
+                        val box = record.box
+                        px >= (box.minX - 1.0) && px <= (box.maxX + 1.0) &&
+                                pz >= (box.minZ - 1.0) && pz <= (box.maxZ + 1.0)
+                    }
+                    if (isInsideAnyBuilding) continue
 
                     val roadY = getHighestGroundYAt(world, px, pz)
                     val currentBlock = world.getBlockAt(px, roadY, pz)
@@ -409,9 +532,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        val halfWidth = width / 2
-        val halfLength = length / 2
-
         for (x in 0 until width) {
             for (z in 0 until length) {
                 val absX = cx - width / 2 + x
@@ -431,16 +551,21 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        val relativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
-        if (relativeBlocks.isEmpty()) return buildJob
+        val rawRelativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
+        if (rawRelativeBlocks.isEmpty()) return buildJob
 
-        relativeBlocks.forEach { relBlock ->
-            val absoluteX = cx - width / 2 + relBlock.relativePos.x
-            val absoluteY = baseY + relBlock.relativePos.y
-            val absoluteZ = cz - length / 2 + relBlock.relativePos.z
+        rawRelativeBlocks.forEach { relBlock ->
+            val rotPos = rotateCoords(relBlock.relativePos, rotation, rawWidth, rawLength)
+
+            val rotData = relBlock.blockData.clone()
+            rotData.rotate(rotation)
+
+            val absoluteX = cx - width / 2 + rotPos.x
+            val absoluteY = baseY + rotPos.y
+            val absoluteZ = cz - length / 2 + rotPos.z
             val absPos = BlockPos(absoluteX, absoluteY, absoluteZ)
 
-            buildJob.addBlock(absPos, relBlock.blockData, isRoad = false)
+            buildJob.addBlock(absPos, rotData, isRoad = false)
         }
 
         buildJob.addBlock(BlockPos(cx, baseY + 1, cz), workstation.createBlockData(), isRoad = false)
@@ -449,8 +574,6 @@ class SettlementPlanner(val settlement: Settlement) {
             (it as? CraftVillager)?.handle as? HumanoidVillager
         }
 
-        // === ИСПРАВЛЕНО: Полностью удален избыточный дамп ресурсов перед началом стройки. ===
-        // Жители будут получать ровно те ресурсы, которые им нужны, динамически через ИИ в ConstructionBehavior.
         citizens.forEach { npc ->
             if (npc.activeBuildJob != buildJob) {
                 npc.activeBuildJob = buildJob
