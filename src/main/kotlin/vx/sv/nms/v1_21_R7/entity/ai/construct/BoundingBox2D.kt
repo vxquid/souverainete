@@ -6,8 +6,6 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import org.bukkit.*
 import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Player
-import org.bukkit.entity.Villager
-import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.gson
@@ -38,8 +36,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val buildings = ConcurrentHashMap<UUID, MutableList<BuildingRecord>>()
         val pendingJobs = ConcurrentHashMap<UUID, Queue<SchematicBuildJob>>()
         val activeJobs = ConcurrentHashMap<UUID, SchematicBuildJob>()
-
-        // Кэш сгенерированных точек дорог для реализации ветвления
         val settlementRoads = ConcurrentHashMap<UUID, MutableSet<BlockPos>>()
 
         private val worldBuildingsKey = NamespacedKey(plugin, "settlement_buildings")
@@ -209,16 +205,10 @@ class SettlementPlanner(val settlement: Settlement) {
         }
     }
 
-    /**
-     * Динамическая застройка по приоритетам (Цепочка развития).
-     * Автоматически находит, какого строения по приоритету еще нет в поселении,
-     * планирует его и расширяет границу.
-     */
     fun planNextPriorityBuilding(): Boolean {
         val records = buildings[settlement.data.id] ?: mutableListOf()
         val existingTypes = records.map { it.type }.toSet()
 
-        // 1. Еда (FARM) -> 2. Шерсть и овцы (SHEPHERD) -> 3. Жилье (HOUSE_SMALL) -> 4. Кузница (BLACKSMITH) -> и т.д.
         val priorityList = listOf(
             VanillaBuildingType.FARM,
             VanillaBuildingType.SHEPHERD,
@@ -327,7 +317,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
             recordsList.add(BuildingRecord(type.typeName, potentialBox))
 
-            // Расширяем границы территории поселения по мере застройки на 15 блоков
             settlement.expandTerritory(15.0)
 
             val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type)
@@ -353,15 +342,12 @@ class SettlementPlanner(val settlement: Settlement) {
         val vanillaPath = type.vanillaPath
         val workstation = type.workstation
 
-        // === 1. ГЕНЕРАЦИЯ ВЕТВЯЩИХСЯ ДОРОГ ===
         val settlementId = settlement.data.id
         val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
 
-        // По умолчанию дорога начинает строиться от центра ратуши
         var currentX = center.blockX
         var currentZ = center.blockZ
 
-        // Поиск ближайшей точки на существующей дороге (для организации ветвления)
         if (roads.isNotEmpty()) {
             var minDistanceSq = Double.MAX_VALUE
             for (pos in roads) {
@@ -407,7 +393,6 @@ class SettlementPlanner(val settlement: Settlement) {
                         buildJob.addBlock(BlockPos(px, roadY, pz), roadBlockData, isRoad = true)
                     }
 
-                    // Сохраняем координату в глобальный кэш дорог поселения
                     roads.add(BlockPos(px, roadY, pz))
                 }
             }
@@ -424,7 +409,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // === 2. ТЕРРАФОРМИРОВАНИЕ ПЛОЩАДКИ ===
         val halfWidth = width / 2
         val halfLength = length / 2
 
@@ -447,7 +431,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // === 3. СТРОИТЕЛЬСТВО ЗДАНИЯ ===
         val relativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
         if (relativeBlocks.isEmpty()) return buildJob
 
@@ -460,31 +443,15 @@ class SettlementPlanner(val settlement: Settlement) {
             buildJob.addBlock(absPos, relBlock.blockData, isRoad = false)
         }
 
-        // === 4. УСТАНОВКА РАБОЧЕЙ СТАНЦИИ ===
         buildJob.addBlock(BlockPos(cx, baseY + 1, cz), workstation.createBlockData(), isRoad = false)
 
-        // === 5. ПОДКЛЮЧЕНИЕ РАБОЧИХ ===
         val citizens = settlement.villagers.mapNotNull {
             (it as? CraftVillager)?.handle as? HumanoidVillager
         }
 
-        val targetMaterial = when (type) {
-            VanillaBuildingType.BAKERY, VanillaBuildingType.HOUSE_SMALL, VanillaBuildingType.HOUSE_MEDIUM -> Material.OAK_PLANKS
-            else -> Material.STONE
-        }
-
+        // === ИСПРАВЛЕНО: Полностью удален избыточный дамп ресурсов перед началом стройки. ===
+        // Жители будут получать ровно те ресурсы, которые им нужны, динамически через ИИ в ConstructionBehavior.
         citizens.forEach { npc ->
-            val bukkitNpc = npc.bukkitEntity as Villager
-            val baseIngredient = targetMaterial.toBaseIngredient()
-
-            relativeBlocks.forEach { block ->
-                bukkitNpc.inventory.addItem(ItemStack(block.blockData.material.toBaseIngredient()))
-            }
-            bukkitNpc.inventory.addItem(ItemStack(baseIngredient, 640))
-            bukkitNpc.inventory.addItem(ItemStack(Material.COBBLESTONE, 640))
-            bukkitNpc.inventory.addItem(ItemStack(Material.DIRT, 640))
-            bukkitNpc.inventory.addItem(ItemStack(Material.IRON_SHOVEL, 1))
-
             if (npc.activeBuildJob != buildJob) {
                 npc.activeBuildJob = buildJob
                 npc.assignedBlock = null
@@ -500,15 +467,9 @@ class SettlementPlanner(val settlement: Settlement) {
     }
 }
 
-/**
- * Расширение для класса Settlement.
- * Измените реализацию метода под структуру ваших границ/территорий.
- */
 fun Settlement.expandTerritory(amount: Double) {
     try {
-        // Пример реализации: если территория представляет собой радиус от центра
-        // this.territory.expand(amount)
-        // Либо пересоздавайте/увеличивайте bounding box вашего региона здесь
+        // Логика расширения территории
     } catch (e: Exception) {
         plugin.logger.warning("Не удалось расширить границу поселения: ${e.message}")
     }

@@ -363,6 +363,15 @@ class InteractionHandler : Listener {
             }
         }
 
+        // === [DEBUG] КНОПКА ОТКРЫТИЯ ИНВЕНТАРЯ ЖИТЕЛЯ ===
+        if (player.isOp) {
+            builder.button("§c[DEBUG] Проверить инвентарь") { menu ->
+                player.openInventory(villager.inventory)
+                player.playSound(player.location, Sound.BLOCK_CHEST_OPEN, 1.0f, 1.0f)
+                menu.destroy()
+            }
+        }
+
         builder.button(plugin.language.getString("interaction-menu.close-button") ?: "Close") { menu ->
             menu.destroy()
         }
@@ -476,7 +485,6 @@ class InteractionHandler : Listener {
             val useRainbow = false
             builder.button(quest.name, isRainbow = useRainbow) {
 
-                // === QUEST DIALOGUE LENGTH LOGIC ===
                 val questLengthPref = player.preferences.questDialogueLength
                 val rawDescription = if (questLengthPref == QuestDialogueLength.SHORT && !quest.data.shortQuestDescription.isNullOrEmpty()) {
                     quest.data.shortQuestDescription

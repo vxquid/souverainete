@@ -51,10 +51,22 @@ class ConstructionBehavior(
         }
     }
 
-    /**
-     * Вычищает весь строительный мусор из инвентаря, чтобы не забивать слоты
-     * перед следующими схематиками. Оставляет только оружие, инструменты и броню.
-     */
+    private fun addItemsSmart(inventory: Inventory, material: Material, amount: Int) {
+        val maxStack = material.maxStackSize
+        if (maxStack == 1) {
+            if (!inventory.contains(material)) {
+                inventory.addItem(ItemStack(material, 1))
+            }
+        } else {
+            val currentAmount = inventory.filterNotNull()
+                .filter { it.type == material }
+                .sumOf { it.amount }
+            if (currentAmount < amount) {
+                inventory.addItem(ItemStack(material, amount - currentAmount))
+            }
+        }
+    }
+
     private fun clearConstructionBlocks(inventory: Inventory) {
         for (i in 0 until inventory.size) {
             val item = inventory.getItem(i) ?: continue
@@ -130,21 +142,15 @@ class ConstructionBehavior(
         villager.assignedBlock = assigned
 
         val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
-        val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
 
-        if (!assigned.material.isAir && !bukkitInv.contains(assigned.material)) {
-            bukkitInv.addItem(ItemStack(assigned.material, 64))
-            if (!bukkitInv.contains(Material.COBBLESTONE)) {
-                bukkitInv.addItem(ItemStack(Material.COBBLESTONE, 64))
-            }
-            if (!bukkitInv.contains(Material.DIRT)) {
-                bukkitInv.addItem(ItemStack(Material.DIRT, 64))
-            }
-            if (!bukkitInv.contains(Material.IRON_SHOVEL)) {
-                bukkitInv.addItem(ItemStack(Material.IRON_SHOVEL, 1))
-            }
+        if (!assigned.material.isAir) {
+            addItemsSmart(bukkitInv, assigned.material, 64)
         }
+        addItemsSmart(bukkitInv, Material.COBBLESTONE, 64)
+        addItemsSmart(bukkitInv, Material.DIRT, 64)
+        addItemsSmart(bukkitInv, Material.IRON_SHOVEL, 1)
 
+        val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
         val isClear = currentBlock.isIgnorableObstacle()
         val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
 
@@ -227,19 +233,6 @@ class ConstructionBehavior(
             return
         }
 
-        villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(blockPos))
-
-        val dX = blockPos.x + 0.5 - villager.x
-        val dY = blockPos.y + 0.5 - villager.eyeY
-        val dZ = blockPos.z + 0.5 - villager.z
-        val distance = kotlin.math.sqrt(dX * dX + dZ * dZ)
-
-        villager.yRot = (Math.toDegrees(kotlin.math.atan2(dZ, dX)) - 90.0).toFloat()
-        villager.yHeadRot = villager.yRot
-        villager.yBodyRot = villager.yRot
-        villager.xRot = (-Math.toDegrees(kotlin.math.atan2(dY, distance))).toFloat()
-        villager.lookControl.setLookAt(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5)
-
         val npcPos = villager.blockPosition()
         val diffX = kotlin.math.abs(blockPos.x - npcPos.x)
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
@@ -257,6 +250,20 @@ class ConstructionBehavior(
             villager.stuckTicks = 0
             villager.lastPosition = null
             villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+
+            // === 1. ПРИОРИТЕТ СТРОИТЕЛЬСТВА (Смотрим на блок только когда пришли) ===
+            villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(blockPos))
+
+            val dX = blockPos.x + 0.5 - villager.x
+            val dY = blockPos.y + 0.5 - villager.eyeY
+            val dZ = blockPos.z + 0.5 - villager.z
+            val distance = kotlin.math.sqrt(dX * dX + dZ * dZ)
+
+            villager.yRot = (Math.toDegrees(kotlin.math.atan2(dZ, dX)) - 90.0).toFloat()
+            villager.yHeadRot = villager.yRot
+            villager.yBodyRot = villager.yRot
+            villager.xRot = (-Math.toDegrees(kotlin.math.atan2(dY, distance))).toFloat()
+            villager.lookControl.setLookAt(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5)
 
             if (!block.isIgnorableObstacle()) {
                 if (block.type.name.contains("LOG") || block.type.name.contains("WOOD")) {
@@ -383,13 +390,16 @@ class ConstructionBehavior(
                     doStop(world, villager, time)
                 }
             }
-        }
+        } else {
+            // === 2. ПРИОРИТЕТ ПЕРЕМЕЩЕНИЯ (Во время ходьбы отдаем управление навигатору) ===
+            // Полностью вычищаем принудительный взгляд на блок. Житель будет смотреть строго перед собой.
+            // Это позволяет нативной навигации идеально обходить углы зданий, коллизии дверей и выходить из помещений.
+            villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
 
-        val distHorizontalSq = diffX * diffX + diffZ * diffZ
-        val needsWalk = (assigned.isRoad && !isWithinReach) || (!assigned.isRoad && distHorizontalSq > 9.0)
-        if (needsWalk && !villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
-            val groundPos = getGroundPos(world, blockPos)
-            villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(groundPos), speedModifier, 2))
+            if (!villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
+                val groundPos = getGroundPos(world, blockPos)
+                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(groundPos), speedModifier, 2))
+            }
         }
     }
 
@@ -406,7 +416,6 @@ class ConstructionBehavior(
             villager.activeBuildJob = null
             villager.buildBreakUntilTime = world.gameTime + 400L
 
-            // Очищаем инвентарь жителя от строительного мусора по завершению постройки
             val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
             clearConstructionBlocks(bukkitInv)
         }

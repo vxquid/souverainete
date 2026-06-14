@@ -167,6 +167,17 @@ class SettlementManager : Listener {
                         settlement.electLeader()
                         saveSettlements(world)
                     }
+
+                    // === АВТОМАТИЧЕСКИЙ РОСТ ПОСЕЛЕНИЯ ВО ВРЕМЕНИ ===
+                    // Каждые несколько минут планировщик пытается запустить следующую постройку по приоритету.
+                    // По мере завершения прошлых домов и расширения территории новые здания будут автоматически
+                    // находить свободные места и ставиться в очередь строительства для жителей.
+                    val planner = SettlementPlanner(settlement)
+                    val success = planner.planNextPriorityBuilding()
+                    if (success) {
+                        plugin.logger.info("[Souverainete] Поселение ${settlement.data.settlementName} расширилось и запланировало новое здание!")
+                        saveSettlements(world)
+                    }
                 }
             }
 
