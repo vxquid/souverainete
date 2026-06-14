@@ -231,28 +231,43 @@ class SettlementPlanner(val settlement: Settlement) {
         return true
     }
 
-    /**
-     * Динамическое планирование по лимитам застройки.
-     * Позволяет строить дубликаты зданий (например, 4 обычных дома для стартовых жителей).
-     */
     fun planNextPriorityBuilding(): Boolean {
         val records = buildings[settlement.data.id] ?: mutableListOf()
 
-        // Считаем количество существующих зданий по базовым типам (без суффиксов _1, _2...)
-        val existingCounts = records.groupingBy {
-            it.type.substringBefore("_")
+        val existingCounts = records.groupingBy { record ->
+            val typeName = record.type
+            if (typeName.contains("_")) {
+                val lastPart = typeName.substringAfterLast("_")
+                if (lastPart.toIntOrNull() != null) {
+                    typeName.substringBeforeLast("_")
+                } else {
+                    typeName
+                }
+            } else {
+                typeName
+            }
         }.eachCount()
 
-        // План развития: 4 малых дома, 2 средних дома, остальные — по 1.
+        val totalResidentialBuilt = (existingCounts["HOUSE_SMALL"] ?: 0) + (existingCounts["HOUSE_MEDIUM"] ?: 0)
+        val maxResidentialAllowed = settlement.villagers.size
+
+        val totalBuildingsBuilt = records.size
+        val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(4)
+
         val priorityList = listOf(
             Pair(VanillaBuildingType.FARM, 1),
             Pair(VanillaBuildingType.SHEPHERD, 1),
-            Pair(VanillaBuildingType.HOUSE_SMALL, 4), // 4 дома под 4 стартовых жителя
+            Pair(VanillaBuildingType.HOUSE_SMALL, if (totalResidentialBuilt < maxResidentialAllowed) (existingCounts["HOUSE_SMALL"] ?: 0) + 1 else 0),
+            Pair(VanillaBuildingType.HOUSE_MEDIUM, 2),
+            Pair(VanillaBuildingType.MEETING_POINT, 1),
+            Pair(VanillaBuildingType.LAMP, maxLampsAllowed),
+            Pair(VanillaBuildingType.ANIMAL_PEN, 1),
+            Pair(VanillaBuildingType.STABLE, 1),
             Pair(VanillaBuildingType.BLACKSMITH, 1),
             Pair(VanillaBuildingType.BAKERY, 1),
-            Pair(VanillaBuildingType.HOUSE_MEDIUM, 2),
             Pair(VanillaBuildingType.LIBRARY, 1),
             Pair(VanillaBuildingType.ARMORY, 1),
+            Pair(VanillaBuildingType.CARTOGRAPHER, 1),
             Pair(VanillaBuildingType.TEMPLE, 1)
         )
 
@@ -270,8 +285,15 @@ class SettlementPlanner(val settlement: Settlement) {
 
     fun planBuilding(type: VanillaBuildingType): Boolean {
         val center = settlement.data.center
-        val maxRadius = 45
+
+        val isCritical = type == VanillaBuildingType.FARM ||
+                type == VanillaBuildingType.SHEPHERD ||
+                type == VanillaBuildingType.TOWN_HALL ||
+                type == VanillaBuildingType.TEMPLE
+
+        val maxRadius = if (isCritical) 55 else 45
         val minRadius = 15
+        val maxAttempts = if (isCritical) 500 else 250
 
         val rawWidth = type.width
         val rawLength = type.length
@@ -280,14 +302,13 @@ class SettlementPlanner(val settlement: Settlement) {
         val rand = Random()
         val recordsList = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
 
-        // === ИСПРАВЛЕНО: Усовершенствованный расчет средневзвешенного вектора входа ===
-        val candidates = VanillaStructureLoader.getRawEntranceCandidates(type.vanillaPath)
-        val jigsawPos = if (candidates.isNotEmpty()) {
+        val jigsawPos = VanillaStructureLoader.getRawEntranceCandidates(type.vanillaPath)
+        val entrancePos = if (jigsawPos.isNotEmpty()) {
             var totalWeight = 0.0
             var sumX = 0.0
             var sumY = 0.0
             var sumZ = 0.0
-            for (cand in candidates) {
+            for (cand in jigsawPos) {
                 sumX += cand.pos.x * cand.weight
                 sumY += cand.pos.y * cand.weight
                 sumZ += cand.pos.z * cand.weight
@@ -298,7 +319,7 @@ class SettlementPlanner(val settlement: Settlement) {
             BlockPos(rawWidth / 2, 0, 0)
         }
 
-        for (attempt in 0..250) {
+        for (attempt in 0..maxAttempts) {
             val angle = rand.nextDouble() * 2 * Math.PI
             val distance = rand.nextInt(maxRadius - minRadius) + minRadius
 
@@ -328,7 +349,7 @@ class SettlementPlanner(val settlement: Settlement) {
             var minJigsawDistSq = Double.MAX_VALUE
 
             for (rot in StructureRotation.values()) {
-                val rotJigsaw = rotateCoords(jigsawPos, rot, rawWidth, rawLength)
+                val rotJigsaw = rotateCoords(entrancePos, rot, rawWidth, rawLength)
                 val rotWidth = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
                 val rotLength = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
 
@@ -357,14 +378,14 @@ class SettlementPlanner(val settlement: Settlement) {
                     val absX = cx + x
                     val absZ = cz + z
 
-                    val hy = getHighestGroundYAt(world, absX, absZ)
-
-                    val blockType = world.getBlockAt(absX, hy, absZ).type
-                    if (blockType == Material.WATER || blockType == Material.LAVA) {
+                    val highestY = world.getHighestBlockYAt(absX, absZ)
+                    val surfaceBlockType = world.getBlockAt(absX, highestY, absZ).type
+                    if (surfaceBlockType == Material.WATER || surfaceBlockType == Material.LAVA || surfaceBlockType.name.contains("ICE")) {
                         validTerrain = false
                         break
                     }
 
+                    val hy = getHighestGroundYAt(world, absX, absZ)
                     if (hy < minY) minY = hy
                     if (hy > maxY) maxY = hy
                 }
@@ -373,7 +394,8 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (!validTerrain) continue
 
-            if (maxY - minY > 4) continue
+            val maxAllowedVariance = if (isCritical) 6 else 4
+            if (maxY - minY > maxAllowedVariance) continue
 
             if (abs(maxY - center.blockY) > 8) continue
 
@@ -412,7 +434,6 @@ class SettlementPlanner(val settlement: Settlement) {
             val collisionCheckBoundedBox = potentialBox.clone().expand(5.0, 0.0, 5.0)
             if (recordsList.any { it.box.overlaps(collisionCheckBoundedBox) }) continue
 
-            // Запись структуры с суффиксом порядка во избежание дубликатов в мапе
             val uniqueName = type.typeName + "_" + (recordsList.count { it.type.startsWith(type.typeName) } + 1)
             recordsList.add(BuildingRecord(uniqueName, potentialBox))
 
@@ -448,6 +469,7 @@ class SettlementPlanner(val settlement: Settlement) {
         val width = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
         val length = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
 
+        // === 1. ГЕНЕРАЦИЯ ВЕТВЯЩИХСЯ ДОРОГ ===
         val settlementId = settlement.data.id
         val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
         val records = buildings[settlementId] ?: emptyList()
@@ -482,10 +504,25 @@ class SettlementPlanner(val settlement: Settlement) {
         val halfW = width / 2 + 1
         val halfL = length / 2 + 1
 
+        // Переменная для сохранения высоты центральной линии дороги на предыдущем шаге
+        var prevCenterRoadY: Int? = null
+
         while (true) {
-            if (abs(currentX - cx) <= halfW && abs(currentZ - cz) <= halfL) {
-                break
+            // Линию Bresenham мы трассируем до упора, но установку блоков фильтруем ниже
+
+            // Вычисляем естественную высоту центра дороги в текущей итерации
+            val naturalCenterY = getHighestGroundYAt(world, currentX, currentZ)
+
+            // ИСПРАВЛЕНО: Сглаживание продольного уклона.
+            // Ограничиваем шаг подъема или спуска максимум на 1 блок относительно предыдущей точки дороги.
+            // Это сглаживает крутые обрывы в плавные террасы.
+            val centerRoadY = if (prevCenterRoadY == null) {
+                naturalCenterY
+            } else {
+                val diff = naturalCenterY - prevCenterRoadY
+                prevCenterRoadY + diff.coerceIn(-1, 1)
             }
+            prevCenterRoadY = centerRoadY
 
             for (wx in -1..1) {
                 for (wz in -1..1) {
@@ -494,8 +531,10 @@ class SettlementPlanner(val settlement: Settlement) {
 
                     if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
 
+                    // Защищаем стены повёрнутых зданий от боковых блоков дороги
                     if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
 
+                    // Глобальная защита от гриферства дорогами
                     val isInsideAnyBuilding = records.any { record ->
                         val box = record.box
                         px >= (box.minX - 1.0) && px <= (box.maxX + 1.0) &&
@@ -503,20 +542,33 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
                     if (isInsideAnyBuilding) continue
 
-                    val roadY = getHighestGroundYAt(world, px, pz)
-                    val currentBlock = world.getBlockAt(px, roadY, pz)
+                    // Естественная высота ландшафта в конкретной точке (px, pz)
+                    val naturalBlockY = getHighestGroundYAt(world, px, pz)
+                    val currentBlock = world.getBlockAt(px, centerRoadY, pz)
 
-                    for (dy in 1..3) {
-                        buildJob.addBlock(BlockPos(px, roadY + dy, pz), airData, isRoad = true)
+                    // ИСПРАВЛЕНО: Поперечное выравнивание (Brush Flattening) и терраформирование.
+                    // Высота всего полотна дороги (включая края) строго привязывается к centerRoadY.
+
+                    // 1. Врезка в холм: если ландшафт выше полотна дороги — срезаем блоки в воздух на высоту до 3 блоков
+                    val clearStart = centerRoadY + 1
+                    val clearEnd = maxOf(naturalBlockY, centerRoadY + 3)
+                    for (y in clearStart..clearEnd) {
+                        buildJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
                     }
 
+                    // 2. Засыпка пустот: если ландшафт ниже полотна дороги — досыпаем прочный земляной фундамент
+                    for (y in naturalBlockY until centerRoadY) {
+                        buildJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
+                    }
+
+                    // 3. Установка самого полотна дороги на ровный сглаженный уровень
                     if (currentBlock.isLiquid) {
-                        buildJob.addBlock(BlockPos(px, roadY, pz), cobbleData, isRoad = true)
+                        buildJob.addBlock(BlockPos(px, centerRoadY, pz), cobbleData, isRoad = true)
                     } else {
-                        buildJob.addBlock(BlockPos(px, roadY, pz), roadBlockData, isRoad = true)
+                        buildJob.addBlock(BlockPos(px, centerRoadY, pz), roadBlockData, isRoad = true)
                     }
 
-                    roads.add(BlockPos(px, roadY, pz))
+                    roads.add(BlockPos(px, centerRoadY, pz))
                 }
             }
 

@@ -85,23 +85,40 @@ class VillageGenerationListener : Listener {
                 var bestY = world.getHighestBlockYAt(bestX, bestZ)
                 var minHeightDifference = Int.MAX_VALUE
                 var highestElevationOfFlattest = Int.MIN_VALUE
+                var foundDryLand = false
 
-                for (ox in -6..6) {
-                    for (oz in -6..6) {
+                for (ox in -12..12) {
+                    for (oz in -12..12) {
                         val cx = centerX.toInt() + ox
                         val cz = centerZ.toInt() + oz
 
                         var minY = Int.MAX_VALUE
                         var maxY = Int.MIN_VALUE
+                        var hasWater = false
 
                         for (px in -5..5) {
                             for (pz in -5..5) {
-                                val hy = SettlementPlanner.getHighestGroundYAt(world, cx + px, cz + pz)
+                                val absX = cx + px
+                                val absZ = cz + pz
+
+                                val highestY = world.getHighestBlockYAt(absX, absZ)
+                                val surfaceBlock = world.getBlockAt(absX, highestY, absZ)
+
+                                if (surfaceBlock.isLiquid || surfaceBlock.type == Material.WATER || surfaceBlock.type.name.contains("ICE")) {
+                                    hasWater = true
+                                    break
+                                }
+
+                                val hy = SettlementPlanner.getHighestGroundYAt(world, absX, absZ)
                                 if (hy < minY) minY = hy
                                 if (hy > maxY) maxY = hy
                             }
+                            if (hasWater) break
                         }
 
+                        if (hasWater) continue
+
+                        foundDryLand = true
                         val diff = maxY - minY
 
                         if (diff < minHeightDifference || (diff == minHeightDifference && maxY > highestElevationOfFlattest)) {
@@ -114,13 +131,43 @@ class VillageGenerationListener : Listener {
                     }
                 }
 
+                if (!foundDryLand) {
+                    for (ox in -6..6) {
+                        for (oz in -6..6) {
+                            val cx = centerX.toInt() + ox
+                            val cz = centerZ.toInt() + oz
+
+                            var minY = Int.MAX_VALUE
+                            var maxY = Int.MIN_VALUE
+
+                            for (px in -5..5) {
+                                for (pz in -5..5) {
+                                    val hy = SettlementPlanner.getHighestGroundYAt(world, cx + px, cz + pz)
+                                    if (hy < minY) minY = hy
+                                    if (hy > maxY) maxY = hy
+                                }
+                            }
+
+                            val diff = maxY - minY
+                            if (diff < minHeightDifference || (diff == minHeightDifference && maxY > highestElevationOfFlattest)) {
+                                minHeightDifference = diff
+                                highestElevationOfFlattest = maxY
+                                bestX = cx
+                                bestZ = cz
+                                bestY = maxY
+                            }
+                        }
+                    }
+                }
+
                 val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
 
                 val bellBlock = centerLoc.block.getRelative(BlockFace.UP)
                 bellBlock.type = Material.BELL
 
+                // ИСПРАВЛЕНО: Количество стартовых жителей увеличено до 8
                 val citizens = mutableSetOf<BukkitVillager>()
-                for (i in 0 until 4) {
+                for (i in 0 until 8) {
                     val spawnLoc = centerLoc.clone().add(1.5, 1.0, 1.5)
                     val v = world.spawn(spawnLoc, BukkitVillager::class.java) { villager ->
                         villager.profession = BukkitVillager.Profession.NONE
@@ -147,16 +194,16 @@ class VillageGenerationListener : Listener {
 
                 spawnVillageAnimals(centerLoc)
 
-                // === ИСПРАВЛЕНО: Новый порядок планирования ===
-                // 1. Сначала еда и дерево
+                // Сначала выживание: еда и дерево
                 planner.planBuilding(VanillaBuildingType.FARM)
                 planner.planBuilding(VanillaBuildingType.SHEPHERD)
 
-                // 2. Затем Ратуша (Meeting Point) на спавне колокола
+                // Затем Ратуша (Meeting Point) на спавне колокола
                 planner.planTownHallAtCenter()
 
-                // 3. Запускаем прогрессию (спланирует все 4 малых стартовых дома под 4 жителей и начнет кузницы/пекарни)
-                repeat(6) {
+                // ИСПРАВЛЕНО: Количество стартовых очередей увеличено до 10,
+                // чтобы сразу заложить жильё под 8 жителей и начать развивать кузницу/пекарню
+                repeat(10) {
                     planner.planNextPriorityBuilding()
                 }
 

@@ -13,7 +13,6 @@ import org.bukkit.inventory.ItemStack
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
-import vx.sv.util.SchematicLoader
 import java.util.*
 import org.bukkit.entity.Villager as BukkitVillager
 
@@ -36,7 +35,7 @@ class BuildTestListener : Listener {
             val world = origin.world ?: return
 
             val relativeBlocks = try {
-                SchematicLoader.loadSchematicFromJar("orc_hall_t1.schem")
+                vx.sv.util.SchematicLoader.loadSchematicFromJar("orc_hall_t1.schem")
             } catch (e: Exception) {
                 player.sendMessage("§c[DEBUG] Ошибка при распаковке NBT файла: ${e.message}")
                 e.printStackTrace()
@@ -101,16 +100,15 @@ class BuildTestListener : Listener {
 
             player.sendMessage("§a§l[Souverainete] §fМгновенная генерация тестового поселения в точке клика...")
 
-            // 1. Устанавливаем плиту и колокол в центре
             val slabBlock = centerLoc.block
             slabBlock.type = Material.STONE_SLAB
 
             val bellBlock = slabBlock.getRelative(BlockFace.UP)
             bellBlock.type = Material.BELL
 
-            // 2. Спавним 4 стартовых кастомных безработных жителя
+            // ИСПРАВЛЕНО: Количество спавнящихся через дебаг-кость жителей также увеличено до 8 штук
             val citizens = mutableSetOf<BukkitVillager>()
-            for (i in 0 until 4) {
+            for (i in 0 until 8) {
                 val v = world.spawn(centerLoc, BukkitVillager::class.java) { villager ->
                     villager.profession = BukkitVillager.Profession.NONE
                     villager.villagerLevel = 1
@@ -118,7 +116,6 @@ class BuildTestListener : Listener {
                 citizens.add(v)
             }
 
-            // 3. Формируем пакет данных нового поселения
             val newData = Settlement.SettlementData(
                 UUID.randomUUID(),
                 world.uid,
@@ -129,15 +126,22 @@ class BuildTestListener : Listener {
             )
             val settlement = Settlement(newData, citizens)
 
-            // 4. Регистрируем поселение и запускаем подбор имени (через ИИ или расу)
             val manager = SettlementManager()
             manager.generateSettlementName(settlement)
 
-            // 5. Инициализируем планировщик постройки и размечаем тестовые площадки по нативным типам
             val planner = SettlementPlanner(settlement)
-            planner.planBuilding(VanillaBuildingType.BAKERY)
-            planner.planBuilding(VanillaBuildingType.BLACKSMITH)
+
+            // Выживание
             planner.planBuilding(VanillaBuildingType.FARM)
+            planner.planBuilding(VanillaBuildingType.SHEPHERD)
+
+            // Ратуша на спавне колокола
+            planner.planTownHallAtCenter()
+
+            // Расширенная очередь прогрессии
+            repeat(10) {
+                planner.planNextPriorityBuilding()
+            }
 
             player.sendMessage("§a§l[Souverainete] §aПоселение успешно основано! Рабочие заспавнены и приступили к застройке тестовых плит.")
         }

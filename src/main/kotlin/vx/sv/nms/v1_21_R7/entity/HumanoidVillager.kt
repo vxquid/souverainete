@@ -84,10 +84,8 @@ class HumanoidVillager(
         this.registerAttribute(this, Attributes.ATTACK_SPEED, 4.0)
         this.registerAttribute(this, Attributes.MAX_HEALTH, 20.0)
 
-        // 1. Расширяем нативный инвентарь жителя до 54 слотов
         this.expandInventory(54)
 
-        // 2. Если сущность только что создана (не из БД), генерируем ей стартовые вещи
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
         if (bukkitVillager != null) {
             val pdc = bukkitVillager.persistentDataContainer
@@ -103,7 +101,6 @@ class HumanoidVillager(
 
     private fun expandInventory(size: Int) {
         try {
-            // Находим нативный SimpleContainer внутри AbstractVillager по типу поля
             val inventoryField = AbstractVillager::class.java.declaredFields.firstOrNull {
                 it.type == SimpleContainer::class.java
             } ?: return
@@ -194,14 +191,12 @@ class HumanoidVillager(
     override fun readAdditionalSaveData(input: ValueInput) {
         super.readAdditionalSaveData(input)
 
-        // Гарантируем, что загруженный инвентарь будет расширен до 54 слотов
         this.expandInventory(54)
 
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
         if (bukkitVillager != null) {
             val pdc = bukkitVillager.persistentDataContainer
 
-            // 1. Миграция старого PDC JSON-инвентаря, если он присутствует
             val legacyKey = NamespacedKey(plugin, "Inventory")
             if (pdc.has(legacyKey, PersistentDataType.STRING)) {
                 val jsonStr = pdc.get(legacyKey, PersistentDataType.STRING)
@@ -223,13 +218,11 @@ class HumanoidVillager(
                 pdc.set(NamespacedKey(plugin, "InventoryInitialized"), PersistentDataType.BYTE, 1.toByte())
             }
 
-            // 2. Если сущность загружается на старых мирах без флага инициализации, помечаем её инициализированной
             val initKey = NamespacedKey(plugin, "InventoryInitialized")
             if (!pdc.has(initKey, PersistentDataType.BYTE)) {
                 pdc.set(initKey, PersistentDataType.BYTE, 1.toByte())
             }
 
-            // === ВОССТАНОВЛЕНИЕ СЕССИИ СТРОИТЕЛЬСТВА ПОСЛЕ РЕСТАРТА ===
             val jobUuidKey = NamespacedKey(plugin, "active_build_job_uuid")
             if (pdc.has(jobUuidKey, PersistentDataType.STRING)) {
                 val uuidStr = pdc.get(jobUuidKey, PersistentDataType.STRING)
@@ -239,10 +232,8 @@ class HumanoidVillager(
                         val savedJob = BuildJobManager.activeJobs[jobId]
 
                         if (savedJob != null && !savedJob.isFinished()) {
-                            // Переподключаем ИИ жителя к задаче
                             this.activeBuildJob = savedJob
                         } else {
-                            // Задача уже завершена или была удалена из глобальной памяти
                             pdc.remove(jobUuidKey)
                         }
                     } catch (e: Exception) {
@@ -286,7 +277,6 @@ class HumanoidVillager(
     override fun makeBrain(packedBrain: Brain.Packed): Brain<Villager> {
         val brain = super.makeBrain(packedBrain)
 
-        // Глобальная зачистка планировщика ИИ жителя от торговли и паники
         try {
             val behaviorsField = Brain::class.java.getDeclaredField("availableBehaviorsByPriority")
             behaviorsField.isAccessible = true
@@ -318,9 +308,11 @@ class HumanoidVillager(
             Pair.of(1, BowAttackBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(1, TacticalAttackBehavior(0.65f, 15) as BehaviorControl<Villager>),
 
-            // Взаимоисключающие поведения приоритета 2: перекур и стройка
+            // ИСПРАВЛЕНО: Интегрированы ShepherdBehavior и ButcherBehavior под приоритет 2
             Pair.of(2, BuildBreakBehavior(0.6f) as BehaviorControl<Villager>),
             Pair.of(2, ConstructionBehavior(0.65f) as BehaviorControl<Villager>),
+            Pair.of(2, ShepherdBehavior(0.65f) as BehaviorControl<Villager>),
+            Pair.of(2, ButcherBehavior(0.65f) as BehaviorControl<Villager>),
 
             Pair.of(3, FollowLeaderBehavior(0.65f, 4.0f, 32.0f) as BehaviorControl<Villager>),
             Pair.of(4, LookAndFollowDuringConversation(0.65f) as BehaviorControl<Villager>)
@@ -339,7 +331,10 @@ class HumanoidVillager(
         @Suppress("UNCHECKED_CAST")
         val oldBrain = this.brain as Brain<Villager>
         oldBrain.stopAll(level, this)
-        this.brain = this.makeBrain(oldBrain.pack() as Brain.Packed)
+        val newBrain = this.makeBrain(oldBrain.pack() as Brain.Packed)
+        this.brain = newBrain
+
+        this.registerBrainGoals(newBrain)
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -490,7 +485,6 @@ class HumanoidVillager(
         this.noActionTime = 0
     }
 
-    // Quick settlement getter
     val settlement: Settlement?
         get() = (this.bukkitEntity as org.bukkit.entity.Villager).settlement
 

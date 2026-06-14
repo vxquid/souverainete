@@ -129,6 +129,15 @@ class ConstructionBehavior(
         if (world.gameTime < villager.nextBuildAvailableTime) return false
         if (world.gameTime < villager.buildBreakUntilTime) return false
 
+        // ИСПРАВЛЕНО: Профессиональные фермеры, пастухи и мясники освобождаются от обязанностей строителя
+        val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
+        val prof = bukkitVillager.profession
+        if (prof == org.bukkit.entity.Villager.Profession.FARMER ||
+            prof == org.bukkit.entity.Villager.Profession.SHEPHERD ||
+            prof == org.bukkit.entity.Villager.Profession.BUTCHER) {
+            return false
+        }
+
         val settlement = villager.settlement ?: return false
         val job = SettlementPlanner.getActiveOrNextJob(settlement) ?: return false
         villager.activeBuildJob = job
@@ -251,7 +260,6 @@ class ConstructionBehavior(
             villager.lastPosition = null
             villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
 
-            // === 1. ПРИОРИТЕТ СТРОИТЕЛЬСТВА (Смотрим на блок только когда пришли) ===
             villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(blockPos))
 
             val dX = blockPos.x + 0.5 - villager.x
@@ -391,9 +399,6 @@ class ConstructionBehavior(
                 }
             }
         } else {
-            // === 2. ПРИОРИТЕТ ПЕРЕМЕЩЕНИЯ (Во время ходьбы отдаем управление навигатору) ===
-            // Полностью вычищаем принудительный взгляд на блок. Житель будет смотреть строго перед собой.
-            // Это позволяет нативной навигации идеально обходить углы зданий, коллизии дверей и выходить из помещений.
             villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
 
             if (!villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {

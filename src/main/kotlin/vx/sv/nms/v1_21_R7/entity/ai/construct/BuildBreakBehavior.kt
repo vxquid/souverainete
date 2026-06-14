@@ -22,6 +22,15 @@ class BuildBreakBehavior(
 ) {
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
+        // ИСПРАВЛЕНО: Профессионалы освобождаются от перекуров у колокола, так как у них свои задачи
+        val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
+        val prof = bukkitVillager.profession
+        if (prof == org.bukkit.entity.Villager.Profession.FARMER ||
+            prof == org.bukkit.entity.Villager.Profession.SHEPHERD ||
+            prof == org.bukkit.entity.Villager.Profession.BUTCHER) {
+            return false
+        }
+
         return world.gameTime < villager.buildBreakUntilTime && villager.settlement != null
     }
 
