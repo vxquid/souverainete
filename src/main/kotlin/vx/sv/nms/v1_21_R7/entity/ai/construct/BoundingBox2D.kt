@@ -272,7 +272,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     val settlementId = UUID.fromString(uuidStr)
                     val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
 
-                    // 1. Восстанавливаем разметку зданий
                     val recordList = buildings.computeIfAbsent(settlementId) { mutableListOf() }
                     recordList.clear()
                     data.buildings.forEach { save ->
@@ -280,23 +279,21 @@ class SettlementPlanner(val settlement: Settlement) {
                         recordList.add(BuildingRecord(save.type, box))
                     }
 
-                    // 2. Восстанавливаем активную задачу
                     if (data.activeJob != null) {
                         activeJobs[settlementId] = deserializeJob(world, data.activeJob)
                     } else {
                         activeJobs.remove(settlementId)
                     }
 
-                    // 3. Восстанавливаем очередь задач
-                    val queue = pendingJobs[settlementId] ?: return@forEach
+                    val queue = pendingJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
                     queue.clear()
                     data.pendingJobs.forEach { jobSave ->
                         queue.offer(deserializeJob(world, jobSave))
                     }
                 }
-                plugin.logger.info("[SettlementPlanner] Успешно загружено зданий и очередей строительства из PDC мира: ${buildings.values.sumOf { it.size }}")
+                plugin.logger.info("[SettlementPlanner] Успешно загружено зданий из PDC мира: ${buildings.values.sumOf { it.size }}")
             } catch (e: Exception) {
-                plugin.logger.severe("[SettlementPlanner] Ошибка при загрузке данных планировщика из PDC:")
+                plugin.logger.severe("[SettlementPlanner] Ошибка при загрузке зданий из PDC:")
                 e.printStackTrace()
             }
         }
@@ -318,8 +315,10 @@ class SettlementPlanner(val settlement: Settlement) {
             center.x + 6.0, center.y + 6.0, center.z + 6.0
         )
         val list = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
-        if (list.none { it.type == "TOWN_HALL" }) {
-            list.add(BuildingRecord("TOWN_HALL", thBox))
+
+        // ИСПРАВЛЕНО: Бронируем место под MEETING_POINT (беседку), а не TOWN_HALL (собор)
+        if (list.none { it.type == "MEETING_POINT" }) {
+            list.add(BuildingRecord("MEETING_POINT", thBox))
         }
     }
 
@@ -504,10 +503,12 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (!validTerrain) continue
 
-            val maxAllowedVariance = if (isCritical) 6 else 4
+            // ИСПРАВЛЕНО: Смягчены лимиты (максимальный перепад на пятне фундамента = 9 блоков)
+            val maxAllowedVariance = if (isCritical) 9 else 5
             if (maxY - minY > maxAllowedVariance) continue
 
-            if (abs(maxY - center.blockY) > 8) continue
+            // ИСПРАВЛЕНО: Здание может быть на 15 блоков выше/ниже ратуши по холмам
+            if (abs(maxY - center.blockY) > 15) continue
 
             var pathValid = true
             var px = center.blockX
@@ -602,7 +603,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val width = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
         val length = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
 
-        // === 1. ГЕНЕРАЦИЯ ВЕТВЯЩИХСЯ ДОРОГ ===
         val settlementId = settlement.data.id
         val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
         val records = buildings[settlementId] ?: emptyList()
@@ -642,11 +642,18 @@ class SettlementPlanner(val settlement: Settlement) {
         while (true) {
             val naturalCenterY = getHighestGroundYAt(world, currentX, currentZ)
 
-            val centerRoadY = if (prevCenterRoadY == null) {
-                naturalCenterY
+            val surfaceY = world.getHighestBlockYAt(currentX, currentZ)
+            val isWaterAtCenter = world.getBlockAt(currentX, surfaceY, currentZ).type == Material.WATER
+
+            val centerRoadY = if (isWaterAtCenter) {
+                prevCenterRoadY ?: naturalCenterY
             } else {
-                val diff = naturalCenterY - prevCenterRoadY
-                prevCenterRoadY + diff.coerceIn(-1, 1)
+                if (prevCenterRoadY == null) {
+                    naturalCenterY
+                } else {
+                    val diff = naturalCenterY - prevCenterRoadY
+                    prevCenterRoadY + diff.coerceIn(-1, 1)
+                }
             }
             prevCenterRoadY = centerRoadY
 
@@ -675,14 +682,28 @@ class SettlementPlanner(val settlement: Settlement) {
                         buildJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
                     }
 
-                    for (y in naturalBlockY until centerRoadY) {
-                        buildJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
-                    }
+                    if (isWaterAtCenter) {
+                        val isRoadEdge = if (abs(dX) > abs(dZ)) abs(wz) == 1 else abs(wx) == 1
 
-                    if (currentBlock.isLiquid) {
-                        buildJob.addBlock(BlockPos(px, centerRoadY, pz), cobbleData, isRoad = true)
+                        if (isRoadEdge) {
+                            buildJob.addBlock(BlockPos(px, centerRoadY + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                        }
+
+                        buildJob.addBlock(BlockPos(px, centerRoadY, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
+
+                        for (y in naturalBlockY until centerRoadY) {
+                            buildJob.addBlock(BlockPos(px, y, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                        }
                     } else {
-                        buildJob.addBlock(BlockPos(px, centerRoadY, pz), roadBlockData, isRoad = true)
+                        for (y in naturalBlockY until centerRoadY) {
+                            buildJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
+                        }
+
+                        if (currentBlock.isLiquid) {
+                            buildJob.addBlock(BlockPos(px, centerRoadY, pz), cobbleData, isRoad = true)
+                        } else {
+                            buildJob.addBlock(BlockPos(px, centerRoadY, pz), roadBlockData, isRoad = true)
+                        }
                     }
 
                     roads.add(BlockPos(px, centerRoadY, pz))
@@ -736,9 +757,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
             buildJob.addBlock(absPos, rotData, isRoad = false)
         }
-
-        // === ИСПРАВЛЕНО: Установка рабочей станции полностью удалена, так как все станции
-        // (включая SMITHING_TABLE шахты) генерируются из блоков самих схем/процедурного кода.
 
         val citizens = settlement.villagers.mapNotNull {
             (it as? CraftVillager)?.handle as? HumanoidVillager

@@ -1,7 +1,6 @@
 package vx.sv.nms.v1_21_R7.entity.ai.construct
 
 import com.google.common.collect.ImmutableMap
-import net.minecraft.core.BlockPos
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.entity.ai.behavior.Behavior
@@ -86,11 +85,6 @@ class ConstructionBehavior(
         }
     }
 
-    private fun getGroundPos(world: ServerLevel, pos: BlockPos): BlockPos {
-        val highestY = world.world.getHighestBlockYAt(pos.x, pos.z)
-        return BlockPos(pos.x, highestY + 1, pos.z)
-    }
-
     private fun removeWholeTree(startBlock: Block) {
         val checked = mutableSetOf<Block>()
         val queue = ArrayDeque<Block>()
@@ -131,7 +125,6 @@ class ConstructionBehavior(
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
         val prof = bukkitVillager.profession
 
-        // ИСПРАВЛЕНО: Шахтеры (TOOLSMITH) освобождаются от обязанностей строителя
         if (prof == org.bukkit.entity.Villager.Profession.FARMER ||
             prof == org.bukkit.entity.Villager.Profession.SHEPHERD ||
             prof == org.bukkit.entity.Villager.Profession.BUTCHER ||
@@ -230,8 +223,8 @@ class ConstructionBehavior(
 
         villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(tool))
 
-        val groundPos = getGroundPos(world, assigned.pos)
-        villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(groundPos), speedModifier, 2))
+        // ИСПРАВЛЕНО: Направляем жителя напрямую к блоку (без багов с высотой крыши)
+        villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(assigned.pos), speedModifier, 2))
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -265,14 +258,15 @@ class ConstructionBehavior(
         val npcPos = villager.blockPosition()
         val diffX = kotlin.math.abs(blockPos.x - npcPos.x)
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
+        val diffY = kotlin.math.abs(blockPos.y - npcPos.y)
 
+        // ИСПРАВЛЕНО: Правильная проверка дистанции по трем осям
         val isWithinReach = if (villager.isBuildDistanceHackActive) {
             true
         } else if (assigned.isRoad) {
-            val diffY = kotlin.math.abs(blockPos.y - npcPos.y)
             (diffX * diffX + diffZ * diffZ <= 25.0) && (diffY <= 4)
         } else {
-            (diffX * diffX + diffZ * diffZ <= 36.0)
+            (diffX * diffX + diffZ * diffZ <= 36.0) && (diffY <= 6)
         }
 
         if (isWithinReach) {
@@ -421,9 +415,9 @@ class ConstructionBehavior(
         } else {
             villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
 
+            // ИСПРАВЛЕНО: Направляем жителя напрямую к блоку (без багов с высотой крыши)
             if (!villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
-                val groundPos = getGroundPos(world, blockPos)
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(groundPos), speedModifier, 2))
+                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(blockPos), speedModifier, 2))
             }
         }
     }

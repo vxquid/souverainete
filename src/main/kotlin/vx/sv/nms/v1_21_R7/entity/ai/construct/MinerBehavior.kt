@@ -32,12 +32,25 @@ class MinerBehavior(
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
-        return bukkitVillager.profession == Villager.Profession.TOOLSMITH && villager.settlement != null
+        if (bukkitVillager.profession != Villager.Profession.TOOLSMITH || villager.settlement == null) {
+            return false
+        }
+
+        // ИСПРАВЛЕНО: Шахтер работает строго в ванильные рабочие часы (от 2000 до 9000 тиков)
+        // В остальное время дня (утро и вечер — суммарно ~4.1 минуты) он идет отдыхать у колокола, а ночью спит
+        val timeOfDay = world.world.time
+        return timeOfDay in 2000..9000
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
         val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
-        return bukkitVillager.profession == Villager.Profession.TOOLSMITH && villager.settlement != null
+        if (bukkitVillager.profession != Villager.Profession.TOOLSMITH || villager.settlement == null) {
+            return false
+        }
+
+        // ИСПРАВЛЕНО: Если рабочее время вышло — завершаем копку, давая ИИ уйти на перерыв
+        val timeOfDay = world.world.time
+        return timeOfDay in 2000..9000
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -73,7 +86,6 @@ class MinerBehavior(
         val stonePos = BlockPos(tablePos.x, tablePos.y, tablePos.z + 1)
         val stoneBlock = bukkitWorld.getBlockAt(stonePos.x, stonePos.y, stonePos.z)
 
-        // Восстанавливаем бесконечную жилу, если она сломана
         if (stoneBlock.type == Material.AIR) {
             stoneBlock.type = Material.STONE
         }
@@ -110,22 +122,21 @@ class MinerBehavior(
                 bukkitWorld.playSound(stoneBlock.location, Sound.BLOCK_STONE_BREAK, 1.0f, 1.0f)
                 bukkitWorld.spawnParticle(Particle.BLOCK, stoneBlock.location.add(0.5, 0.5, 0.5), 15, Material.STONE.createBlockData())
 
-                // ИСПРАВЛЕНО: Значительно повышены шансы и количество выпадающих ресурсов (до 1-4 штук)
                 val random = world.random
                 val roll = random.nextInt(100)
 
                 val dropMaterial = when (roll) {
-                    in 0..4 -> Material.EMERALD            // 5% Изумруды
-                    in 5..14 -> Material.RAW_GOLD          // 10% Сырое золото (новое)
-                    in 15..34 -> Material.RAW_IRON         // 20% Сырое железо
-                    in 35..59 -> Material.COAL             // 25% Уголь
-                    in 60..69 -> Material.LAPIS_LAZULI     // 10% Лазурит (новое)
-                    else -> Material.COBBLESTONE           // 30% Булыжник
+                    in 0..4 -> Material.EMERALD
+                    in 5..14 -> Material.RAW_GOLD
+                    in 15..34 -> Material.RAW_IRON
+                    in 35..59 -> Material.COAL
+                    in 60..69 -> Material.LAPIS_LAZULI
+                    else -> Material.COBBLESTONE
                 }
 
                 val amount = when (dropMaterial) {
-                    Material.COBBLESTONE, Material.COAL -> 2 + random.nextInt(3) // 2-4 штуки
-                    else -> 1 + random.nextInt(3) // 1-3 штуки
+                    Material.COBBLESTONE, Material.COAL -> 2 + random.nextInt(3)
+                    else -> 1 + random.nextInt(3)
                 }
 
                 bukkitWorld.dropItemNaturally(stoneBlock.location.add(0.5, 0.5, 0.5), ItemStack(dropMaterial, amount))
