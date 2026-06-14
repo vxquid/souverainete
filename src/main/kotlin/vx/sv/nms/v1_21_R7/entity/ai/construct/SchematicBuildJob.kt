@@ -5,8 +5,12 @@ import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.data.BlockData
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import java.util.*
 
 class SchematicBuildJob(val world: World) {
+    // Изменяемый UUID задачи для восстановления сессии после перезапуска
+    var jobId: UUID = UUID.randomUUID()
+
     private val blocksMap = mutableMapOf<BlockPos, BlockToPlace>()
     private var sortedBlocksCache: List<BlockToPlace>? = null
     private val lock = Any()
@@ -18,24 +22,19 @@ class SchematicBuildJob(val world: World) {
         }
     }
 
-    /**
-     * Возвращает вес приоритета установки блока.
-     * Твёрдые блоки строятся первыми, декор — после них, жидкости — строго в самом конце.
-     */
     private fun getPlacementPriority(material: Material): Int {
         val name = material.name
         return when {
-            material == Material.WATER || material == Material.LAVA -> 100 // Жидкости разливаются строго последними
-            name.contains("DOOR") || name.contains("BED") -> 50 // Двухблочные структуры
-            name.contains("TORCH") || name.contains("LANTERN") || name.contains("CARPET") || name.contains("SIGN") -> 20 // Навесной декор
-            else -> 0 // Твердый каркас, несущие стены и фундамент строятся в первую очередь
+            material == Material.WATER || material == Material.LAVA -> 100
+            name.contains("DOOR") || name.contains("BED") -> 50
+            name.contains("TORCH") || name.contains("LANTERN") || name.contains("CARPET") || name.contains("SIGN") -> 20
+            else -> 0
         }
     }
 
     fun getBlocks(): List<BlockToPlace> {
         synchronized(lock) {
             if (sortedBlocksCache == null) {
-                // Сортировка: Сначала здания (isRoad = false) -> Снизу-вверх по Y -> По приоритету материала
                 sortedBlocksCache = blocksMap.values.sortedWith(
                     compareBy<BlockToPlace> { it.isRoad }
                         .thenBy { it.pos.y }
@@ -51,7 +50,6 @@ class SchematicBuildJob(val world: World) {
             val npcPos = npc.blockPosition()
             val blocksList = getBlocks()
 
-            // 1. Очистка зависших клеймов
             blocksList.forEach { block ->
                 val claimer = block.claimedBy
                 if (claimer != null) {
@@ -61,7 +59,6 @@ class SchematicBuildJob(val world: World) {
                 }
             }
 
-            // 2. Глобальное авто-завершение
             blocksList.filter { !it.isPlaced }.forEach {
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
                 if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
@@ -70,7 +67,6 @@ class SchematicBuildJob(val world: World) {
                 }
             }
 
-            // 3. Фаза расчистки препятствий
             val obstacles = blocksList.filter {
                 if (it.isPlaced || it.claimedBy != null) return@filter false
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
@@ -95,7 +91,6 @@ class SchematicBuildJob(val world: World) {
                 return closest
             }
 
-            // 4. ФАЗА СТРОИТЕЛЬСТВА
             val buildCandidates = blocksList.filter {
                 !it.isPlaced && it.claimedBy == null
             }
@@ -105,13 +100,9 @@ class SchematicBuildJob(val world: World) {
             val minY = buildCandidates.minOf { it.pos.y }
             val lowestYBlocks = buildCandidates.filter { it.pos.y == minY }
 
-            // ИСПРАВЛЕНО: Находим минимальный приоритет среди оставшихся блоков на текущем слое Y
             val minPriority = lowestYBlocks.minOf { getPlacementPriority(it.blockData.material) }
-
-            // Оставляем только те блоки, у которых приоритет равен минимальному (сначала 0, затем 20, 50, 100)
             val priorityBlocks = lowestYBlocks.filter { getPlacementPriority(it.blockData.material) == minPriority }
 
-            // Среди блоков наивысшего приоритета на слое выбираем ближайший к жителю
             val closest = priorityBlocks.minByOrNull { it.pos.distSqr(npcPos) }
 
             closest?.claimedBy = npc

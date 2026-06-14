@@ -3,7 +3,6 @@ package vx.sv.nms.v1_21_R7.entity.ai.construct
 import net.minecraft.core.BlockPos
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import org.bukkit.Material
-import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
@@ -100,15 +99,10 @@ class BuildTestListener : Listener {
 
             player.sendMessage("§a§l[Souverainete] §fМгновенная генерация тестового поселения в точке клика...")
 
-            val slabBlock = centerLoc.block
-            slabBlock.type = Material.STONE_SLAB
-
-            val bellBlock = slabBlock.getRelative(BlockFace.UP)
-            bellBlock.type = Material.BELL
-
-            // ИСПРАВЛЕНО: Количество спавнящихся через дебаг-кость жителей также увеличено до 8 штук
+            // Стартовый временный колокол больше не ставится на спавне кости.
+            // Количество спавнящихся тестовых жителей увеличено до 10.
             val citizens = mutableSetOf<BukkitVillager>()
-            for (i in 0 until 8) {
+            for (i in 0 until 10) {
                 val v = world.spawn(centerLoc, BukkitVillager::class.java) { villager ->
                     villager.profession = BukkitVillager.Profession.NONE
                     villager.villagerLevel = 1
@@ -131,14 +125,18 @@ class BuildTestListener : Listener {
 
             val planner = SettlementPlanner(settlement)
 
-            // Выживание
+            // === ИСПРАВЛЕНО: Синхронизированный порядок планирования ===
+            // 1. Сначала ресурсы и выживание (на расстоянии)
             planner.planBuilding(VanillaBuildingType.FARM)
             planner.planBuilding(VanillaBuildingType.SHEPHERD)
 
-            // Ратуша на спавне колокола
-            planner.planTownHallAtCenter()
+            // 2. Затем роскошная ратуша-собор (планируется на расстоянии, как уникальное строение)
+            planner.planBuilding(VanillaBuildingType.TOWN_HALL)
 
-            // Расширенная очередь прогрессии
+            // 3. А геометрический центр площади застраивается открытой беседкой MEETING_POINT
+            planner.planMeetingPointAtCenter()
+
+            // 4. Оставшаяся очередь застройки по приоритетам
             repeat(10) {
                 planner.planNextPriorityBuilding()
             }

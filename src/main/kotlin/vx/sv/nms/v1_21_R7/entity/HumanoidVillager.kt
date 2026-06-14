@@ -67,6 +67,7 @@ class HumanoidVillager(
     private var attacksLeft: Int? = null
 
     var activeBuildJob: SchematicBuildJob? = null
+    var savedJobId: UUID? = null
     var assignedBlock: BlockToPlace? = null
     var previousMainHandItem: net.minecraft.world.item.ItemStack? = null
     var nextBuildAvailableTime: Long = 0L
@@ -128,6 +129,10 @@ class HumanoidVillager(
         pdc.set(initKey, PersistentDataType.BYTE, 1.toByte())
 
         bukkitVillager.race.spawnItems.forEach { item -> inv.addItem(item.build()) }
+
+        // ИСПРАВЛЕНО: Даем жителю стартовый набор сытной еды, чтобы они не умирали до завершения ферм
+        inv.addItem(ItemStack(Material.BREAD, 32))
+        inv.addItem(ItemStack(Material.BAKED_POTATO, 32))
 
         val weaponWeights = mapOf(
             Material.STONE_SWORD to 60,
@@ -228,14 +233,7 @@ class HumanoidVillager(
                 val uuidStr = pdc.get(jobUuidKey, PersistentDataType.STRING)
                 if (!uuidStr.isNullOrEmpty()) {
                     try {
-                        val jobId = UUID.fromString(uuidStr)
-                        val savedJob = BuildJobManager.activeJobs[jobId]
-
-                        if (savedJob != null && !savedJob.isFinished()) {
-                            this.activeBuildJob = savedJob
-                        } else {
-                            pdc.remove(jobUuidKey)
-                        }
+                        this.savedJobId = UUID.fromString(uuidStr)
                     } catch (e: Exception) {
                         pdc.remove(jobUuidKey)
                     }
@@ -308,11 +306,14 @@ class HumanoidVillager(
             Pair.of(1, BowAttackBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(1, TacticalAttackBehavior(0.65f, 15) as BehaviorControl<Villager>),
 
-            // ИСПРАВЛЕНО: Интегрированы ShepherdBehavior и ButcherBehavior под приоритет 2
+            // Взаимоисключающие поведения приоритета 2
             Pair.of(2, BuildBreakBehavior(0.6f) as BehaviorControl<Villager>),
             Pair.of(2, ConstructionBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ShepherdBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ButcherBehavior(0.65f) as BehaviorControl<Villager>),
+
+            // ИСПРАВЛЕНО: Интегрирован ИИ Шахтёра под приоритет 2
+            Pair.of(2, MinerBehavior(0.65f) as BehaviorControl<Villager>),
 
             Pair.of(3, FollowLeaderBehavior(0.65f, 4.0f, 32.0f) as BehaviorControl<Villager>),
             Pair.of(4, LookAndFollowDuringConversation(0.65f) as BehaviorControl<Villager>)

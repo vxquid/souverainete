@@ -7,6 +7,7 @@ import org.bukkit.NamespacedKey
 import org.bukkit.block.BlockFace
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.world.AsyncStructureSpawnEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
@@ -28,7 +29,10 @@ class VillageGenerationListener : Listener {
             val angle = random.nextDouble() * 2 * Math.PI
             val distance = 4.0 + random.nextDouble() * 4.0
             val spawnLoc = center.clone().add(Math.cos(angle) * distance, 1.0, Math.sin(angle) * distance)
-            spawnLoc.y = world.getHighestBlockYAt(spawnLoc.blockX, spawnLoc.blockZ).toDouble() + 1.0
+
+            // ИСПРАВЛЕНО: Теперь высота спавна овец определяется по реальному уровню грунта (сквозь листву деревьев)
+            val groundY = SettlementPlanner.getHighestGroundYAt(world, spawnLoc.blockX, spawnLoc.blockZ)
+            spawnLoc.y = groundY.toDouble() + 1.0
 
             world.spawn(spawnLoc, org.bukkit.entity.Sheep::class.java) { sheep ->
                 val name = sheepNames.getOrElse(i % sheepNames.size) { "Деревенская овца" }
@@ -48,7 +52,10 @@ class VillageGenerationListener : Listener {
             val angle = random.nextDouble() * 2 * Math.PI
             val distance = 2.0 + random.nextDouble() * 3.0
             val spawnLoc = center.clone().add(Math.cos(angle) * distance, 1.0, Math.sin(angle) * distance)
-            spawnLoc.y = world.getHighestBlockYAt(spawnLoc.blockX, spawnLoc.blockZ).toDouble() + 1.0
+
+            // ИСПРАВЛЕНО: Теперь высота спавна котов определяется по реальному уровню грунта (сквозь листву деревьев)
+            val groundY = SettlementPlanner.getHighestGroundYAt(world, spawnLoc.blockX, spawnLoc.blockZ)
+            spawnLoc.y = groundY.toDouble() + 1.0
 
             world.spawn(spawnLoc, org.bukkit.entity.Cat::class.java) { cat ->
                 val name = catNames.getOrElse(i % catNames.size) { "Деревенский кот" }
@@ -60,6 +67,29 @@ class VillageGenerationListener : Listener {
                     PersistentDataType.BYTE,
                     1.toByte()
                 )
+            }
+        }
+    }
+
+    /**
+     * Защищает бесконечный блок камня в шахте от разрушения игроками.
+     */
+    @EventHandler
+    fun onPlayerBreakMineBlock(event: BlockBreakEvent) {
+        val block = event.block
+        if (block.type == Material.STONE) {
+            val northBlock = block.getRelative(BlockFace.NORTH)
+            if (northBlock.type == Material.SMITHING_TABLE) {
+                // Проверяем, находится ли блок на территории поселения
+                val world = block.world
+                val worldSettlements = SettlementManager.settlements[world] ?: return
+                val vector = block.location.toVector()
+                val settlement = worldSettlements.find { it.territory.contains(vector) }
+
+                if (settlement != null) {
+                    event.isCancelled = true
+                    event.player.sendMessage("§c§l[Souverainete] §cВы не можете добывать бесконечную каменную жилу шахты поселения! Она принадлежит шахтерам.")
+                }
             }
         }
     }
@@ -162,12 +192,8 @@ class VillageGenerationListener : Listener {
 
                 val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
 
-                val bellBlock = centerLoc.block.getRelative(BlockFace.UP)
-                bellBlock.type = Material.BELL
-
-                // ИСПРАВЛЕНО: Количество стартовых жителей увеличено до 8
                 val citizens = mutableSetOf<BukkitVillager>()
-                for (i in 0 until 8) {
+                for (i in 0 until 10) {
                     val spawnLoc = centerLoc.clone().add(1.5, 1.0, 1.5)
                     val v = world.spawn(spawnLoc, BukkitVillager::class.java) { villager ->
                         villager.profession = BukkitVillager.Profession.NONE
@@ -194,15 +220,15 @@ class VillageGenerationListener : Listener {
 
                 spawnVillageAnimals(centerLoc)
 
-                // Сначала выживание: еда и дерево
                 planner.planBuilding(VanillaBuildingType.FARM)
+                planner.planBuilding(VanillaBuildingType.FARM)
+                planner.planBuilding(VanillaBuildingType.MINE)
                 planner.planBuilding(VanillaBuildingType.SHEPHERD)
 
-                // Затем Ратуша (Meeting Point) на спавне колокола
-                planner.planTownHallAtCenter()
+                planner.planBuilding(VanillaBuildingType.TOWN_HALL)
 
-                // ИСПРАВЛЕНО: Количество стартовых очередей увеличено до 10,
-                // чтобы сразу заложить жильё под 8 жителей и начать развивать кузницу/пекарню
+                planner.planMeetingPointAtCenter()
+
                 repeat(10) {
                     planner.planNextPriorityBuilding()
                 }

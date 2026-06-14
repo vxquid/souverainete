@@ -30,33 +30,40 @@ class ButcherBehavior(
         return bukkitVillager.profession == org.bukkit.entity.Villager.Profession.BUTCHER && villager.settlement != null
     }
 
+    override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
+        val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
+        return bukkitVillager.profession == org.bukkit.entity.Villager.Profession.BUTCHER && villager.settlement != null
+    }
+
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
         val settlement = villager.settlement ?: return
         val center = settlement.data.center
         val bukkitWorld = world.world
         val npcLoc = villager.bukkitEntity.location
 
-        // Собираем овец в радиусе 25 блоков от центра ратуши
         val villageSheep = bukkitWorld.getEntitiesByClass(Sheep::class.java).filter { sheep ->
             sheep.location.distanceSquared(center) <= 625.0
         }
 
-        // Если отар превысил 12 голов — производим забой лишних
         if (villageSheep.size > 12) {
-            val targetSheep = villageSheep.find { it.isAdult }
+            // ИСПРАВЛЕНО: Мясник выбирает только свободную овцу, которую сейчас не обслуживает пастух
+            val targetSheep = villageSheep.find { it.isAdult && ShepherdBehavior.isSheepFree(it, villager) }
 
             if (targetSheep != null) {
+                // Бронируем овцу за мясником на время подхода и забоя
+                ShepherdBehavior.claimSheep(targetSheep, villager)
+
                 val distSq = npcLoc.distanceSquared(targetSheep.location)
                 if (distSq <= 4.0) {
-                    // Забиваем овцу
                     targetSheep.damage(20.0, villager.bukkitEntity)
                     bukkitWorld.playSound(targetSheep.location, Sound.ENTITY_SHEEP_DEATH, 1.0f, 1.0f)
-                    
-                    // Анимация удара топором
+
                     villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.IRON_AXE)))
                     villager.swing(InteractionHand.MAIN_HAND)
+
+                    // Забой завершен, сбрасываем бронь
+                    ShepherdBehavior.releaseReservations(villager.uuid)
                 } else {
-                    // Направляемся к цели
                     val targetPos = BlockPos(targetSheep.location.blockX, targetSheep.location.blockY, targetSheep.location.blockZ)
                     villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
                     villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
@@ -65,6 +72,13 @@ class ButcherBehavior(
             }
         }
 
+        ShepherdBehavior.releaseReservations(villager.uuid)
         villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+    }
+
+    override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
+        ShepherdBehavior.releaseReservations(villager.uuid)
+        villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+        villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
     }
 }

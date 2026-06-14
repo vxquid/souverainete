@@ -9,10 +9,7 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
-import org.bukkit.Location
-import org.bukkit.Material
-import org.bukkit.Particle
-import org.bukkit.Sound
+import org.bukkit.*
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.entity.CraftVillager
@@ -22,7 +19,9 @@ import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
+import vx.sv.Souverainete.Companion.plugin
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import java.util.*
 import org.bukkit.entity.Villager as BukkitVillager
@@ -129,28 +128,49 @@ class ConstructionBehavior(
         if (world.gameTime < villager.nextBuildAvailableTime) return false
         if (world.gameTime < villager.buildBreakUntilTime) return false
 
-        // ИСПРАВЛЕНО: Профессиональные фермеры, пастухи и мясники освобождаются от обязанностей строителя
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
         val prof = bukkitVillager.profession
+
+        // ИСПРАВЛЕНО: Шахтеры (TOOLSMITH) освобождаются от обязанностей строителя
         if (prof == org.bukkit.entity.Villager.Profession.FARMER ||
             prof == org.bukkit.entity.Villager.Profession.SHEPHERD ||
-            prof == org.bukkit.entity.Villager.Profession.BUTCHER) {
+            prof == org.bukkit.entity.Villager.Profession.BUTCHER ||
+            prof == org.bukkit.entity.Villager.Profession.TOOLSMITH) {
             return false
         }
 
         val settlement = villager.settlement ?: return false
-        val job = SettlementPlanner.getActiveOrNextJob(settlement) ?: return false
+
+        if (villager.activeBuildJob == null && villager.savedJobId != null) {
+            val active = SettlementPlanner.activeJobs[settlement.data.id]
+            if (active != null && active.jobId == villager.savedJobId) {
+                villager.activeBuildJob = active
+            } else {
+                villager.savedJobId = null
+            }
+        }
+
+        val job = villager.activeBuildJob ?: SettlementPlanner.getActiveOrNextJob(settlement) ?: return false
         villager.activeBuildJob = job
+
+        val pdc = bukkitVillager.persistentDataContainer
+        val jobUuidKey = NamespacedKey(plugin, "active_build_job_uuid")
+        if (pdc.get(jobUuidKey, PersistentDataType.STRING) != job.jobId.toString()) {
+            pdc.set(jobUuidKey, PersistentDataType.STRING, job.jobId.toString())
+            villager.savedJobId = job.jobId
+        }
 
         if (job.isFinished()) {
             villager.activeBuildJob = null
+            pdc.remove(jobUuidKey)
+            villager.savedJobId = null
             return false
         }
 
         val assigned = villager.assignedBlock ?: job.claimNextBlock(villager) ?: return false
         villager.assignedBlock = assigned
 
-        val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
+        val bukkitInv = bukkitVillager.inventory
 
         if (!assigned.material.isAir) {
             addItemsSmart(bukkitInv, assigned.material, 64)
@@ -423,6 +443,10 @@ class ConstructionBehavior(
 
             val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
             clearConstructionBlocks(bukkitInv)
+
+            val pdc = (villager.bukkitEntity as BukkitVillager).persistentDataContainer
+            pdc.remove(NamespacedKey(plugin, "active_build_job_uuid"))
+            villager.savedJobId = null
         }
 
         villager.digTicks = 0
@@ -451,7 +475,9 @@ class BuilderSafetyListener : Listener {
 
                 val settlement = nmsVillager.settlement
                 val safeLoc = if (settlement != null) {
-                    settlement.data.center.clone().add(0.5, 1.0, 0.5)
+                    val center = settlement.data.center
+                    val highestY = center.world.getHighestBlockYAt(center.blockX, center.blockZ)
+                    Location(center.world, center.x + 0.5, highestY + 1.0, center.z + 0.5)
                 } else {
                     val loc = villager.location
                     val highestY = loc.world.getHighestBlockYAt(loc.blockX, loc.blockZ)

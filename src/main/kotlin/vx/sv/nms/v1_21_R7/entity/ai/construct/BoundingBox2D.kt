@@ -14,9 +14,13 @@ import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -29,6 +33,25 @@ data class BuildingSaveData(
     val maxX: Double, val maxY: Double, val maxZ: Double
 )
 
+// === НОВЫЕ DTO-СТРУКТУРЫ ДЛЯ СЕРИАЛИЗАЦИИ ПРОГРЕССА ===
+data class BlockSaveData(
+    val x: Int, val y: Int, val z: Int,
+    val blockDataStr: String,
+    val isPlaced: Boolean,
+    val isRoad: Boolean
+)
+
+data class SchematicJobSaveData(
+    val jobId: String,
+    val blocks: List<BlockSaveData>
+)
+
+data class SettlementPlannerSaveData(
+    val buildings: List<BuildingSaveData>,
+    val activeJob: SchematicJobSaveData?,
+    val pendingJobs: List<SchematicJobSaveData>
+)
+
 class SettlementPlanner(val settlement: Settlement) {
 
     private val world = settlement.world
@@ -39,7 +62,7 @@ class SettlementPlanner(val settlement: Settlement) {
         val activeJobs = ConcurrentHashMap<UUID, SchematicBuildJob>()
         val settlementRoads = ConcurrentHashMap<UUID, MutableSet<BlockPos>>()
 
-        private val worldBuildingsKey = NamespacedKey(plugin, "settlement_buildings")
+        private val worldBuildingsKey = NamespacedKey(plugin, "settlement_buildings_data")
 
         init {
             Bukkit.getScheduler().runTaskTimer(plugin, Runnable {
@@ -144,51 +167,136 @@ class SettlementPlanner(val settlement: Settlement) {
             return y
         }
 
+        fun compress(data: String): ByteArray {
+            val bos = ByteArrayOutputStream()
+            val gzos = GZIPOutputStream(bos)
+            gzos.write(data.toByteArray(Charsets.UTF_8))
+            gzos.close()
+            return bos.toByteArray()
+        }
+
+        fun decompress(compressed: ByteArray): String {
+            val bis = ByteArrayInputStream(compressed)
+            val gzis = GZIPInputStream(bis)
+            val result = gzis.readBytes().toString(Charsets.UTF_8)
+            gzis.close()
+            return result
+        }
+
+        private fun serializeJob(job: SchematicBuildJob): SchematicJobSaveData {
+            val blockSaves = job.getBlocks().map { block ->
+                BlockSaveData(
+                    block.pos.x, block.pos.y, block.pos.z,
+                    block.blockData.asString,
+                    block.isPlaced,
+                    block.isRoad
+                )
+            }
+            return SchematicJobSaveData(job.jobId.toString(), blockSaves)
+        }
+
+        private fun deserializeJob(world: World, saveData: SchematicJobSaveData): SchematicBuildJob {
+            val job = SchematicBuildJob(world)
+            job.jobId = UUID.fromString(saveData.jobId)
+
+            saveData.blocks.forEach { bSave ->
+                val pos = BlockPos(bSave.x, bSave.y, bSave.z)
+                val blockData = Bukkit.createBlockData(bSave.blockDataStr)
+                job.addBlock(pos, blockData, bSave.isRoad)
+                if (bSave.isPlaced) {
+                    job.getBlocks().lastOrNull()?.isPlaced = true
+                }
+            }
+            return job
+        }
+
         fun saveBuildingsToWorld(world: World) {
             val pdc = world.persistentDataContainer
-            val saveData = mutableMapOf<String, List<BuildingSaveData>>()
+            val saveData = mutableMapOf<String, SettlementPlannerSaveData>()
 
-            buildings.forEach { (settlementId, records) ->
-                val worldSettlements = SettlementManager.settlements[world] ?: return@forEach
-                val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
+            val worldSettlements = SettlementManager.settlements[world] ?: return
+            worldSettlements.forEach { settlement ->
+                val settlementId = settlement.data.id
+                val records = buildings[settlementId] ?: emptyList()
 
-                val saves = records.map { record ->
+                val active = activeJobs[settlementId]
+                val activeSave = active?.let { serializeJob(it) }
+
+                val queue = pendingJobs[settlementId] ?: emptyList()
+                val pendingSaves = queue.map { serializeJob(it) }
+
+                val plannerSaves = records.map { record ->
                     BuildingSaveData(
                         record.type,
                         record.box.minX, record.box.minY, record.box.minZ,
                         record.box.maxX, record.box.maxY, record.box.maxZ
                     )
                 }
-                saveData[settlementId.toString()] = saves
+
+                saveData[settlementId.toString()] = SettlementPlannerSaveData(
+                    plannerSaves,
+                    activeSave,
+                    pendingSaves
+                )
             }
-            pdc.set(worldBuildingsKey, PersistentDataType.STRING, gson.toJson(saveData))
+
+            val compressedBytes = compress(gson.toJson(saveData))
+            pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
         }
 
         fun loadBuildingsFromWorld(world: World) {
             val pdc = world.persistentDataContainer
-            val json = pdc.get(worldBuildingsKey, PersistentDataType.STRING) ?: return
+
+            val json = if (pdc.has(worldBuildingsKey, PersistentDataType.BYTE_ARRAY)) {
+                val compressedBytes = pdc.get(worldBuildingsKey, PersistentDataType.BYTE_ARRAY) ?: return
+                decompress(compressedBytes)
+            } else if (pdc.has(worldBuildingsKey, PersistentDataType.STRING)) {
+                val legacyJson = pdc.get(worldBuildingsKey, PersistentDataType.STRING) ?: return
+
+                val compressedBytes = compress(legacyJson)
+                pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+                pdc.remove(worldBuildingsKey)
+
+                legacyJson
+            } else {
+                return
+            }
 
             try {
-                val typeToken = object : TypeToken<Map<String, List<BuildingSaveData>>>() {}.type
-                val loadedData: Map<String, List<BuildingSaveData>> = gson.fromJson(json, typeToken) ?: return
+                val typeToken = object : TypeToken<Map<String, SettlementPlannerSaveData>>() {}.type
+                val loadedData: Map<String, SettlementPlannerSaveData> = gson.fromJson(json, typeToken) ?: return
 
                 val worldSettlements = SettlementManager.settlements[world] ?: return
 
-                loadedData.forEach { (uuidStr, saves) ->
+                loadedData.forEach { (uuidStr, data) ->
                     val settlementId = UUID.fromString(uuidStr)
                     val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
 
+                    // 1. Восстанавливаем разметку зданий
                     val recordList = buildings.computeIfAbsent(settlementId) { mutableListOf() }
                     recordList.clear()
-
-                    saves.forEach { save ->
+                    data.buildings.forEach { save ->
                         val box = BoundingBox(save.minX, save.minY, save.minZ, save.maxX, save.maxY, save.maxZ)
                         recordList.add(BuildingRecord(save.type, box))
                     }
+
+                    // 2. Восстанавливаем активную задачу
+                    if (data.activeJob != null) {
+                        activeJobs[settlementId] = deserializeJob(world, data.activeJob)
+                    } else {
+                        activeJobs.remove(settlementId)
+                    }
+
+                    // 3. Восстанавливаем очередь задач
+                    val queue = pendingJobs[settlementId] ?: return@forEach
+                    queue.clear()
+                    data.pendingJobs.forEach { jobSave ->
+                        queue.offer(deserializeJob(world, jobSave))
+                    }
                 }
-                plugin.logger.info("[SettlementPlanner] Успешно загружено зданий из PDC мира: ${buildings.values.sumOf { it.size }}")
+                plugin.logger.info("[SettlementPlanner] Успешно загружено зданий и очередей строительства из PDC мира: ${buildings.values.sumOf { it.size }}")
             } catch (e: Exception) {
-                plugin.logger.severe("[SettlementPlanner] Ошибка при загрузке зданий из PDC:")
+                plugin.logger.severe("[SettlementPlanner] Ошибка при загрузке данных планировщика из PDC:")
                 e.printStackTrace()
             }
         }
@@ -215,11 +323,11 @@ class SettlementPlanner(val settlement: Settlement) {
         }
     }
 
-    fun planTownHallAtCenter(): Boolean {
+    fun planMeetingPointAtCenter(): Boolean {
         val center = settlement.data.center
         val cx = center.blockX
         val cz = center.blockZ
-        val type = VanillaBuildingType.TOWN_HALL
+        val type = VanillaBuildingType.MEETING_POINT
         val baseY = center.blockY
 
         val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type, StructureRotation.NONE)
@@ -255,7 +363,8 @@ class SettlementPlanner(val settlement: Settlement) {
         val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(4)
 
         val priorityList = listOf(
-            Pair(VanillaBuildingType.FARM, 1),
+            Pair(VanillaBuildingType.FARM, 2),
+            Pair(VanillaBuildingType.MINE, 1),
             Pair(VanillaBuildingType.SHEPHERD, 1),
             Pair(VanillaBuildingType.HOUSE_SMALL, if (totalResidentialBuilt < maxResidentialAllowed) (existingCounts["HOUSE_SMALL"] ?: 0) + 1 else 0),
             Pair(VanillaBuildingType.HOUSE_MEDIUM, 2),
@@ -289,7 +398,8 @@ class SettlementPlanner(val settlement: Settlement) {
         val isCritical = type == VanillaBuildingType.FARM ||
                 type == VanillaBuildingType.SHEPHERD ||
                 type == VanillaBuildingType.TOWN_HALL ||
-                type == VanillaBuildingType.TEMPLE
+                type == VanillaBuildingType.TEMPLE ||
+                type == VanillaBuildingType.MINE
 
         val maxRadius = if (isCritical) 55 else 45
         val minRadius = 15
@@ -426,9 +536,33 @@ class SettlementPlanner(val settlement: Settlement) {
 
             val baseY = maxY
 
+            var excavationCount = 0
+            val totalArea = width * length
+            for (x in -width / 2..width / 2) {
+                for (z in -length / 2..length / 2) {
+                    val absX = cx + x
+                    val absZ = cz + z
+                    val hy = getHighestGroundYAt(world, absX, absZ)
+                    if (hy >= baseY) {
+                        excavationCount++
+                    }
+                }
+            }
+
+            val finalBaseY = if (excavationCount.toDouble() / totalArea > 0.30) {
+                baseY + 1
+            } else {
+                baseY
+            }
+
+            val minX = cx - width / 2
+            val minZ = cz - length / 2
+            val maxX = minX + width
+            val maxZ = minZ + length
+
             val potentialBox = BoundingBox(
-                (cx - width / 2).toDouble(), (baseY - 2).toDouble(), (cz - length / 2).toDouble(),
-                (cx + width / 2).toDouble(), (baseY + buildingHeight).toDouble(), (cz + length / 2).toDouble()
+                minX.toDouble(), (finalBaseY - 2).toDouble(), minZ.toDouble(),
+                maxX.toDouble(), (finalBaseY + buildingHeight).toDouble(), maxZ.toDouble()
             )
 
             val collisionCheckBoundedBox = potentialBox.clone().expand(5.0, 0.0, 5.0)
@@ -439,7 +573,7 @@ class SettlementPlanner(val settlement: Settlement) {
 
             settlement.expandTerritory(15.0)
 
-            val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type, bestRotation)
+            val buildJob = startVanillaStructureConstruction(cx, finalBaseY, cz, type, bestRotation)
 
             val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
             synchronized(queue) {
@@ -464,7 +598,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val rawLength = type.length
         val height = type.height
         val vanillaPath = type.vanillaPath
-        val workstation = type.workstation
 
         val width = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
         val length = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
@@ -504,18 +637,11 @@ class SettlementPlanner(val settlement: Settlement) {
         val halfW = width / 2 + 1
         val halfL = length / 2 + 1
 
-        // Переменная для сохранения высоты центральной линии дороги на предыдущем шаге
         var prevCenterRoadY: Int? = null
 
         while (true) {
-            // Линию Bresenham мы трассируем до упора, но установку блоков фильтруем ниже
-
-            // Вычисляем естественную высоту центра дороги в текущей итерации
             val naturalCenterY = getHighestGroundYAt(world, currentX, currentZ)
 
-            // ИСПРАВЛЕНО: Сглаживание продольного уклона.
-            // Ограничиваем шаг подъема или спуска максимум на 1 блок относительно предыдущей точки дороги.
-            // Это сглаживает крутые обрывы в плавные террасы.
             val centerRoadY = if (prevCenterRoadY == null) {
                 naturalCenterY
             } else {
@@ -531,10 +657,8 @@ class SettlementPlanner(val settlement: Settlement) {
 
                     if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
 
-                    // Защищаем стены повёрнутых зданий от боковых блоков дороги
                     if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
 
-                    // Глобальная защита от гриферства дорогами
                     val isInsideAnyBuilding = records.any { record ->
                         val box = record.box
                         px >= (box.minX - 1.0) && px <= (box.maxX + 1.0) &&
@@ -542,26 +666,19 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
                     if (isInsideAnyBuilding) continue
 
-                    // Естественная высота ландшафта в конкретной точке (px, pz)
                     val naturalBlockY = getHighestGroundYAt(world, px, pz)
                     val currentBlock = world.getBlockAt(px, centerRoadY, pz)
 
-                    // ИСПРАВЛЕНО: Поперечное выравнивание (Brush Flattening) и терраформирование.
-                    // Высота всего полотна дороги (включая края) строго привязывается к centerRoadY.
-
-                    // 1. Врезка в холм: если ландшафт выше полотна дороги — срезаем блоки в воздух на высоту до 3 блоков
                     val clearStart = centerRoadY + 1
                     val clearEnd = maxOf(naturalBlockY, centerRoadY + 3)
                     for (y in clearStart..clearEnd) {
                         buildJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
                     }
 
-                    // 2. Засыпка пустот: если ландшафт ниже полотна дороги — досыпаем прочный земляной фундамент
                     for (y in naturalBlockY until centerRoadY) {
                         buildJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
                     }
 
-                    // 3. Установка самого полотна дороги на ровный сглаженный уровень
                     if (currentBlock.isLiquid) {
                         buildJob.addBlock(BlockPos(px, centerRoadY, pz), cobbleData, isRoad = true)
                     } else {
@@ -620,7 +737,8 @@ class SettlementPlanner(val settlement: Settlement) {
             buildJob.addBlock(absPos, rotData, isRoad = false)
         }
 
-        buildJob.addBlock(BlockPos(cx, baseY + 1, cz), workstation.createBlockData(), isRoad = false)
+        // === ИСПРАВЛЕНО: Установка рабочей станции полностью удалена, так как все станции
+        // (включая SMITHING_TABLE шахты) генерируются из блоков самих схем/процедурного кода.
 
         val citizens = settlement.villagers.mapNotNull {
             (it as? CraftVillager)?.handle as? HumanoidVillager

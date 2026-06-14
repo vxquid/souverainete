@@ -11,8 +11,7 @@ enum class VanillaBuildingType(
     val workstation: Material,
     val displayName: String
 ) {
-    // Ратуша-собор (plains_temple_3) со станцией-колоколом (BELL) вместо стойки для зелий
-    TOWN_HALL("TOWN_HALL", "village/plains/houses/plains_temple_3", 11, 11, 12, Material.BELL, "Town Hall"),
+    TOWN_HALL("TOWN_HALL", "village/plains/houses/plains_temple_3", 11, 11, 12, Material.BREWING_STAND, "Town Hall"),
 
     BLACKSMITH("BLACKSMITH", "village/plains/houses/plains_weaponsmith_1", 10, 10, 6, Material.BLAST_FURNACE, "Blacksmith Shop"),
     BAKERY("BAKERY", "village/plains/houses/plains_butcher_shop_1", 9, 9, 6, Material.SMOKER, "Bakery"),
@@ -24,12 +23,14 @@ enum class VanillaBuildingType(
     HOUSE_SMALL("HOUSE_SMALL", "village/plains/houses/plains_small_house_1", 7, 7, 5, Material.CRAFTING_TABLE, "Small House"),
     HOUSE_MEDIUM("HOUSE_MEDIUM", "village/plains/houses/plains_medium_house_1", 9, 9, 6, Material.CRAFTING_TABLE, "Medium House"),
 
-    // НОВЫЕ ДЕКОРАТИВНЫЕ И ИНФРАСТРУКТУРНЫЕ ПОСТРОЙКИ
     STABLE("STABLE", "village/plains/houses/plains_stable_1", 7, 7, 5, Material.HAY_BLOCK, "Stables"),
     ANIMAL_PEN("ANIMAL_PEN", "village/plains/houses/plains_animal_pen_1", 9, 9, 4, Material.OAK_FENCE, "Animal Pen"),
     LAMP("LAMP", "village/plains/plains_lamp_1", 3, 3, 4, Material.OAK_FENCE, "Street Lamp"),
     MEETING_POINT("MEETING_POINT", "village/plains/town_centers/plains_meeting_point_2", 6, 6, 5, Material.BELL, "Gathering Place"),
-    CARTOGRAPHER("CARTOGRAPHER", "village/plains/houses/plains_cartographer_1", 9, 9, 6, Material.CARTOGRAPHY_TABLE, "Cartographer House");
+    CARTOGRAPHER("CARTOGRAPHER", "village/plains/houses/plains_cartographer_1", 9, 9, 6, Material.CARTOGRAPHY_TABLE, "Cartographer House"),
+
+    // НОВАЯ СТРУКТУРА: Карьер-шахта (custom-генерация)
+    MINE("MINE", "custom/mine", 7, 7, 6, Material.SMITHING_TABLE, "Stone Quarry");
 
     companion object {
         fun byTypeName(name: String): VanillaBuildingType? {

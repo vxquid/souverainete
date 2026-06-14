@@ -88,7 +88,7 @@ class Souverainete : JavaPlugin(), Listener {
         // --- УСТАНОВКА МЕТРИК BSTATS ---
         val metrics = Metrics(this, 27976)
 
-        // 1. Наиболее используемый ИИ провайдер (Твой запрос)
+        // 1. Наиболее используемый ИИ провайдер
         metrics.addCustomChart(Metrics.SimplePie("ai_provider") {
             providerManager.config.providerType.name
         })
@@ -98,31 +98,31 @@ class Souverainete : JavaPlugin(), Listener {
             providerManager.config.language
         })
 
-        // 3. Формат диалогов (Интересно узнать, любят ли игроки голограммы или классический чат)
+        // 3. Формат диалогов
         metrics.addCustomChart(Metrics.SimplePie("dialogue_format") {
             if (::gameplayManager.isInitialized) gameplayManager.config.dialogue.dialogueFormat.name else "Unknown"
         })
 
-        // 4. Стратегия смерти компаньонов (Покажет, насколько хардкорны сервера: FATALISM, RESPAWN или KNOCKOUT)
+        // 4. Стратегия смерти компаньонов
         metrics.addCustomChart(Metrics.SimplePie("death_strategy") {
             if (::gameplayManager.isInitialized) gameplayManager.config.party.deathHandleStrategy else "Unknown"
         })
 
-        // 5. Статус кастомных скинов (Используют ли люди гуманоидных NPC или играют с ванильными жителями)
+        // 5. Статус кастомных скинов
         metrics.addCustomChart(Metrics.SimplePie("humanoid_npcs") {
             if (::gameplayManager.isInitialized) {
                 if (gameplayManager.config.humanoid.humanoidVillagers) "Enabled" else "Disabled"
             } else "Unknown"
         })
 
-        // 6. Статус ванильной торговли (Включен ли детерминизм/ванильная экономика)
+        // 6. Статус ванильной торговли
         metrics.addCustomChart(Metrics.SimplePie("vanilla_trading") {
             if (::gameplayManager.isInitialized) {
                 if (gameplayManager.config.general.vanillaTrading) "Enabled" else "Disabled"
             } else "Unknown"
         })
 
-        // 7. Общее количество поселений на сервере (График-линия, показывает масштаб использования плагина)
+        // 7. Общее количество поселений на сервере
         metrics.addCustomChart(Metrics.SingleLineChart("total_settlements") {
             if (::gameplayManager.isInitialized) {
                 settlements.values.sumOf { it.size }
@@ -148,6 +148,9 @@ class Souverainete : JavaPlugin(), Listener {
     override fun onDisable() {
         gameplayManager.allowedWorlds.forEach { world ->
             world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.STRING, gson.toJson(settlements[world]?.map { it.data }))
+
+            // ИСПРАВЛЕНО: Безопасно сохраняем всю разметку, очереди и активные сессии планировщика для каждого мира
+            SettlementPlanner.saveBuildingsToWorld(world)
         }
         Bukkit.getWorlds().getOrNull(0)?.persistentDataContainer?.set(
             NamespacedKey(this, "ActualQuests"),
@@ -155,7 +158,6 @@ class Souverainete : JavaPlugin(), Listener {
             gameplayManager.actualQuests.toLongArray()
         )
         gameplayManager.raidManager.disable()
-        BuildJobManager.saveJobsToWorld()
     }
 
     @EventHandler
@@ -168,7 +170,7 @@ class Souverainete : JavaPlugin(), Listener {
             commandManager.registerCommand(QuestCommand())
             commandManager.registerCommand(TranslateCommand())
             commandManager.registerCommand(SettlementCommand())
-            commandManager.registerCommand(SettingsCommand()) // Register the new command
+            commandManager.registerCommand(SettingsCommand())
 
             // Register GUI listener
             server.pluginManager.registerEvents(SettingsGUIListener(), this)

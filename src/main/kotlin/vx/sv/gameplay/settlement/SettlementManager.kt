@@ -25,6 +25,7 @@ import vx.sv.gameplay.humanoid.race.RaceManager.Race
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
+import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
 import vx.sv.nms.v1_21_R7.entity.ai.construct.VanillaBuildingType
 import vx.sv.persistent.LivingEntityExtend.settlement
@@ -91,7 +92,6 @@ class SettlementManager : Listener {
             sendReputationActionBar(player, activeSettlement)
 
             // === ЛОГИКА БОССБАРА ЗДАНИЙ ===
-            // ИСПРАВЛЕНО: Теперь поиск зданий выполняется по UUID (activeSettlement.data.id)
             val buildings = SettlementPlanner.buildings[activeSettlement.data.id] ?: emptyList()
             // Проверяем, находится ли игрок внутри BoundingBox какого-либо здания
             val currentBuilding = buildings.find { it.box.contains(playerLocationVector) }
@@ -169,14 +169,71 @@ class SettlementManager : Listener {
                     }
 
                     // === АВТОМАТИЧЕСКИЙ РОСТ ПОСЕЛЕНИЯ ВО ВРЕМЕНИ ===
-                    // Каждые несколько минут планировщик пытается запустить следующую постройку по приоритету.
-                    // По мере завершения прошлых домов и расширения территории новые здания будут автоматически
-                    // находить свободные места и ставиться в очередь строительства для жителей.
                     val planner = SettlementPlanner(settlement)
                     val success = planner.planNextPriorityBuilding()
                     if (success) {
                         plugin.logger.info("[Souverainete] Поселение ${settlement.data.settlementName} расширилось и запланировало новое здание!")
                         saveSettlements(world)
+                    }
+
+                    // === ИСПРАВЛЕНО: ФОРСИРОВАННЫЙ ТИКЕР ДОЛЖНОСТЕЙ ===
+                    val villagers = settlement.villagers.filter { it.isValid }
+                    val plannedBuildings = SettlementPlanner.buildings[settlement.data.id] ?: emptyList()
+                    val craftWorld = world as? org.bukkit.craftbukkit.CraftWorld
+                    val serverLevel = craftWorld?.handle
+
+                    if (serverLevel != null) {
+                        // 1. Шахтер (кузнец-инструментальщик SMITHING_TABLE)
+                        val hasMine = plannedBuildings.any { it.type.startsWith("MINE") }
+                        if (hasMine) {
+                            val hasMiner = villagers.any { it.profession == Villager.Profession.TOOLSMITH }
+                            if (!hasMiner) {
+                                val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
+                                if (freeVillager != null) {
+                                    freeVillager.profession = Villager.Profession.TOOLSMITH
+                                    freeVillager.villagerLevel = 1
+
+                                    val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
+                                    nms?.refreshBrain(serverLevel)
+                                    plugin.logger.info("[Souverainete] Назначен новый принудительный Шахтёр в поселении ${settlement.data.settlementName}!")
+                                }
+                            }
+                        }
+
+                        // 2. Пастух (SHEPHERD)
+                        val hasShepherdCot = plannedBuildings.any { it.type.startsWith("SHEPHERD") }
+                        if (hasShepherdCot) {
+                            val hasShepherd = villagers.any { it.profession == Villager.Profession.SHEPHERD }
+                            if (!hasShepherd) {
+                                val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
+                                if (freeVillager != null) {
+                                    freeVillager.profession = Villager.Profession.SHEPHERD
+                                    freeVillager.villagerLevel = 1
+
+                                    val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
+                                    nms?.refreshBrain(serverLevel)
+                                    plugin.logger.info("[Souverainete] Назначен новый принудительный Пастух в поселении ${settlement.data.settlementName}!")
+                                }
+                            }
+                        }
+
+                        // 3. Фермеры (FARMER, максимум 2 на 2 фермы)
+                        val farmCount = plannedBuildings.count { it.type.startsWith("FARM") }
+                        if (farmCount > 0) {
+                            val currentFarmers = villagers.count { it.profession == Villager.Profession.FARMER }
+                            val maxFarmers = farmCount.coerceAtMost(2)
+                            if (currentFarmers < maxFarmers) {
+                                val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
+                                if (freeVillager != null) {
+                                    freeVillager.profession = Villager.Profession.FARMER
+                                    freeVillager.villagerLevel = 1
+
+                                    val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
+                                    nms?.refreshBrain(serverLevel)
+                                    plugin.logger.info("[Souverainete] Назначен новый принудительный Фермер в поселении ${settlement.data.settlementName}!")
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -326,10 +383,28 @@ class SettlementManager : Listener {
     }
 
     private fun loadSettlements(world: World) {
-        val rawJson = world.persistentDataContainer.get(settlementsWorldKey, PersistentDataType.STRING) ?: return
+        val pdc = world.persistentDataContainer
+
+        // ИСПРАВЛЕНО: Безопасное сжатое считывание списка поселений во избежание лимита NBT String (64 КБ)
+        val json = if (pdc.has(settlementsWorldKey, PersistentDataType.BYTE_ARRAY)) {
+            val compressedBytes = pdc.get(settlementsWorldKey, PersistentDataType.BYTE_ARRAY) ?: return
+            SettlementPlanner.decompress(compressedBytes)
+        } else if (pdc.has(settlementsWorldKey, PersistentDataType.STRING)) {
+            val legacyJson = pdc.get(settlementsWorldKey, PersistentDataType.STRING) ?: return
+
+            // Пережимаем в GZIP байты и обновляем тип в PDC
+            val compressedBytes = SettlementPlanner.compress(legacyJson)
+            pdc.set(settlementsWorldKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+            pdc.remove(settlementsWorldKey)
+
+            legacyJson
+        } else {
+            return
+        }
+
         val typeToken = object : TypeToken<List<Settlement.SettlementData>>() {}.type
         try {
-            val loadedData: List<Settlement.SettlementData>? = gson.fromJson(rawJson, typeToken)
+            val loadedData: List<Settlement.SettlementData>? = gson.fromJson(json, typeToken)
             loadedData?.forEach { data ->
                 settlements.getOrPut(world) { mutableListOf() }.add(Settlement(data))
             }
@@ -422,7 +497,11 @@ class SettlementManager : Listener {
 
         fun saveSettlements(world: World) {
             val data = settlements[world]?.map { it.data } ?: return
-            world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.STRING, gson.toJson(data))
+            val json = gson.toJson(data)
+
+            // ИСПРАВЛЕНО: Сжимаем JSON поселений в GZIP массив во избежание лимитов NBT String
+            val compressedBytes = SettlementPlanner.compress(json)
+            world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
 
             // Нативное сохранение 3D разметки зданий при сохранении мира
             SettlementPlanner.saveBuildingsToWorld(world)
