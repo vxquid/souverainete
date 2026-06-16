@@ -8,7 +8,6 @@ import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import java.util.*
 
 class SchematicBuildJob(val world: World) {
-    // Изменяемый UUID задачи для восстановления сессии после перезапуска
     var jobId: UUID = UUID.randomUUID()
 
     private val blocksMap = mutableMapOf<BlockPos, BlockToPlace>()
@@ -35,8 +34,10 @@ class SchematicBuildJob(val world: World) {
     fun getBlocks(): List<BlockToPlace> {
         synchronized(lock) {
             if (sortedBlocksCache == null) {
+                // ИСПРАВЛЕНО: Теперь isRoad = true строится в самую первую очередь!
+                // Жители сначала прокладывают инфраструктуру, а уже затем возводят здание.
                 sortedBlocksCache = blocksMap.values.sortedWith(
-                    compareBy<BlockToPlace> { it.isRoad }
+                    compareBy<BlockToPlace> { !it.isRoad }
                         .thenBy { it.pos.y }
                         .thenBy { getPlacementPriority(it.blockData.material) }
                 )

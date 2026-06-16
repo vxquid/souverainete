@@ -314,7 +314,7 @@ class SettlementPlanner(val settlement: Settlement) {
                     val hy = getHighestGroundYAt(world, cx + x, cz + z)
                     val groundBlock = world.getBlockAt(cx + x, hy, cz + z)
                     val type = groundBlock.type
-                    if (type.isSolid) {
+                    if (type.isSolid && !type.name.contains("LEAVES") && !type.name.contains("LOG") && !type.name.contains("WOOD")) {
                         materialCounts[type] = (materialCounts[type] ?: 0) + 1
                     }
                 }
@@ -415,10 +415,15 @@ class SettlementPlanner(val settlement: Settlement) {
     fun planBuilding(type: VanillaBuildingType): Boolean {
         val center = settlement.data.center
 
-        // ИСПРАВЛЕНО: Глобальное смягчение лимитов и значительное расширение радиусов поиска
-        val maxRadius = 120 // Значительно увеличен радиус для разрастания города
-        val minRadius = 15
-        val maxAttempts = 1500 // 1500 попыток гарантируют нахождение площадки даже в горах
+        val isCritical = type == VanillaBuildingType.FARM ||
+                type == VanillaBuildingType.SHEPHERD ||
+                type == VanillaBuildingType.TOWN_HALL ||
+                type == VanillaBuildingType.TEMPLE ||
+                type == VanillaBuildingType.MINE
+
+        val maxRadius = if (isCritical) 120 else 80
+        val minRadius = if (isCritical) 20 else 15
+        val maxAttempts = if (isCritical) 1500 else 800
 
         val rawWidth = type.width
         val rawLength = type.length
@@ -427,13 +432,13 @@ class SettlementPlanner(val settlement: Settlement) {
         val rand = Random()
         val recordsList = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
 
-        val jigsawPos = VanillaStructureLoader.getRawEntranceCandidates(type.vanillaPath)
-        val entrancePos = if (jigsawPos.isNotEmpty()) {
+        val entranceCandidates = VanillaStructureLoader.getRawEntranceCandidates(type.vanillaPath)
+        val entrancePos = if (entranceCandidates.isNotEmpty()) {
             var totalWeight = 0.0
             var sumX = 0.0
             var sumY = 0.0
             var sumZ = 0.0
-            for (cand in jigsawPos) {
+            for (cand in entranceCandidates) {
                 sumX += cand.pos.x * cand.weight
                 sumY += cand.pos.y * cand.weight
                 sumZ += cand.pos.z * cand.weight
@@ -443,6 +448,12 @@ class SettlementPlanner(val settlement: Settlement) {
         } else {
             BlockPos(rawWidth / 2, 0, 0)
         }
+
+        // ИСПРАВЛЕНО: Вычисляем относительную высоту самой нижней двери/порога в схеме, чтобы позже привязать её к дороге
+        val lowestDoor = entranceCandidates.filter { it.weight == 5.0 }.minByOrNull { it.pos.y }
+        val lowestJigsaw = entranceCandidates.filter { it.weight == 10.0 }.minByOrNull { it.pos.y }
+        val bestYOffsetCandidate = lowestDoor ?: lowestJigsaw ?: entranceCandidates.minByOrNull { it.pos.y }
+        val entranceYOffset = bestYOffsetCandidate?.pos?.y ?: 0
 
         for (attempt in 0..maxAttempts) {
             val angle = rand.nextDouble() * 2 * Math.PI
@@ -473,7 +484,7 @@ class SettlementPlanner(val settlement: Settlement) {
             var bestRotation = StructureRotation.NONE
             var minJigsawDistSq = Double.MAX_VALUE
 
-            for (rot in StructureRotation.entries) {
+            for (rot in StructureRotation.values()) {
                 val rotJigsaw = rotateCoords(entrancePos, rot, rawWidth, rawLength)
                 val rotWidth = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
                 val rotLength = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
@@ -493,11 +504,64 @@ class SettlementPlanner(val settlement: Settlement) {
 
             val width = if (bestRotation == StructureRotation.CLOCKWISE_90 || bestRotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
             val length = if (bestRotation == StructureRotation.CLOCKWISE_90 || bestRotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
+            val halfW = width / 2 + 1
+            val halfL = length / 2 + 1
+
+            // === ИСПРАВЛЕНО: Виртуальная трассировка будущей дороги для расчета финальной высоты порога ===
+            var simX = targetX
+            var simZ = targetZ
+            val simDX = abs(cx - simX)
+            val simDZ = abs(cz - simZ)
+            val simSX = if (simX < cx) 1 else -1
+            val simSZ = if (simZ < cz) 1 else -1
+            var simErr = simDX - simDZ
+
+            var simPrevY: Int? = null
+            var finalRoadY = center.blockY
+            var pathValid = true
+
+            while (true) {
+                // Если дорога уперлась в границу (буфер) здания — запоминаем её итоговую высоту в этой точке
+                if (abs(simX - cx) <= halfW && abs(simZ - cz) <= halfL) {
+                    finalRoadY = simPrevY ?: getHighestGroundYAt(world, simX, simZ)
+                    break
+                }
+
+                val natY = getHighestGroundYAt(world, simX, simZ)
+                val surY = world.getHighestBlockYAt(simX, simZ)
+                val isWater = world.getBlockAt(simX, surY, simZ).type == Material.WATER
+
+                val curY = if (isWater) {
+                    simPrevY ?: natY
+                } else {
+                    if (simPrevY == null) natY else simPrevY + (natY - simPrevY).coerceIn(-1, 1)
+                }
+                simPrevY = curY
+
+                if (abs(curY - center.blockY) > 30) {
+                    pathValid = false
+                    break
+                }
+
+                if (simX == cx && simZ == cz) {
+                    finalRoadY = curY
+                    break
+                }
+
+                val e2 = 2 * simErr
+                if (e2 > -simDZ) { simErr -= simDZ; simX += simSX }
+                if (e2 < simDX) { simErr += simDX; simZ += simSZ }
+            }
+
+            if (!pathValid) continue
+
+            // === ИСПРАВЛЕНО: Здание строится так, чтобы его порог/дверь была ровно на 1 блок выше законченной дороги ===
+            val finalBaseY = finalRoadY + 1 - entranceYOffset
 
             var minY = Int.MAX_VALUE
             var maxY = Int.MIN_VALUE
-            var sumY = 0
             var validTerrain = true
+            var floatingCount = 0
 
             for (x in -width / 2..width / 2) {
                 for (z in -length / 2..length / 2) {
@@ -512,7 +576,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
 
                     val highestY = world.getHighestBlockYAt(absX, absZ)
-
                     if (abs(highestY - center.blockY) > 30) {
                         validTerrain = false
                         break
@@ -525,8 +588,8 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
 
                     val hy = getHighestGroundYAt(world, absX, absZ)
-                    sumY += hy
 
+                    if (hy < finalBaseY) floatingCount++
                     if (hy < minY) minY = hy
                     if (hy > maxY) maxY = hy
                 }
@@ -535,61 +598,11 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (!validTerrain) continue
 
-            // ИСПРАВЛЕНО: Смягчен лимит перепада высот. До 12 блоков разницы.
-            // Здания могут строиться на склонах холмов благодаря свайному фундаменту.
-            val maxAllowedVariance = 12
+            val maxAllowedVariance = if (isCritical) 12 else 8
             if (maxY - minY > maxAllowedVariance) continue
 
-            // ИСПРАВЛЕНО: Здания могут находиться до 30 блоков выше/ниже центра деревни.
-            if (abs(maxY - center.blockY) > 30) continue
-
-            var pathValid = true
-            var px = center.blockX
-            var pz = center.blockZ
-            val dX = abs(cx - px)
-            val dZ = abs(cz - pz)
-            val sX = if (px < cx) 1 else -1
-            val sZ = if (pz < cz) 1 else -1
-            var err = dX - dZ
-
-            while (true) {
-                val hy = getHighestGroundYAt(world, px, pz)
-
-                // ИСПРАВЛЕНО: Дороги больше не отменяют постройку, если они идут в гору или с горы (допуск 30 блоков).
-                if (abs(hy - center.blockY) > 30) {
-                    pathValid = false
-                    break
-                }
-
-                if (px == cx && pz == cz) break
-                val e2 = 2 * err
-                if (e2 > -dZ) { err -= dZ; px += sX }
-                if (e2 < dX) { err += dX; pz += sZ }
-            }
-
-            if (!pathValid) continue
-
-            val averageY = if (width * length > 0) sumY / (width * length) else maxY
-            val baseY = averageY
-
-            var excavationCount = 0
             val totalArea = width * length
-            for (x in -width / 2..width / 2) {
-                for (z in -length / 2..length / 2) {
-                    val absX = cx + x
-                    val absZ = cz + z
-                    val hy = getHighestGroundYAt(world, absX, absZ)
-                    if (hy >= baseY) {
-                        excavationCount++
-                    }
-                }
-            }
-
-            val finalBaseY = if (excavationCount.toDouble() / totalArea > 0.30) {
-                baseY + 1
-            } else {
-                baseY
-            }
+            if (floatingCount.toDouble() / totalArea > 0.35) continue
 
             val minX = cx - width / 2
             val minZ = cz - length / 2
@@ -677,6 +690,10 @@ class SettlementPlanner(val settlement: Settlement) {
         var prevCenterRoadY: Int? = null
 
         while (true) {
+            if (abs(currentX - cx) <= halfW && abs(currentZ - cz) <= halfL) {
+                break
+            }
+
             val naturalCenterY = getHighestGroundYAt(world, currentX, currentZ)
 
             val surfaceY = world.getHighestBlockYAt(currentX, currentZ)
