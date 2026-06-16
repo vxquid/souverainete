@@ -33,7 +33,6 @@ data class BuildingSaveData(
     val maxX: Double, val maxY: Double, val maxZ: Double
 )
 
-// === НОВЫЕ DTO-СТРУКТУРЫ ДЛЯ СЕРИАЛИЗАЦИИ ПРОГРЕССА ===
 data class BlockSaveData(
     val x: Int, val y: Int, val z: Int,
     val blockDataStr: String,
@@ -285,7 +284,7 @@ class SettlementPlanner(val settlement: Settlement) {
                         activeJobs.remove(settlementId)
                     }
 
-                    val queue = pendingJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
+                    val queue = pendingJobs[settlementId] ?: return@forEach
                     queue.clear()
                     data.pendingJobs.forEach { jobSave ->
                         queue.offer(deserializeJob(world, jobSave))
@@ -306,6 +305,28 @@ class SettlementPlanner(val settlement: Settlement) {
                 StructureRotation.COUNTERCLOCKWISE_90 -> BlockPos(pos.z, pos.y, width - 1 - pos.x)
             }
         }
+
+        fun getDominantGroundMaterialAt(world: World, cx: Int, cz: Int, width: Int, length: Int): Material {
+            val materialCounts = mutableMapOf<Material, Int>()
+
+            for (x in -width / 2..width / 2) {
+                for (z in -length / 2..length / 2) {
+                    val hy = getHighestGroundYAt(world, cx + x, cz + z)
+                    val groundBlock = world.getBlockAt(cx + x, hy, cz + z)
+                    val type = groundBlock.type
+                    if (type.isSolid) {
+                        materialCounts[type] = (materialCounts[type] ?: 0) + 1
+                    }
+                }
+            }
+
+            val dominant = materialCounts.maxByOrNull { it.value }?.key ?: Material.COBBLESTONE
+            return when (dominant) {
+                Material.GRASS_BLOCK, Material.DIRT_PATH, Material.MYCELIUM, Material.PODZOL -> Material.DIRT
+                Material.SAND, Material.RED_SAND, Material.SANDSTONE -> dominant
+                else -> if (dominant.isSolid) dominant else Material.COBBLESTONE
+            }
+        }
     }
 
     init {
@@ -316,7 +337,6 @@ class SettlementPlanner(val settlement: Settlement) {
         )
         val list = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
 
-        // ИСПРАВЛЕНО: Бронируем место под MEETING_POINT (беседку), а не TOWN_HALL (собор)
         if (list.none { it.type == "MEETING_POINT" }) {
             list.add(BuildingRecord("MEETING_POINT", thBox))
         }
@@ -329,7 +349,8 @@ class SettlementPlanner(val settlement: Settlement) {
         val type = VanillaBuildingType.MEETING_POINT
         val baseY = center.blockY
 
-        val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type, StructureRotation.NONE)
+        val foundationMaterial = getDominantGroundMaterialAt(world, cx, cz, type.width, type.length)
+        val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type, StructureRotation.NONE, foundationMaterial)
 
         val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
         synchronized(queue) {
@@ -394,15 +415,10 @@ class SettlementPlanner(val settlement: Settlement) {
     fun planBuilding(type: VanillaBuildingType): Boolean {
         val center = settlement.data.center
 
-        val isCritical = type == VanillaBuildingType.FARM ||
-                type == VanillaBuildingType.SHEPHERD ||
-                type == VanillaBuildingType.TOWN_HALL ||
-                type == VanillaBuildingType.TEMPLE ||
-                type == VanillaBuildingType.MINE
-
-        val maxRadius = if (isCritical) 55 else 45
+        // ИСПРАВЛЕНО: Глобальное смягчение лимитов и значительное расширение радиусов поиска
+        val maxRadius = 120 // Значительно увеличен радиус для разрастания города
         val minRadius = 15
-        val maxAttempts = if (isCritical) 500 else 250
+        val maxAttempts = 1500 // 1500 попыток гарантируют нахождение площадки даже в горах
 
         val rawWidth = type.width
         val rawLength = type.length
@@ -457,7 +473,7 @@ class SettlementPlanner(val settlement: Settlement) {
             var bestRotation = StructureRotation.NONE
             var minJigsawDistSq = Double.MAX_VALUE
 
-            for (rot in StructureRotation.values()) {
+            for (rot in StructureRotation.entries) {
                 val rotJigsaw = rotateCoords(entrancePos, rot, rawWidth, rawLength)
                 val rotWidth = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
                 val rotLength = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
@@ -480,6 +496,7 @@ class SettlementPlanner(val settlement: Settlement) {
 
             var minY = Int.MAX_VALUE
             var maxY = Int.MIN_VALUE
+            var sumY = 0
             var validTerrain = true
 
             for (x in -width / 2..width / 2) {
@@ -487,7 +504,20 @@ class SettlementPlanner(val settlement: Settlement) {
                     val absX = cx + x
                     val absZ = cz + z
 
+                    val chunkX = absX shr 4
+                    val chunkZ = absZ shr 4
+                    if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                        validTerrain = false
+                        break
+                    }
+
                     val highestY = world.getHighestBlockYAt(absX, absZ)
+
+                    if (abs(highestY - center.blockY) > 30) {
+                        validTerrain = false
+                        break
+                    }
+
                     val surfaceBlockType = world.getBlockAt(absX, highestY, absZ).type
                     if (surfaceBlockType == Material.WATER || surfaceBlockType == Material.LAVA || surfaceBlockType.name.contains("ICE")) {
                         validTerrain = false
@@ -495,6 +525,8 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
 
                     val hy = getHighestGroundYAt(world, absX, absZ)
+                    sumY += hy
+
                     if (hy < minY) minY = hy
                     if (hy > maxY) maxY = hy
                 }
@@ -503,12 +535,13 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (!validTerrain) continue
 
-            // ИСПРАВЛЕНО: Смягчены лимиты (максимальный перепад на пятне фундамента = 9 блоков)
-            val maxAllowedVariance = if (isCritical) 9 else 5
+            // ИСПРАВЛЕНО: Смягчен лимит перепада высот. До 12 блоков разницы.
+            // Здания могут строиться на склонах холмов благодаря свайному фундаменту.
+            val maxAllowedVariance = 12
             if (maxY - minY > maxAllowedVariance) continue
 
-            // ИСПРАВЛЕНО: Здание может быть на 15 блоков выше/ниже ратуши по холмам
-            if (abs(maxY - center.blockY) > 15) continue
+            // ИСПРАВЛЕНО: Здания могут находиться до 30 блоков выше/ниже центра деревни.
+            if (abs(maxY - center.blockY) > 30) continue
 
             var pathValid = true
             var px = center.blockX
@@ -522,7 +555,8 @@ class SettlementPlanner(val settlement: Settlement) {
             while (true) {
                 val hy = getHighestGroundYAt(world, px, pz)
 
-                if (abs(hy - center.blockY) > 9) {
+                // ИСПРАВЛЕНО: Дороги больше не отменяют постройку, если они идут в гору или с горы (допуск 30 блоков).
+                if (abs(hy - center.blockY) > 30) {
                     pathValid = false
                     break
                 }
@@ -535,7 +569,8 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (!pathValid) continue
 
-            val baseY = maxY
+            val averageY = if (width * length > 0) sumY / (width * length) else maxY
+            val baseY = averageY
 
             var excavationCount = 0
             val totalArea = width * length
@@ -574,7 +609,9 @@ class SettlementPlanner(val settlement: Settlement) {
 
             settlement.expandTerritory(15.0)
 
-            val buildJob = startVanillaStructureConstruction(cx, finalBaseY, cz, type, bestRotation)
+            val foundationMaterial = getDominantGroundMaterialAt(world, cx, cz, width, length)
+
+            val buildJob = startVanillaStructureConstruction(cx, finalBaseY, cz, type, bestRotation, foundationMaterial)
 
             val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
             synchronized(queue) {
@@ -583,14 +620,14 @@ class SettlementPlanner(val settlement: Settlement) {
             return true
         }
 
-        plugin.logger.warning("Не удалось найти безопасное место для здания ${type.displayName} в поселении ${settlement.data.settlementName}.")
         return false
     }
 
     private fun startVanillaStructureConstruction(
         cx: Int, baseY: Int, cz: Int,
         type: VanillaBuildingType,
-        rotation: StructureRotation
+        rotation: StructureRotation,
+        foundationMaterial: Material
     ): SchematicBuildJob {
         val buildJob = SchematicBuildJob(world)
         val center = settlement.data.center
@@ -682,6 +719,10 @@ class SettlementPlanner(val settlement: Settlement) {
                         buildJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
                     }
 
+                    for (y in naturalBlockY until centerRoadY) {
+                        buildJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
+                    }
+
                     if (isWaterAtCenter) {
                         val isRoadEdge = if (abs(dX) > abs(dZ)) abs(wz) == 1 else abs(wx) == 1
 
@@ -722,6 +763,8 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
+        val foundationData = foundationMaterial.createBlockData()
+
         for (x in 0 until width) {
             for (z in 0 until length) {
                 val absX = cx - width / 2 + x
@@ -736,7 +779,7 @@ class SettlementPlanner(val settlement: Settlement) {
                 }
 
                 for (y in highest + 1 until baseY) {
-                    buildJob.addBlock(BlockPos(absX, y, absZ), cobbleData, isRoad = false)
+                    buildJob.addBlock(BlockPos(absX, y, absZ), foundationData, isRoad = false)
                 }
             }
         }

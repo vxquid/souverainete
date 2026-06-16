@@ -38,7 +38,6 @@ class SettlementManager : Listener {
     private val config = plugin.gameplayManager.config.settlement
     private val repConfig = plugin.gameplayManager.config.reputation
 
-    // Хранилище активных боссбаров для зданий по UUID игроков
     private val buildingBossBars = ConcurrentHashMap<UUID, BossBar>()
 
     init {
@@ -49,7 +48,6 @@ class SettlementManager : Listener {
         settlements[world] = mutableListOf()
         this.loadSettlements(world)
 
-        // Восстанавливаем 3D разметку всех спланированных зданий из базы данных
         SettlementPlanner.loadBuildingsFromWorld(world)
 
         val worldSettlements = settlements[world] ?: emptyList()
@@ -91,9 +89,7 @@ class SettlementManager : Listener {
 
             sendReputationActionBar(player, activeSettlement)
 
-            // === ЛОГИКА БОССБАРА ЗДАНИЙ ===
             val buildings = SettlementPlanner.buildings[activeSettlement.data.id] ?: emptyList()
-            // Проверяем, находится ли игрок внутри BoundingBox какого-либо здания
             val currentBuilding = buildings.find { it.box.contains(playerLocationVector) }
 
             if (currentBuilding != null) {
@@ -103,7 +99,6 @@ class SettlementManager : Listener {
                     newBar
                 }
 
-                // Извлекаем красивое название типа здания (если не найдено — форматируем raw строку)
                 val buildingEnum = VanillaBuildingType.byTypeName(currentBuilding.type)
                 val displayName = buildingEnum?.displayName ?: currentBuilding.type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
 
@@ -113,7 +108,6 @@ class SettlementManager : Listener {
             }
 
         } else {
-            // Если игрок вышел из поселения
             buildingBossBars.remove(player.uniqueId)?.let { player.hideBossBar(it) }
 
             if (lastSettlementName != null) {
@@ -168,7 +162,6 @@ class SettlementManager : Listener {
                         saveSettlements(world)
                     }
 
-                    // === АВТОМАТИЧЕСКИЙ РОСТ ПОСЕЛЕНИЯ ВО ВРЕМЕНИ ===
                     val planner = SettlementPlanner(settlement)
                     val success = planner.planNextPriorityBuilding()
                     if (success) {
@@ -176,14 +169,13 @@ class SettlementManager : Listener {
                         saveSettlements(world)
                     }
 
-                    // === ИСПРАВЛЕНО: ФОРСИРОВАННЫЙ ТИКЕР ДОЛЖНОСТЕЙ ===
                     val villagers = settlement.villagers.filter { it.isValid }
                     val plannedBuildings = SettlementPlanner.buildings[settlement.data.id] ?: emptyList()
                     val craftWorld = world as? org.bukkit.craftbukkit.CraftWorld
                     val serverLevel = craftWorld?.handle
 
                     if (serverLevel != null) {
-                        // 1. Шахтер (кузнец-инструментальщик SMITHING_TABLE)
+                        // 1. Шахтер
                         val hasMine = plannedBuildings.any { it.type.startsWith("MINE") }
                         if (hasMine) {
                             val hasMiner = villagers.any { it.profession == Villager.Profession.TOOLSMITH }
@@ -191,7 +183,9 @@ class SettlementManager : Listener {
                                 val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
                                 if (freeVillager != null) {
                                     freeVillager.profession = Villager.Profession.TOOLSMITH
-                                    freeVillager.villagerLevel = 1
+                                    // ИСПРАВЛЕНО: Уровень 2 навсегда закрепляет профессию и предотвращает спам сбросов
+                                    freeVillager.villagerLevel = 2
+                                    freeVillager.villagerExperience = 10
 
                                     val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
                                     nms?.refreshBrain(serverLevel)
@@ -200,7 +194,7 @@ class SettlementManager : Listener {
                             }
                         }
 
-                        // 2. Пастух (SHEPHERD)
+                        // 2. Пастух
                         val hasShepherdCot = plannedBuildings.any { it.type.startsWith("SHEPHERD") }
                         if (hasShepherdCot) {
                             val hasShepherd = villagers.any { it.profession == Villager.Profession.SHEPHERD }
@@ -208,7 +202,8 @@ class SettlementManager : Listener {
                                 val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
                                 if (freeVillager != null) {
                                     freeVillager.profession = Villager.Profession.SHEPHERD
-                                    freeVillager.villagerLevel = 1
+                                    freeVillager.villagerLevel = 2
+                                    freeVillager.villagerExperience = 10
 
                                     val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
                                     nms?.refreshBrain(serverLevel)
@@ -217,7 +212,7 @@ class SettlementManager : Listener {
                             }
                         }
 
-                        // 3. Фермеры (FARMER, максимум 2 на 2 фермы)
+                        // 3. Фермеры
                         val farmCount = plannedBuildings.count { it.type.startsWith("FARM") }
                         if (farmCount > 0) {
                             val currentFarmers = villagers.count { it.profession == Villager.Profession.FARMER }
@@ -226,7 +221,8 @@ class SettlementManager : Listener {
                                 val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
                                 if (freeVillager != null) {
                                     freeVillager.profession = Villager.Profession.FARMER
-                                    freeVillager.villagerLevel = 1
+                                    freeVillager.villagerLevel = 2
+                                    freeVillager.villagerExperience = 10
 
                                     val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
                                     nms?.refreshBrain(serverLevel)
@@ -385,18 +381,14 @@ class SettlementManager : Listener {
     private fun loadSettlements(world: World) {
         val pdc = world.persistentDataContainer
 
-        // ИСПРАВЛЕНО: Безопасное сжатое считывание списка поселений во избежание лимита NBT String (64 КБ)
         val json = if (pdc.has(settlementsWorldKey, PersistentDataType.BYTE_ARRAY)) {
             val compressedBytes = pdc.get(settlementsWorldKey, PersistentDataType.BYTE_ARRAY) ?: return
             SettlementPlanner.decompress(compressedBytes)
         } else if (pdc.has(settlementsWorldKey, PersistentDataType.STRING)) {
             val legacyJson = pdc.get(settlementsWorldKey, PersistentDataType.STRING) ?: return
-
-            // Пережимаем в GZIP байты и обновляем тип в PDC
             val compressedBytes = SettlementPlanner.compress(legacyJson)
             pdc.set(settlementsWorldKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
             pdc.remove(settlementsWorldKey)
-
             legacyJson
         } else {
             return
@@ -499,11 +491,9 @@ class SettlementManager : Listener {
             val data = settlements[world]?.map { it.data } ?: return
             val json = gson.toJson(data)
 
-            // ИСПРАВЛЕНО: Сжимаем JSON поселений в GZIP массив во избежание лимитов NBT String
             val compressedBytes = SettlementPlanner.compress(json)
             world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
 
-            // Нативное сохранение 3D разметки зданий при сохранении мира
             SettlementPlanner.saveBuildingsToWorld(world)
         }
 
@@ -536,23 +526,16 @@ class SettlementManager : Listener {
             }
         }
 
-        /**
-         * Records a diplomatic event between two settlements.
-         * Keeps only the last 5 events to save memory and AI token limits.
-         */
         fun recordDiplomaticEvent(settlementA: Settlement, settlementB: Settlement, event: String) {
             val maxRecords = 5
 
-            // Initialize history if it's missing (backward compatibility with old saves)
             if (settlementA.data.diplomaticHistory == null) settlementA.data.diplomaticHistory = mutableMapOf()
             if (settlementB.data.diplomaticHistory == null) settlementB.data.diplomaticHistory = mutableMapOf()
 
-            // Record history for settlement A
             val historyA = settlementA.data.diplomaticHistory!!.getOrPut(settlementB.data.id) { mutableListOf() }
             historyA.add(event)
             if (historyA.size > maxRecords) historyA.removeAt(0)
 
-            // Record history for settlement B
             val historyB = settlementB.data.diplomaticHistory!!.getOrPut(settlementA.data.id) { mutableListOf() }
             historyB.add(event)
             if (historyB.size > maxRecords) historyB.removeAt(0)

@@ -31,7 +31,7 @@ class ShepherdBehavior(
     200
 ) {
     companion object {
-        // Глобальная потокобезопасная карта резервирования овец: UUID Овцы -> UUID Жителя (Пастуха или Мясника)
+        // Глобальная потокобезопасная карта резервирования овец
         val reservedSheep = ConcurrentHashMap<UUID, UUID>()
 
         fun isSheepFree(sheep: Sheep, villager: HumanoidVillager): Boolean {
@@ -56,12 +56,27 @@ class ShepherdBehavior(
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
-        return bukkitVillager.profession == org.bukkit.entity.Villager.Profession.SHEPHERD && villager.settlement != null
+        if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.SHEPHERD || villager.settlement == null) {
+            return false
+        }
+
+        // ИСПРАВЛЕНО: Пастух работает строго в рабочее время (с 8:00 до 15:00)
+        val timeOfDay = world.world.time
+        if (timeOfDay < 2000 || timeOfDay > 9000) {
+            return false
+        }
+
+        return true
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
-        return bukkitVillager.profession == org.bukkit.entity.Villager.Profession.SHEPHERD && villager.settlement != null
+        if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.SHEPHERD || villager.settlement == null) {
+            return false
+        }
+
+        val timeOfDay = world.world.time
+        return timeOfDay in 2000..9000
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -70,14 +85,33 @@ class ShepherdBehavior(
         val bukkitWorld = world.world
         val npcLoc = villager.bukkitEntity.location
 
-        // 1. ПРОВЕРЯЕМ, ВЕДЕМ ЛИ МЫ УЖЕ ОВЦУ НА ПОВОДКЕ (Высший приоритет)
+        // === АНТИ-ЗАСТРЕВАНИЕ (Stuck Prevention) ===
+        val nmsPos = villager.position()
+        val lastPos = villager.lastPosition
+        if (lastPos != null && lastPos.distanceToSqr(nmsPos) < 0.01) {
+            villager.stuckTicks++
+        } else {
+            villager.stuckTicks = 0
+            villager.lastPosition = nmsPos
+        }
+
+        // 1. ПРОВЕРЯЕМ, ВЕДЕМ ЛИ МЫ УЖЕ ОВЦУ НА ПОВОДКЕ
         val leashedSheep = bukkitWorld.getEntitiesByClass(Sheep::class.java).find {
             it.isLeashed && it.leashHolder == villager.bukkitEntity
         }
 
         if (leashedSheep != null) {
-            // Резервируем ведомую овцу за собой на время пути
             claimSheep(leashedSheep, villager)
+
+            // Если пастух завис на месте с овцой больше 5 секунд — веревка обрывается
+            if (villager.stuckTicks > 100) {
+                leashedSheep.setLeashHolder(null)
+                releaseReservations(villager.uuid)
+                villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                villager.stuckTicks = 0
+                return
+            }
 
             if (leashedSheep.location.distanceSquared(center) <= 36.0) {
                 leashedSheep.setLeashHolder(null)
@@ -104,13 +138,22 @@ class ShepherdBehavior(
             it.location.distanceSquared(npcLoc) <= 2025.0
         }
 
-        // 2. СТРИЖКА ОВЕЦ (Приоритет 2 — Сначала стрижем тех, кто рядом, учитывая резервы)
+        // 2. СТРИЖКА ОВЕЦ (Приоритет 2)
         val sheepToShear = allSheep.find { sheep ->
             sheep.isAdult && !sheep.isSheared && sheep.location.distanceSquared(center) <= 900.0 && isSheepFree(sheep, villager)
         }
 
         if (sheepToShear != null) {
             claimSheep(sheepToShear, villager)
+
+            // Защита от зависания при попытке дойти до овцы
+            if (villager.stuckTicks > 100) {
+                releaseReservations(villager.uuid)
+                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                villager.stuckTicks = 0
+                return
+            }
+
             val distSq = npcLoc.distanceSquared(sheepToShear.location)
             if (distSq <= 4.0) {
                 sheepToShear.isSheared = true
@@ -135,7 +178,7 @@ class ShepherdBehavior(
             return
         }
 
-        // 3. ИЩЕМ СБЕЖАВШУЮ ИЛИ ДИКУЮ ОВЦУ (Приоритет 3 — только свободные овцы)
+        // 3. ИЩЕМ СБЕЖАВШУЮ ИЛИ ДИКУЮ ОВЦУ (Приоритет 3)
         val sheepToHerd = allSheep.find { sheep ->
             val isVillageAnimal = sheep.persistentDataContainer.has(NamespacedKey(plugin, "village_animal"), PersistentDataType.BYTE)
             val needsHerding = if (isVillageAnimal) {
@@ -148,6 +191,14 @@ class ShepherdBehavior(
 
         if (sheepToHerd != null) {
             claimSheep(sheepToHerd, villager)
+
+            if (villager.stuckTicks > 100) {
+                releaseReservations(villager.uuid)
+                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                villager.stuckTicks = 0
+                return
+            }
+
             val distSq = npcLoc.distanceSquared(sheepToHerd.location)
             if (distSq <= 9.0) {
                 sheepToHerd.setLeashHolder(villager.bukkitEntity)
@@ -172,6 +223,14 @@ class ShepherdBehavior(
 
             if (breedingSheep != null) {
                 claimSheep(breedingSheep, villager)
+
+                if (villager.stuckTicks > 100) {
+                    releaseReservations(villager.uuid)
+                    villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                    villager.stuckTicks = 0
+                    return
+                }
+
                 val distSq = npcLoc.distanceSquared(breedingSheep.location)
                 if (distSq <= 4.0) {
                     breedingSheep.loveModeTicks = 600
@@ -190,7 +249,6 @@ class ShepherdBehavior(
             }
         }
 
-        // Если делать нечего — сбрасываем старые брони и убираем вещи из рук
         releaseReservations(villager.uuid)
         villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
     }
@@ -199,5 +257,7 @@ class ShepherdBehavior(
         releaseReservations(villager.uuid)
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+        villager.stuckTicks = 0
+        villager.lastPosition = null
     }
 }

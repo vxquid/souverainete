@@ -1,6 +1,7 @@
 package vx.sv.nms.v1_21_R7.entity.ai.construct
 
 import com.google.common.collect.ImmutableMap
+import net.minecraft.core.BlockPos
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.entity.ai.behavior.Behavior
@@ -8,14 +9,13 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
-import org.bukkit.*
+import org.bukkit.Material
+import org.bukkit.NamespacedKey
+import org.bukkit.Particle
+import org.bukkit.Sound
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
-import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.craftbukkit.inventory.CraftItemStack
-import org.bukkit.event.EventHandler
-import org.bukkit.event.Listener
-import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
@@ -117,6 +117,27 @@ class ConstructionBehavior(
         }
     }
 
+    /**
+     * ИСПРАВЛЕНО: Умный поиск пола.
+     * Если целевой блок находится высоко (крыша) или в стене, ИИ сканирует блоки вниз
+     * и находит твердый пол, на который можно физически встать.
+     */
+    private fun getWalkablePos(world: ServerLevel, targetPos: BlockPos, villagerPos: BlockPos): BlockPos {
+        var y = targetPos.y
+        val bukkitWorld = world.world
+        // Ищем твердый блок вниз от цели (до 10 блоков в глубину)
+        while (y > targetPos.y - 10 && y > bukkitWorld.minHeight) {
+            val block = bukkitWorld.getBlockAt(targetPos.x, y, targetPos.z)
+            // Игнорируем листву, ищем твердый пол (камень, дерево, грязь)
+            if (block.type.isSolid && !block.type.name.contains("LEAVES")) {
+                return BlockPos(targetPos.x, y + 1, targetPos.z)
+            }
+            y--
+        }
+        // Если ничего не найдено (например, висит над пропастью), идем на текущей высоте жителя
+        return BlockPos(targetPos.x, villagerPos.y, targetPos.z)
+    }
+
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         if (!world.world.isDayTime) return false
         if (world.gameTime < villager.nextBuildAvailableTime) return false
@@ -166,7 +187,12 @@ class ConstructionBehavior(
         val bukkitInv = bukkitVillager.inventory
 
         if (!assigned.material.isAir) {
-            addItemsSmart(bukkitInv, assigned.material, 64)
+            val materialToGive = if (assigned.material == Material.FARMLAND) Material.DIRT else assigned.material
+            addItemsSmart(bukkitInv, materialToGive, 64)
+
+            if (assigned.material == Material.FARMLAND) {
+                addItemsSmart(bukkitInv, Material.IRON_HOE, 1)
+            }
         }
         addItemsSmart(bukkitInv, Material.COBBLESTONE, 64)
         addItemsSmart(bukkitInv, Material.DIRT, 64)
@@ -195,7 +221,10 @@ class ConstructionBehavior(
 
         val isClear = currentBlock.isIgnorableObstacle()
         val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
-        val hasResources = !isClear || isPathTransformation || assigned.material.isAir || bukkitInv.contains(assigned.material)
+
+        val isFarmlandTransformation = (currentBlock.type == Material.DIRT || currentBlock.type == Material.FARMLAND) && assigned.material == Material.FARMLAND
+        val hasResources = !isClear || isPathTransformation || isFarmlandTransformation || assigned.material.isAir ||
+                bukkitInv.contains(assigned.material) || (assigned.material == Material.FARMLAND && bukkitInv.contains(Material.DIRT))
 
         return world.world.isDayTime && hasResources
     }
@@ -223,8 +252,9 @@ class ConstructionBehavior(
 
         villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(tool))
 
-        // ИСПРАВЛЕНО: Направляем жителя напрямую к блоку (без багов с высотой крыши)
-        villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(assigned.pos), speedModifier, 2))
+        // ИСПРАВЛЕНО: Идем к безопасному полу под блоком
+        val walkPos = getWalkablePos(world, assigned.pos, villager.blockPosition())
+        villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(walkPos), speedModifier, 2))
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -260,13 +290,14 @@ class ConstructionBehavior(
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
         val diffY = kotlin.math.abs(blockPos.y - npcPos.y)
 
-        // ИСПРАВЛЕНО: Правильная проверка дистанции по трем осям
+        // ИСПРАВЛЕНО: Радиус взаимодействия (reach) урезан до 3 блоков по горизонтали (было 6).
+        // Это заставит жителей подбегать вплотную к стене перед началом постройки.
         val isWithinReach = if (villager.isBuildDistanceHackActive) {
             true
         } else if (assigned.isRoad) {
-            (diffX * diffX + diffZ * diffZ <= 25.0) && (diffY <= 4)
+            (diffX * diffX + diffZ * diffZ <= 9.0) && (diffY <= 4)
         } else {
-            (diffX * diffX + diffZ * diffZ <= 36.0) && (diffY <= 6)
+            (diffX * diffX + diffZ * diffZ <= 9.0) && (diffY <= 5)
         }
 
         if (isWithinReach) {
@@ -321,6 +352,7 @@ class ConstructionBehavior(
                 }
             } else {
                 val material = assigned.material
+                val isFarmland = material == Material.FARMLAND
 
                 if (material.isAir) {
                     if (block.isLiquid) {
@@ -354,7 +386,51 @@ class ConstructionBehavior(
                 val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
                 val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
 
-                if (!isPathTransformation && !bukkitInv.contains(material)) {
+                if (isFarmland) {
+                    if (block.type != Material.DIRT && block.type != Material.FARMLAND) {
+                        val expectedTool = CraftItemStack.asNMSCopy(ItemStack(Material.DIRT))
+                        if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, expectedTool)) {
+                            villager.setItemInHand(InteractionHand.MAIN_HAND, expectedTool)
+                        }
+
+                        if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+                        villager.buildTicks++
+
+                        if (villager.buildTicks >= 10) {
+                            block.type = Material.DIRT
+                            bukkitWorld.playSound(block.location, Sound.BLOCK_GRASS_PLACE, 1.0f, 1.0f)
+                            takeItem(bukkitInv, Material.DIRT, 1)
+                            villager.buildTicks = 0
+                        }
+                        return
+                    }
+
+                    if (block.type == Material.DIRT) {
+                        val expectedTool = CraftItemStack.asNMSCopy(ItemStack(Material.IRON_HOE))
+                        if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, expectedTool)) {
+                            villager.setItemInHand(InteractionHand.MAIN_HAND, expectedTool)
+                        }
+
+                        if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+                        villager.buildTicks++
+
+                        if (villager.buildTicks >= 10) {
+                            block.setBlockData(assigned.blockData, true)
+                            bukkitWorld.playSound(block.location, Sound.ITEM_HOE_TILL, 1.0f, 1.0f)
+
+                            job.completeBlock(assigned)
+                            villager.assignedBlock = null
+                            villager.buildTicks = 0
+                            villager.nextBuildAvailableTime = world.gameTime + 2L
+                            villager.isBuildDistanceHackActive = false
+                            villager.lastBuildActionTime = world.gameTime
+                            doStop(world, villager, time)
+                        }
+                        return
+                    }
+                }
+
+                if (!isPathTransformation && !isFarmland && !bukkitInv.contains(material)) {
                     job.unclaimBlock(assigned)
                     villager.assignedBlock = null
                     villager.buildTicks = 0
@@ -415,9 +491,10 @@ class ConstructionBehavior(
         } else {
             villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
 
-            // ИСПРАВЛЕНО: Направляем жителя напрямую к блоку (без багов с высотой крыши)
+            // ИСПРАВЛЕНО: Безопасное прокладывание пути по твердому полу
             if (!villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(blockPos), speedModifier, 2))
+                val walkPos = getWalkablePos(world, blockPos, npcPos)
+                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(walkPos), speedModifier, 2))
             }
         }
     }
@@ -452,43 +529,5 @@ class ConstructionBehavior(
         }
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
-    }
-}
-
-class BuilderSafetyListener : Listener {
-
-    @EventHandler
-    fun onNpcDamage(event: EntityDamageEvent) {
-        val villager = event.entity as? BukkitVillager ?: return
-
-        if (event.cause == EntityDamageEvent.DamageCause.SUFFOCATION) {
-            val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager ?: return
-
-            if (nmsVillager.activeBuildJob != null) {
-                event.isCancelled = true
-
-                val settlement = nmsVillager.settlement
-                val safeLoc = if (settlement != null) {
-                    val center = settlement.data.center
-                    val highestY = center.world.getHighestBlockYAt(center.blockX, center.blockZ)
-                    Location(center.world, center.x + 0.5, highestY + 1.0, center.z + 0.5)
-                } else {
-                    val loc = villager.location
-                    val highestY = loc.world.getHighestBlockYAt(loc.blockX, loc.blockZ)
-                    Location(loc.world, loc.x, highestY + 1.0, loc.z, loc.yaw, loc.pitch)
-                }
-
-                nmsVillager.assignedBlock = null
-                nmsVillager.digTicks = 0
-                nmsVillager.buildTicks = 0
-                nmsVillager.isBuildDistanceHackActive = false
-                nmsVillager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-
-                villager.teleport(safeLoc)
-
-                villager.world.playSound(safeLoc, Sound.ENTITY_VILLAGER_HURT, 1.0f, 1.0f)
-                villager.world.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
-            }
-        }
     }
 }
