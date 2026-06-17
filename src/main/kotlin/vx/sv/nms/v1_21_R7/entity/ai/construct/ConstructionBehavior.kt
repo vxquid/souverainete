@@ -40,9 +40,10 @@ class ConstructionBehavior(
 
     companion object {
         private val debugVisualsMap = mutableMapOf<UUID, Pair<BlockDisplay, BlockDisplay>>()
-
-        // ИСПРАВЛЕНО: Калькулятор стрика удаленных действий для отслеживания застрявших жителей
         private val remoteActionsStreakMap = java.util.WeakHashMap<HumanoidVillager, Int>()
+
+        // ИСПРАВЛЕНО: Карта для отслеживания движения жителей в реальном времени
+        private val lastLocationMap = java.util.WeakHashMap<HumanoidVillager, Location>()
     }
 
     private fun handleDebugVisuals(world: ServerLevel, villager: HumanoidVillager, block: Block) {
@@ -113,13 +114,11 @@ class ConstructionBehavior(
         displays?.second?.remove()
     }
 
-    // ИСПРАВЛЕНО: Метод экстренной эвакуации застрявшего в расщелине жителя
     private fun handleStuckTeleport(world: ServerLevel, villager: HumanoidVillager) {
         val settlement = villager.settlement ?: return
         val center = settlement.data.center
         val bukkitWorld = world.world
 
-        // Безопасная высота на спавне поселения
         val groundY = SettlementPlanner.getHighestGroundYAt(bukkitWorld, center.blockX, center.blockZ)
         val safeLoc = Location(
             bukkitWorld,
@@ -130,40 +129,34 @@ class ConstructionBehavior(
             villager.bukkitEntity.location.pitch
         )
 
-        // Разрываем контракт с текущим блоком
         val job = villager.activeBuildJob
         val assigned = villager.assignedBlock
         if (assigned != null && job != null) {
             job.unclaimBlock(assigned)
         }
 
-        // Полный сброс состояния ИИ и кулдаун
         villager.assignedBlock = null
         villager.activeBuildJob = null
         villager.digTicks = 0
         villager.buildTicks = 0
         villager.isBuildDistanceHackActive = false
-        villager.nextBuildAvailableTime = world.gameTime + 100L // 5 секунд перерыва
+        villager.nextBuildAvailableTime = world.gameTime + 100L
 
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
         villager.refreshBrain(world)
 
-        // Телепортируем на спавн
         villager.bukkitEntity.teleport(safeLoc)
 
-        // Визуальные эффекты недовольства
         bukkitWorld.playSound(safeLoc, Sound.ENTITY_VILLAGER_NO, 1.0f, 1.0f)
         bukkitWorld.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
     }
 
-    // ИСПРАВЛЕНО: Обновление стрика удаленных установок блоков
     private fun updateStreakAndCheck(world: ServerLevel, villager: HumanoidVillager, wasRemote: Boolean): Boolean {
         if (wasRemote) {
             val currentStreak = (remoteActionsStreakMap[villager] ?: 0) + 1
             remoteActionsStreakMap[villager] = currentStreak
 
-            // Если житель установил/сломал 3 блока подряд удалённо — значит, он точно зажат в стене/каньоне
             if (currentStreak >= 3) {
                 remoteActionsStreakMap.remove(villager)
                 handleStuckTeleport(world, villager)
@@ -380,6 +373,22 @@ class ConstructionBehavior(
 
         handleDebugVisuals(world, villager, block)
 
+        // ИСПРАВЛЕНО: Умное обновление таймера бездействия.
+        // Если житель двигается (пробежал более 0.05 блока за тик) или активно работает (копает/строит),
+        // мы сбрасываем его таймер простоя. Это предотвращает ложную активацию удаленного строительства при беге.
+        val currentLoc = villager.bukkitEntity.location
+        val lastLoc = lastLocationMap[villager]
+
+        if (villager.digTicks > 0 || villager.buildTicks > 0) {
+            villager.lastBuildActionTime = world.gameTime
+        } else if (lastLoc != null && currentLoc.world == lastLoc.world) {
+            val distanceMovedSq = currentLoc.distanceSquared(lastLoc)
+            if (distanceMovedSq > 0.0025) { // Движение > 0.05 блока за тик
+                villager.lastBuildActionTime = world.gameTime
+            }
+        }
+        lastLocationMap[villager] = currentLoc
+
         val idleTicks = world.gameTime - villager.lastBuildActionTime
 
         if (idleTicks > 120L) {
@@ -435,7 +444,7 @@ class ConstructionBehavior(
                 if (block.type.name.contains("LOG") || block.type.name.contains("WOOD")) {
                     removeWholeTree(block)
 
-                    remoteActionsStreakMap[villager] = 0 // Сброс
+                    remoteActionsStreakMap[villager] = 0
 
                     villager.digTicks = 0
                     villager.isBuildDistanceHackActive = false
@@ -467,7 +476,6 @@ class ConstructionBehavior(
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
 
-                    // ИСПРАВЛЕНО: Проверка стрика удаленного копания
                     if (updateStreakAndCheck(world, villager, wasRemote)) return
 
                     doStop(world, villager, time)
@@ -493,7 +501,6 @@ class ConstructionBehavior(
                             villager.isBuildDistanceHackActive = false
                             villager.lastBuildActionTime = world.gameTime
 
-                            // ИСПРАВЛЕНО: Проверка стрика при сборе жидкостей
                             if (updateStreakAndCheck(world, villager, wasRemote)) return
 
                             doStop(world, villager, time)
@@ -508,7 +515,6 @@ class ConstructionBehavior(
                         villager.isBuildDistanceHackActive = false
                         villager.lastBuildActionTime = world.gameTime
 
-                        // ИСПРАВЛЕНО: Проверка стрика при расчистке воздуха
                         if (updateStreakAndCheck(world, villager, wasRemote)) return
 
                         doStop(world, villager, time)
@@ -577,7 +583,6 @@ class ConstructionBehavior(
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
 
-                    // ИСПРАВЛЕНО: Проверка стрика при постройке блоков
                     if (updateStreakAndCheck(world, villager, wasRemote)) return
 
                     doStop(world, villager, time)
