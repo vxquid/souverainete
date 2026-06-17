@@ -165,15 +165,24 @@ class SettlementPlanner(val settlement: Settlement) {
             return fallbackJob
         }
 
+        fun isTreeBlock(type: Material): Boolean {
+            val name = type.name
+            return name.contains("LEAVES") ||
+                    name.contains("LOG") ||
+                    name.contains("WOOD") ||
+                    name.contains("STEM") ||
+                    name.contains("HYPHAE") ||
+                    name.contains("ROOTS") ||
+                    name.contains("CHERRY") ||
+                    name.contains("SAPLING")
+        }
+
         fun getHighestGroundYAt(world: World, x: Int, z: Int): Int {
             var y = world.getHighestBlockYAt(x, z)
             while (y > world.minHeight) {
                 val block = world.getBlockAt(x, y, z)
                 val type = block.type
-                val isTreeOrPlant = type.name.contains("LEAVES") ||
-                        type.name.contains("LOG") ||
-                        type.name.contains("WOOD") ||
-                        block.isIgnorableObstacle()
+                val isTreeOrPlant = isTreeBlock(type) || block.isIgnorableObstacle()
                 if (isTreeOrPlant) {
                     y--
                 } else {
@@ -281,7 +290,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 val typeToken = object : TypeToken<Map<String, SettlementPlannerSaveData>>() {}.type
                 val loadedData: Map<String, SettlementPlannerSaveData> = gson.fromJson(json, typeToken) ?: return
 
-                // ИСПРАВЛЕНО: Убрана рекурсивная ссылка на саму себя во избежание сбоев в работе
                 val worldSettlements = SettlementManager.settlements[world] ?: return
 
                 loadedData.forEach { (uuidStr, data) ->
@@ -360,11 +368,12 @@ class SettlementPlanner(val settlement: Settlement) {
         val records = buildings[settlement.data.id] ?: emptyList()
         val jobId = records.find { it.type == "MEETING_POINT" }?.jobId ?: UUID.randomUUID()
 
-        val buildJob = startVanillaStructureConstruction(cx, baseY, cz, type, StructureRotation.NONE, jobId)
+        // ИСПРАВЛЕНО: Теперь метод возвращает список сегментов дороги и финального здания
+        val buildJobsList = startVanillaStructureConstruction(cx, baseY, cz, type, StructureRotation.NONE, jobId)
 
         val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
         synchronized(queue) {
-            queue.offer(buildJob)
+            buildJobsList.forEach { queue.offer(it) }
         }
         return true
     }
@@ -521,6 +530,10 @@ class SettlementPlanner(val settlement: Settlement) {
 
             var minY = Int.MAX_VALUE
             var maxY = Int.MIN_VALUE
+
+            var sumY = 0
+            var countY = 0
+
             var validTerrain = true
 
             for (x in -width / 2..width / 2) {
@@ -550,6 +563,9 @@ class SettlementPlanner(val settlement: Settlement) {
                     val hy = getHighestGroundYAt(world, absX, absZ)
                     if (hy < minY) minY = hy
                     if (hy > maxY) maxY = hy
+
+                    sumY += hy
+                    countY++
                 }
                 if (!validTerrain) break
             }
@@ -582,7 +598,9 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (!pathValid) continue
 
-            val baseY = maxY
+            val averageY = if (countY > 0) Math.round(sumY.toDouble() / countY).toInt() else center.blockY
+            val baseY = averageY
+
             var excavationCount = 0
             val totalArea = width * length
             for (x in -width / 2..width / 2) {
@@ -624,11 +642,12 @@ class SettlementPlanner(val settlement: Settlement) {
 
             settlement.expandTerritory(15.0)
 
-            val buildJob = startVanillaStructureConstruction(cx, finalBaseY, cz, type, bestRotation, jobId)
+            // ИСПРАВЛЕНО: Принимаем список пошаговых задач
+            val buildJobsList = startVanillaStructureConstruction(cx, finalBaseY, cz, type, bestRotation, jobId)
 
             val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
             synchronized(queue) {
-                queue.offer(buildJob)
+                buildJobsList.forEach { queue.offer(it) }
             }
             return true
         }
@@ -642,8 +661,8 @@ class SettlementPlanner(val settlement: Settlement) {
         type: VanillaBuildingType,
         rotation: StructureRotation,
         jobId: UUID
-    ): SchematicBuildJob {
-        val buildJob = SchematicBuildJob(world, jobId)
+    ): List<SchematicBuildJob> { // ИСПРАВЛЕНО: Теперь возвращает пошаговые сегментированные задачи
+        val jobsList = mutableListOf<SchematicBuildJob>()
         val center = settlement.data.center
 
         val rawWidth = type.width
@@ -689,6 +708,11 @@ class SettlementPlanner(val settlement: Settlement) {
         val halfL = length / 2 + 1
 
         var prevCenterRoadY: Int? = null
+
+        // Переменные для автоматического разбиения пути на маленькие отрезки
+        var currentRoadJob = SchematicBuildJob(world)
+        var stepsInSegment = 0
+        val maxStepsPerSegment = 8 // Сегменты дороги ровно по 8 блоков для легкого Pathfinding у ИИ
 
         while (true) {
             val naturalCenterY = getHighestGroundYAt(world, currentX, currentZ)
@@ -739,35 +763,45 @@ class SettlementPlanner(val settlement: Settlement) {
                     val clearStart = centerRoadY + 1
                     val clearEnd = maxOf(naturalBlockY, centerRoadY + 3)
                     for (y in clearStart..clearEnd) {
-                        buildJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
                     }
 
                     if (isWaterAtCenter) {
                         val isEdge = if (isMovingX) abs(wz) == 2 else abs(wx) == 2
 
                         if (isEdge) {
-                            buildJob.addBlock(BlockPos(px, centerRoadY, pz), Material.OAK_LOG.createBlockData(), isRoad = true)
-                            buildJob.addBlock(BlockPos(px, centerRoadY + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                            currentRoadJob.addBlock(BlockPos(px, centerRoadY, pz), Material.OAK_LOG.createBlockData(), isRoad = true)
+                            currentRoadJob.addBlock(BlockPos(px, centerRoadY + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
                         } else {
-                            buildJob.addBlock(BlockPos(px, centerRoadY, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
+                            currentRoadJob.addBlock(BlockPos(px, centerRoadY, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
                             val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
                             slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
-                            buildJob.addBlock(BlockPos(px, centerRoadY - 1, pz), slabData, isRoad = true)
+                            currentRoadJob.addBlock(BlockPos(px, centerRoadY - 1, pz), slabData, isRoad = true)
                         }
                     } else {
                         for (y in naturalBlockY until centerRoadY) {
-                            buildJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
+                            currentRoadJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
                         }
 
                         if (currentBlock.isLiquid) {
-                            buildJob.addBlock(BlockPos(px, centerRoadY, pz), cobbleData, isRoad = true)
+                            currentRoadJob.addBlock(BlockPos(px, centerRoadY, pz), cobbleData, isRoad = true)
                         } else {
-                            buildJob.addBlock(BlockPos(px, centerRoadY, pz), roadBlockData, isRoad = true)
+                            currentRoadJob.addBlock(BlockPos(px, centerRoadY, pz), roadBlockData, isRoad = true)
                         }
                     }
 
                     roads.add(BlockPos(px, centerRoadY, pz))
                 }
+            }
+
+            stepsInSegment++
+            // Складываем готовые короткие сегменты дорог в общий список задач
+            if (stepsInSegment >= maxStepsPerSegment) {
+                if (currentRoadJob.getBlocks().isNotEmpty()) {
+                    jobsList.add(currentRoadJob)
+                    currentRoadJob = SchematicBuildJob(world)
+                }
+                stepsInSegment = 0
             }
 
             if (currentX == cx && currentZ == cz) break
@@ -782,7 +816,35 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // ИСПРАВЛЕНО: Восстановлена генерация фундаментов и блоков схематика, которая была утеряна в прошлом обновлении
+        // Забираем последний кусочек дороги, если он не набрал лимит по шагам
+        if (currentRoadJob.getBlocks().isNotEmpty()) {
+            jobsList.add(currentRoadJob)
+        }
+
+        // ИСПРАВЛЕНО: Строго в самом конце создаем финализирующий проект с оригинальным jobId — само здание
+        val buildJob = SchematicBuildJob(world, jobId)
+
+        val materialCounts = mutableMapOf<Material, Int>()
+        for (x in 0 until width) {
+            for (z in 0 until length) {
+                val absX = cx - width / 2 + x
+                val absZ = cz - length / 2 + z
+                val highest = getHighestGroundYAt(world, absX, absZ)
+                val blockType = world.getBlockAt(absX, highest, absZ).type
+
+                if (blockType.isSolid &&
+                    !isTreeBlock(blockType) &&
+                    blockType != Material.AIR) {
+                    materialCounts[blockType] = (materialCounts[blockType] ?: 0) + 1
+                }
+            }
+        }
+
+        val mimicMaterial = materialCounts.maxByOrNull { it.value }?.key ?: Material.COBBLESTONE
+        val finalMimicMaterial = if (mimicMaterial == Material.GRASS_BLOCK) Material.DIRT else mimicMaterial
+        val foundationBlockData = finalMimicMaterial.createBlockData()
+
+        // 1. Создаем котлован и фундамент
         for (x in 0 until width) {
             for (z in 0 until length) {
                 val absX = cx - width / 2 + x
@@ -797,29 +859,31 @@ class SettlementPlanner(val settlement: Settlement) {
                 }
 
                 for (y in highest + 1 until baseY) {
-                    buildJob.addBlock(BlockPos(absX, y, absZ), cobbleData, isRoad = false)
+                    buildJob.addBlock(BlockPos(absX, y, absZ), foundationBlockData, isRoad = false)
                 }
             }
         }
 
+        // 2. Создаем блоки самой структуры здания
         val rawRelativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
-        if (rawRelativeBlocks.isEmpty()) return buildJob
+        if (rawRelativeBlocks.isNotEmpty()) {
+            rawRelativeBlocks.forEach { relBlock ->
+                val rotPos = rotateCoords(relBlock.relativePos, rotation, rawWidth, rawLength)
 
-        rawRelativeBlocks.forEach { relBlock ->
-            val rotPos = rotateCoords(relBlock.relativePos, rotation, rawWidth, rawLength)
+                val rotData = relBlock.blockData.clone()
+                rotData.rotate(rotation)
 
-            val rotData = relBlock.blockData.clone()
-            rotData.rotate(rotation)
+                val absoluteX = cx - width / 2 + rotPos.x
+                val absoluteY = baseY + rotPos.y
+                val absoluteZ = cz - length / 2 + rotPos.z
+                val absPos = BlockPos(absoluteX, absoluteY, absoluteZ)
 
-            val absoluteX = cx - width / 2 + rotPos.x
-            val absoluteY = baseY + rotPos.y
-            val absoluteZ = cz - length / 2 + rotPos.z
-            val absPos = BlockPos(absoluteX, absoluteY, absoluteZ)
-
-            buildJob.addBlock(absPos, rotData, isRoad = false)
+                buildJob.addBlock(absPos, rotData, isRoad = false)
+            }
         }
 
-        return buildJob
+        jobsList.add(buildJob)
+        return jobsList
     }
 }
 

@@ -40,6 +40,9 @@ class ConstructionBehavior(
 
     companion object {
         private val debugVisualsMap = mutableMapOf<UUID, Pair<BlockDisplay, BlockDisplay>>()
+
+        // ИСПРАВЛЕНО: Калькулятор стрика удаленных действий для отслеживания застрявших жителей
+        private val remoteActionsStreakMap = java.util.WeakHashMap<HumanoidVillager, Int>()
     }
 
     private fun handleDebugVisuals(world: ServerLevel, villager: HumanoidVillager, block: Block) {
@@ -108,6 +111,68 @@ class ConstructionBehavior(
         val displays = debugVisualsMap.remove(villager.uuid)
         displays?.first?.remove()
         displays?.second?.remove()
+    }
+
+    // ИСПРАВЛЕНО: Метод экстренной эвакуации застрявшего в расщелине жителя
+    private fun handleStuckTeleport(world: ServerLevel, villager: HumanoidVillager) {
+        val settlement = villager.settlement ?: return
+        val center = settlement.data.center
+        val bukkitWorld = world.world
+
+        // Безопасная высота на спавне поселения
+        val groundY = SettlementPlanner.getHighestGroundYAt(bukkitWorld, center.blockX, center.blockZ)
+        val safeLoc = Location(
+            bukkitWorld,
+            center.x + 0.5,
+            groundY.toDouble() + 1.0,
+            center.z + 0.5,
+            villager.bukkitEntity.location.yaw,
+            villager.bukkitEntity.location.pitch
+        )
+
+        // Разрываем контракт с текущим блоком
+        val job = villager.activeBuildJob
+        val assigned = villager.assignedBlock
+        if (assigned != null && job != null) {
+            job.unclaimBlock(assigned)
+        }
+
+        // Полный сброс состояния ИИ и кулдаун
+        villager.assignedBlock = null
+        villager.activeBuildJob = null
+        villager.digTicks = 0
+        villager.buildTicks = 0
+        villager.isBuildDistanceHackActive = false
+        villager.nextBuildAvailableTime = world.gameTime + 100L // 5 секунд перерыва
+
+        villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+        villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+        villager.refreshBrain(world)
+
+        // Телепортируем на спавн
+        villager.bukkitEntity.teleport(safeLoc)
+
+        // Визуальные эффекты недовольства
+        bukkitWorld.playSound(safeLoc, Sound.ENTITY_VILLAGER_NO, 1.0f, 1.0f)
+        bukkitWorld.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
+    }
+
+    // ИСПРАВЛЕНО: Обновление стрика удаленных установок блоков
+    private fun updateStreakAndCheck(world: ServerLevel, villager: HumanoidVillager, wasRemote: Boolean): Boolean {
+        if (wasRemote) {
+            val currentStreak = (remoteActionsStreakMap[villager] ?: 0) + 1
+            remoteActionsStreakMap[villager] = currentStreak
+
+            // Если житель установил/сломал 3 блока подряд удалённо — значит, он точно зажат в стене/каньоне
+            if (currentStreak >= 3) {
+                remoteActionsStreakMap.remove(villager)
+                handleStuckTeleport(world, villager)
+                return true
+            }
+        } else {
+            remoteActionsStreakMap[villager] = 0
+        }
+        return false
     }
 
     private fun takeItem(inventory: Inventory, material: Material, amount: Int) {
@@ -297,8 +362,6 @@ class ConstructionBehavior(
         }
 
         villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(tool))
-
-        // ИСПРАВЛЕНО: Уменьшен радиус приближения closeEnough с 2 до 1, чтобы житель подходил максимально вплотную
         villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(assigned.pos), speedModifier, 1))
     }
 
@@ -342,14 +405,12 @@ class ConstructionBehavior(
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
         val diffY = kotlin.math.abs(blockPos.y - npcPos.y)
 
-        // ИСПРАВЛЕНО: Ужесточены лимиты дистанции застройки.
-        // Жители теперь физически обязаны подходить ближе к блоку, чтобы начать над ним работать.
         val isWithinReach = if (villager.isBuildDistanceHackActive) {
             true
         } else if (assigned.isRoad) {
-            (diffX * diffX + diffZ * diffZ <= 9.0) && (diffY <= 3) // Было 25 и 4 (макс. расстояние уменьшено с 5 до 3 блоков)
+            (diffX * diffX + diffZ * diffZ <= 9.0) && (diffY <= 3)
         } else {
-            (diffX * diffX + diffZ * diffZ <= 16.0) && (diffY <= 4) // Было 36 и 6 (макс. расстояние уменьшено с 6 до 4 блоков)
+            (diffX * diffX + diffZ * diffZ <= 16.0) && (diffY <= 4)
         }
 
         if (isWithinReach) {
@@ -373,6 +434,9 @@ class ConstructionBehavior(
             if (!block.isIgnorableObstacle()) {
                 if (block.type.name.contains("LOG") || block.type.name.contains("WOOD")) {
                     removeWholeTree(block)
+
+                    remoteActionsStreakMap[villager] = 0 // Сброс
+
                     villager.digTicks = 0
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
@@ -398,8 +462,14 @@ class ConstructionBehavior(
                     block.breakNaturally()
                     villager.digTicks = 0
                     villager.nextBuildAvailableTime = world.gameTime + 2L
+
+                    val wasRemote = villager.isBuildDistanceHackActive
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
+
+                    // ИСПРАВЛЕНО: Проверка стрика удаленного копания
+                    if (updateStreakAndCheck(world, villager, wasRemote)) return
+
                     doStop(world, villager, time)
                 }
             } else {
@@ -418,8 +488,14 @@ class ConstructionBehavior(
                             villager.assignedBlock = null
                             villager.buildTicks = 0
                             villager.nextBuildAvailableTime = world.gameTime + 2L
+
+                            val wasRemote = villager.isBuildDistanceHackActive
                             villager.isBuildDistanceHackActive = false
                             villager.lastBuildActionTime = world.gameTime
+
+                            // ИСПРАВЛЕНО: Проверка стрика при сборе жидкостей
+                            if (updateStreakAndCheck(world, villager, wasRemote)) return
+
                             doStop(world, villager, time)
                         }
                     } else {
@@ -427,8 +503,14 @@ class ConstructionBehavior(
                         villager.assignedBlock = null
                         villager.buildTicks = 0
                         villager.nextBuildAvailableTime = world.gameTime + 2L
+
+                        val wasRemote = villager.isBuildDistanceHackActive
                         villager.isBuildDistanceHackActive = false
                         villager.lastBuildActionTime = world.gameTime
+
+                        // ИСПРАВЛЕНО: Проверка стрика при расчистке воздуха
+                        if (updateStreakAndCheck(world, villager, wasRemote)) return
+
                         doStop(world, villager, time)
                     }
                     return
@@ -490,16 +572,20 @@ class ConstructionBehavior(
                     villager.assignedBlock = null
                     villager.buildTicks = 0
                     villager.nextBuildAvailableTime = world.gameTime + 2L
+
+                    val wasRemote = villager.isBuildDistanceHackActive
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
+
+                    // ИСПРАВЛЕНО: Проверка стрика при постройке блоков
+                    if (updateStreakAndCheck(world, villager, wasRemote)) return
+
                     doStop(world, villager, time)
                 }
             }
         } else {
             villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
 
-            // ИСПРАВЛЕНО: Теперь путь к цели принудительно пересчитывается каждые 30 тиков (1.5 сек)
-            // или если цель пропала. Параметр closeEnough задан как 1 для максимально плотного подхода.
             if (world.gameTime % 30L == 0L || !villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
                 villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(blockPos), speedModifier, 1))
             }
