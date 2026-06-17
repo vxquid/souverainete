@@ -234,8 +234,9 @@ class SettlementManager : Listener {
                 }
             }
 
-            val homelessVillagers = world.entities
-                .filterIsInstance<Villager>()
+            // ИСПРАВЛЕНО: world.entities заменено на getEntitiesByClass,
+            // чтобы не сканировать миллионы монстров, предметов на земле и дропов в основном потоке.
+            val homelessVillagers = world.getEntitiesByClass(Villager::class.java)
                 .filter { it.settlement == null }
 
             if (homelessVillagers.isEmpty()) return@Runnable

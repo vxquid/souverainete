@@ -30,7 +30,6 @@ class VillageGenerationListener : Listener {
             val distance = 4.0 + random.nextDouble() * 4.0
             val spawnLoc = center.clone().add(Math.cos(angle) * distance, 1.0, Math.sin(angle) * distance)
 
-            // ИСПРАВЛЕНО: Теперь высота спавна овец определяется по реальному уровню грунта (сквозь листву деревьев)
             val groundY = SettlementPlanner.getHighestGroundYAt(world, spawnLoc.blockX, spawnLoc.blockZ)
             spawnLoc.y = groundY.toDouble() + 1.0
 
@@ -53,7 +52,6 @@ class VillageGenerationListener : Listener {
             val distance = 2.0 + random.nextDouble() * 3.0
             val spawnLoc = center.clone().add(Math.cos(angle) * distance, 1.0, Math.sin(angle) * distance)
 
-            // ИСПРАВЛЕНО: Теперь высота спавна котов определяется по реальному уровню грунта (сквозь листву деревьев)
             val groundY = SettlementPlanner.getHighestGroundYAt(world, spawnLoc.blockX, spawnLoc.blockZ)
             spawnLoc.y = groundY.toDouble() + 1.0
 
@@ -71,16 +69,12 @@ class VillageGenerationListener : Listener {
         }
     }
 
-    /**
-     * Защищает бесконечный блок камня в шахте от разрушения игроками.
-     */
     @EventHandler
     fun onPlayerBreakMineBlock(event: BlockBreakEvent) {
         val block = event.block
         if (block.type == Material.STONE) {
             val northBlock = block.getRelative(BlockFace.NORTH)
             if (northBlock.type == Material.SMITHING_TABLE) {
-                // Проверяем, находится ли блок на территории поселения
                 val world = block.world
                 val worldSettlements = SettlementManager.settlements[world] ?: return
                 val vector = block.location.toVector()
@@ -134,7 +128,7 @@ class VillageGenerationListener : Listener {
                                 val highestY = world.getHighestBlockYAt(absX, absZ)
                                 val surfaceBlock = world.getBlockAt(absX, highestY, absZ)
 
-                                if (surfaceBlock.isLiquid || surfaceBlock.type == Material.WATER || surfaceBlock.type.name.contains("ICE")) {
+                                if (surfaceBlock.isLiquid || surfaceBlock.type == Material.WATER || surfaceBlock.type.name.contains("ICE") || surfaceBlock.type.name.contains("WATER")) {
                                     hasWater = true
                                     break
                                 }
@@ -161,33 +155,10 @@ class VillageGenerationListener : Listener {
                     }
                 }
 
+                // ИСПРАВЛЕНО: Аварийный fallback удален. Если суша не найдена, спавн безопасно отменяется.
                 if (!foundDryLand) {
-                    for (ox in -6..6) {
-                        for (oz in -6..6) {
-                            val cx = centerX.toInt() + ox
-                            val cz = centerZ.toInt() + oz
-
-                            var minY = Int.MAX_VALUE
-                            var maxY = Int.MIN_VALUE
-
-                            for (px in -5..5) {
-                                for (pz in -5..5) {
-                                    val hy = SettlementPlanner.getHighestGroundYAt(world, cx + px, cz + pz)
-                                    if (hy < minY) minY = hy
-                                    if (hy > maxY) maxY = hy
-                                }
-                            }
-
-                            val diff = maxY - minY
-                            if (diff < minHeightDifference || (diff == minHeightDifference && maxY > highestElevationOfFlattest)) {
-                                minHeightDifference = diff
-                                highestElevationOfFlattest = maxY
-                                bestX = cx
-                                bestZ = cz
-                                bestY = maxY
-                            }
-                        }
-                    }
+                    plugin.logger.info("[Souverainete] Спавн поселения отменен: в зоне генерации пригодная суша отсутствует.")
+                    return@Runnable
                 }
 
                 val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())

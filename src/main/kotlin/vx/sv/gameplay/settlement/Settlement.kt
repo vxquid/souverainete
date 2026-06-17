@@ -17,15 +17,15 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         val center: Location,
         val creationTime: Long,
         var dominantRace: String,
-        var leaderId: UUID? = null, // Stores the elected leader's UUID
-        var leaderName: String? = null, // Stores the elected leader's string name for quick access
+        var leaderId: UUID? = null,
+        var leaderName: String? = null,
         val reputation: MutableMap<UUID, Int> = mutableMapOf(),
         val relations: MutableMap<UUID, RelationLevel> = mutableMapOf(),
 
-        // FIELD IS NOW NULLABLE: Backward compatibility for old saves that don't have this field in JSON
         var diplomaticHistory: MutableMap<UUID, MutableList<String>>? = null,
+        var activeRaid: RaidData? = null,
 
-        var activeRaid: RaidData? = null
+        var activeProjectId: UUID? = null
     )
 
     data class RaidData(
@@ -38,28 +38,23 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         var activeTicks: Long = 0
     )
 
-    val world     = plugin.server.getWorld(data.worldUUID)!!
-    var territory = BoundingBox.of(data.center, 64.0, 64.0, 64.0)
+    val world = plugin.server.getWorld(data.worldUUID)!!
 
-    /**
-     * Randomly elects a new leader from the current villagers.
-     * Removes the old leader's PDC tag and assigns it to the new one.
-     */
+    // ИСПРАВЛЕНО: Увеличен радиус территории деревни со 64.0 до 120.0 блоков во все стороны для простора
+    var territory = BoundingBox.of(data.center, 120.0, 128.0, 120.0)
+
     fun electLeader() {
         if (villagers.isEmpty()) return
 
-        // 1. Clear previous leader if they are still alive in the settlement
         data.leaderId?.let { oldId ->
             val oldLeader = villagers.find { it.uniqueId == oldId }
             oldLeader?.persistentDataContainer?.remove(LEADER_KEY)
         }
 
-        // 2. Elect a new random leader
         val newLeader = villagers.random()
         data.leaderId = newLeader.uniqueId
-        data.leaderName = newLeader.customName ?: "Leader" // Save string name
+        data.leaderName = newLeader.customName ?: "Leader"
 
-        // 3. Set PDC tag to identify the leader (storing settlement UUID)
         newLeader.persistentDataContainer.set(LEADER_KEY, PersistentDataType.STRING, data.id.toString())
     }
 
@@ -74,49 +69,19 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         }
     }
 
-    enum class SettlementSize {
-        UNDERDEVELOPED,
-        EMERGING,
-        ESTABLISHED,
-        ADVANCED,
-        METROPOLIS
-    }
-
-    enum class RelationLevel {
-        WAR,
-        TENSE,
-        NEUTRAL,
-        WARM,
-        ALLIANCE
-    }
-
-    enum class RaidStatus {
-        ONGOING,
-        VICTORY,
-        LOSS,
-        STOPPED
-    }
+    enum class SettlementSize { UNDERDEVELOPED, EMERGING, ESTABLISHED, ADVANCED, METROPOLIS }
+    enum class RelationLevel { WAR, TENSE, NEUTRAL, WARM, ALLIANCE }
+    enum class RaidStatus { ONGOING, VICTORY, LOSS, STOPPED }
 
     companion object {
-        // NamespaceKey used for PersistentDataContainer checks
         val LEADER_KEY = NamespacedKey(plugin, "settlement_leader")
     }
 }
 
-// =========================================
-// Extensions for quick leader checking
-// =========================================
-/**
- * Checks if this NPC (Villager) is currently a settlement leader.
- */
 fun Villager.isSettlementLeader(): Boolean {
     return this.persistentDataContainer.has(Settlement.LEADER_KEY, PersistentDataType.STRING)
 }
 
-/**
- * Retrieves the UUID of the settlement this Villager leads.
- * Returns null if the NPC is not a leader or data is invalid.
- */
 fun Villager.getLedSettlementId(): UUID? {
     val idString = this.persistentDataContainer.get(Settlement.LEADER_KEY, PersistentDataType.STRING) ?: return null
     return try {

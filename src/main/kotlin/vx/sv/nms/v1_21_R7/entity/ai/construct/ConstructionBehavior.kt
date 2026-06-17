@@ -1,7 +1,6 @@
 package vx.sv.nms.v1_21_R7.entity.ai.construct
 
 import com.google.common.collect.ImmutableMap
-import net.minecraft.core.BlockPos
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.entity.ai.behavior.Behavior
@@ -9,13 +8,16 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
-import org.bukkit.Material
-import org.bukkit.NamespacedKey
-import org.bukkit.Particle
-import org.bukkit.Sound
+import org.bukkit.*
 import org.bukkit.block.Block
 import org.bukkit.block.BlockFace
+import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.craftbukkit.inventory.CraftItemStack
+import org.bukkit.entity.BlockDisplay
+import org.bukkit.entity.Display
+import org.bukkit.event.EventHandler
+import org.bukkit.event.Listener
+import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
@@ -35,6 +37,78 @@ class ConstructionBehavior(
     ),
     1200
 ) {
+
+    companion object {
+        private val debugVisualsMap = mutableMapOf<UUID, Pair<BlockDisplay, BlockDisplay>>()
+    }
+
+    private fun handleDebugVisuals(world: ServerLevel, villager: HumanoidVillager, block: Block) {
+        val bukkitWorld = world.world
+        val playersWithSpyglass = bukkitWorld.players.any {
+            it.inventory.itemInMainHand.type == Material.SPYGLASS ||
+                    it.inventory.itemInOffHand.type == Material.SPYGLASS
+        }
+
+        val uuid = villager.uuid
+
+        if (playersWithSpyglass) {
+            var (line, blockDisplay) = debugVisualsMap[uuid] ?: Pair<BlockDisplay?, BlockDisplay?>(null, null)
+
+            if (line == null || line.isDead) {
+                line = bukkitWorld.spawn(villager.bukkitEntity.location, BlockDisplay::class.java) {
+                    it.block = Bukkit.createBlockData(Material.WHITE_CONCRETE)
+                    it.brightness = Display.Brightness(15, 15)
+                    try { it.teleportDuration = 1 } catch (_: Exception) {}
+                }
+            }
+            if (blockDisplay == null || blockDisplay.isDead) {
+                blockDisplay = bukkitWorld.spawn(block.location, BlockDisplay::class.java) {
+                    it.brightness = Display.Brightness(15, 15)
+                    try { it.teleportDuration = 1 } catch (_: Exception) {}
+                }
+            }
+
+            debugVisualsMap[uuid] = Pair(line, blockDisplay)
+
+            val startLoc = villager.bukkitEntity.location.add(0.0, 1.75, 0.0)
+            val targetLoc = block.location.clone().add(0.5, 0.5, 0.5)
+            val dir = targetLoc.toVector().subtract(startLoc.toVector())
+            val length = dir.length().toFloat()
+
+            if (length > 0) {
+                val lineLoc = startLoc.clone()
+                lineLoc.direction = dir
+                line.teleport(lineLoc)
+
+                val lineTransform = line.transformation
+                lineTransform.scale.set(0.02f, 0.02f, length)
+                lineTransform.translation.set(-0.01f, -0.01f, 0f)
+                line.transformation = lineTransform
+            }
+
+            val isBreaking = !block.isIgnorableObstacle()
+            val targetMaterial = if (isBreaking) Material.RED_STAINED_GLASS else Material.LIME_STAINED_GLASS
+
+            if (blockDisplay.block.material != targetMaterial) {
+                blockDisplay.block = Bukkit.createBlockData(targetMaterial)
+            }
+
+            blockDisplay.teleport(block.location)
+            val blockTransform = blockDisplay.transformation
+            blockTransform.scale.set(1.02f, 1.02f, 1.02f)
+            blockTransform.translation.set(-0.01f, -0.01f, -0.01f)
+            blockDisplay.transformation = blockTransform
+
+        } else {
+            clearDebugVisuals(villager)
+        }
+    }
+
+    private fun clearDebugVisuals(villager: HumanoidVillager) {
+        val displays = debugVisualsMap.remove(villager.uuid)
+        displays?.first?.remove()
+        displays?.second?.remove()
+    }
 
     private fun takeItem(inventory: Inventory, material: Material, amount: Int) {
         val index = inventory.first(material)
@@ -117,27 +191,6 @@ class ConstructionBehavior(
         }
     }
 
-    /**
-     * ИСПРАВЛЕНО: Умный поиск пола.
-     * Если целевой блок находится высоко (крыша) или в стене, ИИ сканирует блоки вниз
-     * и находит твердый пол, на который можно физически встать.
-     */
-    private fun getWalkablePos(world: ServerLevel, targetPos: BlockPos, villagerPos: BlockPos): BlockPos {
-        var y = targetPos.y
-        val bukkitWorld = world.world
-        // Ищем твердый блок вниз от цели (до 10 блоков в глубину)
-        while (y > targetPos.y - 10 && y > bukkitWorld.minHeight) {
-            val block = bukkitWorld.getBlockAt(targetPos.x, y, targetPos.z)
-            // Игнорируем листву, ищем твердый пол (камень, дерево, грязь)
-            if (block.type.isSolid && !block.type.name.contains("LEAVES")) {
-                return BlockPos(targetPos.x, y + 1, targetPos.z)
-            }
-            y--
-        }
-        // Если ничего не найдено (например, висит над пропастью), идем на текущей высоте жителя
-        return BlockPos(targetPos.x, villagerPos.y, targetPos.z)
-    }
-
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         if (!world.world.isDayTime) return false
         if (world.gameTime < villager.nextBuildAvailableTime) return false
@@ -156,8 +209,9 @@ class ConstructionBehavior(
         val settlement = villager.settlement ?: return false
 
         if (villager.activeBuildJob == null && villager.savedJobId != null) {
-            val active = SettlementPlanner.activeJobs[settlement.data.id]
-            if (active != null && active.jobId == villager.savedJobId) {
+            val activeList = SettlementPlanner.activeJobs[settlement.data.id]
+            val active = activeList?.find { it.jobId == villager.savedJobId }
+            if (active != null && !active.isFinished()) {
                 villager.activeBuildJob = active
             } else {
                 villager.savedJobId = null
@@ -187,12 +241,7 @@ class ConstructionBehavior(
         val bukkitInv = bukkitVillager.inventory
 
         if (!assigned.material.isAir) {
-            val materialToGive = if (assigned.material == Material.FARMLAND) Material.DIRT else assigned.material
-            addItemsSmart(bukkitInv, materialToGive, 64)
-
-            if (assigned.material == Material.FARMLAND) {
-                addItemsSmart(bukkitInv, Material.IRON_HOE, 1)
-            }
+            addItemsSmart(bukkitInv, assigned.material, 64)
         }
         addItemsSmart(bukkitInv, Material.COBBLESTONE, 64)
         addItemsSmart(bukkitInv, Material.DIRT, 64)
@@ -221,10 +270,7 @@ class ConstructionBehavior(
 
         val isClear = currentBlock.isIgnorableObstacle()
         val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
-
-        val isFarmlandTransformation = (currentBlock.type == Material.DIRT || currentBlock.type == Material.FARMLAND) && assigned.material == Material.FARMLAND
-        val hasResources = !isClear || isPathTransformation || isFarmlandTransformation || assigned.material.isAir ||
-                bukkitInv.contains(assigned.material) || (assigned.material == Material.FARMLAND && bukkitInv.contains(Material.DIRT))
+        val hasResources = !isClear || isPathTransformation || assigned.material.isAir || bukkitInv.contains(assigned.material)
 
         return world.world.isDayTime && hasResources
     }
@@ -252,18 +298,24 @@ class ConstructionBehavior(
 
         villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(tool))
 
-        // ИСПРАВЛЕНО: Идем к безопасному полу под блоком
-        val walkPos = getWalkablePos(world, assigned.pos, villager.blockPosition())
-        villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(walkPos), speedModifier, 2))
+        // ИСПРАВЛЕНО: Уменьшен радиус приближения closeEnough с 2 до 1, чтобы житель подходил максимально вплотную
+        villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(assigned.pos), speedModifier, 1))
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
+        if (!villager.bukkitEntity.isValid) {
+            clearDebugVisuals(villager)
+            return
+        }
+
         val assigned = villager.assignedBlock ?: return
         val job = villager.activeBuildJob ?: return
 
         val bukkitWorld = world.world
         val blockPos = assigned.pos
         val block = bukkitWorld.getBlockAt(blockPos.x, blockPos.y, blockPos.z)
+
+        handleDebugVisuals(world, villager, block)
 
         val idleTicks = world.gameTime - villager.lastBuildActionTime
 
@@ -290,14 +342,14 @@ class ConstructionBehavior(
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
         val diffY = kotlin.math.abs(blockPos.y - npcPos.y)
 
-        // ИСПРАВЛЕНО: Радиус взаимодействия (reach) урезан до 3 блоков по горизонтали (было 6).
-        // Это заставит жителей подбегать вплотную к стене перед началом постройки.
+        // ИСПРАВЛЕНО: Ужесточены лимиты дистанции застройки.
+        // Жители теперь физически обязаны подходить ближе к блоку, чтобы начать над ним работать.
         val isWithinReach = if (villager.isBuildDistanceHackActive) {
             true
         } else if (assigned.isRoad) {
-            (diffX * diffX + diffZ * diffZ <= 9.0) && (diffY <= 4)
+            (diffX * diffX + diffZ * diffZ <= 9.0) && (diffY <= 3) // Было 25 и 4 (макс. расстояние уменьшено с 5 до 3 блоков)
         } else {
-            (diffX * diffX + diffZ * diffZ <= 9.0) && (diffY <= 5)
+            (diffX * diffX + diffZ * diffZ <= 16.0) && (diffY <= 4) // Было 36 и 6 (макс. расстояние уменьшено с 6 до 4 блоков)
         }
 
         if (isWithinReach) {
@@ -352,7 +404,6 @@ class ConstructionBehavior(
                 }
             } else {
                 val material = assigned.material
-                val isFarmland = material == Material.FARMLAND
 
                 if (material.isAir) {
                     if (block.isLiquid) {
@@ -386,51 +437,7 @@ class ConstructionBehavior(
                 val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
                 val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
 
-                if (isFarmland) {
-                    if (block.type != Material.DIRT && block.type != Material.FARMLAND) {
-                        val expectedTool = CraftItemStack.asNMSCopy(ItemStack(Material.DIRT))
-                        if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, expectedTool)) {
-                            villager.setItemInHand(InteractionHand.MAIN_HAND, expectedTool)
-                        }
-
-                        if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
-                        villager.buildTicks++
-
-                        if (villager.buildTicks >= 10) {
-                            block.type = Material.DIRT
-                            bukkitWorld.playSound(block.location, Sound.BLOCK_GRASS_PLACE, 1.0f, 1.0f)
-                            takeItem(bukkitInv, Material.DIRT, 1)
-                            villager.buildTicks = 0
-                        }
-                        return
-                    }
-
-                    if (block.type == Material.DIRT) {
-                        val expectedTool = CraftItemStack.asNMSCopy(ItemStack(Material.IRON_HOE))
-                        if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, expectedTool)) {
-                            villager.setItemInHand(InteractionHand.MAIN_HAND, expectedTool)
-                        }
-
-                        if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
-                        villager.buildTicks++
-
-                        if (villager.buildTicks >= 10) {
-                            block.setBlockData(assigned.blockData, true)
-                            bukkitWorld.playSound(block.location, Sound.ITEM_HOE_TILL, 1.0f, 1.0f)
-
-                            job.completeBlock(assigned)
-                            villager.assignedBlock = null
-                            villager.buildTicks = 0
-                            villager.nextBuildAvailableTime = world.gameTime + 2L
-                            villager.isBuildDistanceHackActive = false
-                            villager.lastBuildActionTime = world.gameTime
-                            doStop(world, villager, time)
-                        }
-                        return
-                    }
-                }
-
-                if (!isPathTransformation && !isFarmland && !bukkitInv.contains(material)) {
+                if (!isPathTransformation && !bukkitInv.contains(material)) {
                     job.unclaimBlock(assigned)
                     villager.assignedBlock = null
                     villager.buildTicks = 0
@@ -491,15 +498,17 @@ class ConstructionBehavior(
         } else {
             villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
 
-            // ИСПРАВЛЕНО: Безопасное прокладывание пути по твердому полу
-            if (!villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
-                val walkPos = getWalkablePos(world, blockPos, npcPos)
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(walkPos), speedModifier, 2))
+            // ИСПРАВЛЕНО: Теперь путь к цели принудительно пересчитывается каждые 30 тиков (1.5 сек)
+            // или если цель пропала. Параметр closeEnough задан как 1 для максимально плотного подхода.
+            if (world.gameTime % 30L == 0L || !villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
+                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(blockPos), speedModifier, 1))
             }
         }
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
+        clearDebugVisuals(villager)
+
         val job = villager.activeBuildJob
         val assigned = villager.assignedBlock
 
@@ -529,5 +538,43 @@ class ConstructionBehavior(
         }
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+    }
+}
+
+class BuilderSafetyListener : Listener {
+
+    @EventHandler
+    fun onNpcDamage(event: EntityDamageEvent) {
+        val villager = event.entity as? BukkitVillager ?: return
+
+        if (event.cause == EntityDamageEvent.DamageCause.SUFFOCATION) {
+            val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager ?: return
+
+            if (nmsVillager.activeBuildJob != null) {
+                event.isCancelled = true
+
+                val settlement = nmsVillager.settlement
+                val safeLoc = if (settlement != null) {
+                    val center = settlement.data.center
+                    val highestY = center.world.getHighestBlockYAt(center.blockX, center.blockZ)
+                    Location(center.world, center.x + 0.5, highestY + 1.0, center.z + 0.5)
+                } else {
+                    val loc = villager.location
+                    val highestY = loc.world.getHighestBlockYAt(loc.blockX, loc.blockZ)
+                    Location(loc.world, loc.x, highestY + 1.0, loc.z, loc.yaw, loc.pitch)
+                }
+
+                nmsVillager.assignedBlock = null
+                nmsVillager.digTicks = 0
+                nmsVillager.buildTicks = 0
+                nmsVillager.isBuildDistanceHackActive = false
+                nmsVillager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+
+                villager.teleport(safeLoc)
+
+                villager.world.playSound(safeLoc, Sound.ENTITY_VILLAGER_HURT, 1.0f, 1.0f)
+                villager.world.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
+            }
+        }
     }
 }
