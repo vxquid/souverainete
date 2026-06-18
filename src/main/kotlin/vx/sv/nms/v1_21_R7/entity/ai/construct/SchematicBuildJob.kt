@@ -1,6 +1,7 @@
 package vx.sv.nms.v1_21_R7.entity.ai.construct
 
 import net.minecraft.core.BlockPos
+import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.data.BlockData
@@ -43,9 +44,7 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
         }
     }
 
-    // Вспомогательный метод для выбора ближайшего блока из конкретного списка
     private fun claimFromList(list: List<BlockToPlace>, npc: HumanoidVillager, npcPos: BlockPos): BlockToPlace? {
-        // Сначала ищем препятствия (расчистка)
         val obstacles = list.filter {
             if (it.isPlaced || it.claimedBy != null) return@filter false
             val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
@@ -66,7 +65,6 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
             return closest
         }
 
-        // Если расчищать нечего — ищем блоки для строительства
         val buildCandidates = list.filter { !it.isPlaced && it.claimedBy == null }
         if (buildCandidates.isEmpty()) return null
 
@@ -86,7 +84,6 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
             val npcPos = npc.blockPosition()
             val blocksList = getBlocks()
 
-            // Сбрасываем зависшие задачи
             blocksList.forEach { block ->
                 val claimer = block.claimedBy
                 if (claimer != null) {
@@ -96,33 +93,55 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
                 }
             }
 
-            // Отмечаем уже поставленные
             blocksList.filter { !it.isPlaced }.forEach {
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
                 if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
                     it.isPlaced = true
+
+                    // ИСПРАВЛЕНО: Сброс зарезервированного блока, если он завершился нативно
+                    val claimer = it.claimedBy
+                    if (claimer != null && claimer.assignedBlock == it) {
+                        claimer.assignedBlock = null
+                        claimer.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                        claimer.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+                    }
                     it.claimedBy = null
                 }
             }
 
-            // ИСПРАВЛЕНО: Сперва пытаемся назначить блоки ЗДАНИЯ (как расчистку, так и стройку)
             val buildingBlocks = blocksList.filter { !it.isRoad }
             val buildingClaim = claimFromList(buildingBlocks, npc, npcPos)
             if (buildingClaim != null) return buildingClaim
 
-            // Если здание ПОЛНОСТЬЮ завершено — переходим к ДОРОГЕ
             val roadBlocks = blocksList.filter { it.isRoad }
             return claimFromList(roadBlocks, npc, npcPos)
         }
     }
 
     fun unclaimBlock(block: BlockToPlace) {
-        synchronized(lock) { block.claimedBy = null }
+        synchronized(lock) {
+            // ИСПРАВЛЕНО: Отправляем коллбэк претенденту на блок при отмене
+            val claimer = block.claimedBy
+            if (claimer != null && claimer.assignedBlock == block) {
+                claimer.assignedBlock = null
+                claimer.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                claimer.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+            }
+            block.claimedBy = null
+        }
     }
 
     fun completeBlock(block: BlockToPlace) {
         synchronized(lock) {
             block.isPlaced = true
+
+            // ИСПРАВЛЕНО: Отправляем коллбэк претенденту на блок при успешном завершении
+            val claimer = block.claimedBy
+            if (claimer != null && claimer.assignedBlock == block) {
+                claimer.assignedBlock = null
+                claimer.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                claimer.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+            }
             block.claimedBy = null
         }
     }
@@ -130,13 +149,23 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
     fun isFinished(): Boolean {
         synchronized(lock) {
             val blocksList = getBlocks()
+
             blocksList.filter { !it.isPlaced }.forEach {
                 val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
                 if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
                     it.isPlaced = true
+
+                    // ИСПРАВЛЕНО: Сброс зарезервированного блока при нативном завершении
+                    val claimer = it.claimedBy
+                    if (claimer != null && claimer.assignedBlock == it) {
+                        claimer.assignedBlock = null
+                        claimer.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                        claimer.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+                    }
                     it.claimedBy = null
                 }
             }
+
             return blocksList.all { it.isPlaced }
         }
     }

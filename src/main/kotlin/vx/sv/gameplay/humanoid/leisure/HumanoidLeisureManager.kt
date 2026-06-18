@@ -1,11 +1,13 @@
 package vx.sv.gameplay.humanoid.leisure
 
 import com.destroystokyo.paper.entity.Pathfinder
+import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.entity.CraftVillager
+import org.bukkit.entity.Pose
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
@@ -66,27 +68,28 @@ class HumanoidLeisureManager : Listener {
 
             val candidate = plugin.server.worlds
                 .filter { plugin.gameplayManager.allowedWorlds.contains(it) }
-                // Restrict leisure search during the night, as NPCs should be sleeping.
-                .filter { !isNightTime(it.time) }
+                // ИСПРАВЛЕНО: Убрано ночное ограничение мира, так как бездомные жители бодрствуют ночью у костра
                 .flatMap { it.entities }
                 .filterIsInstance<Villager>()
                 .filter {
-                    val nmsVillager = (it as? CraftVillager)?.handle as? HumanoidVillager
+                    val nmsVillager = (it as? CraftVillager)?.handle as? HumanoidVillager ?: return@filter false
+                    val isNight = isNightTime(it.world.time)
+
+                    // ИСПРАВЛЕНО: Ночью досугом могут заниматься ТОЛЬКО бездомные жители (нет кровати в памяти)
+                    if (isNight) {
+                        val hasBed = nmsVillager.brain.hasMemoryValue(MemoryModuleType.HOME)
+                        if (hasBed) return@filter false
+                    }
 
                     it.isValid &&
                             !activeSessions.containsKey(it) &&
                             it.vehicle == null &&
-                            // Ignore NPCs that are currently sleeping or getting into bed.
-                            it.pose != org.bukkit.entity.Pose.SLEEPING &&
+                            it.pose != Pose.SLEEPING &&
                             !it.isSleeping &&
-                            // Ignore NPCs that are in an active dialogue session.
                             DialogueSession.activeDialogueSessions.none { session -> session.entity == it } &&
-                            // Ignore NPCs that are interacting via a menu.
                             InteractionHandler.openedMenuList.none { menu -> menu.villager == it } &&
-                            // Игнорируем жителей, которые уже находятся в пати с игроком
                             it.partyLeaderUUID == null &&
-                            // Игнорируем жителей, у которых есть активная задача строительства
-                            nmsVillager?.activeBuildJob == null
+                            nmsVillager.activeBuildJob == null
                 }
                 .randomOrNull() ?: return@runTaskTimer
 
@@ -103,32 +106,31 @@ class HumanoidLeisureManager : Listener {
                 val npc = session.villager
                 val nmsVillager = (npc as? CraftVillager)?.handle as? HumanoidVillager
 
-                // Прерываем сессию досуга, если NPC умер, стал невалидным, сменил мир, вступил в пати или начал СТРОИТЬ
                 if (!npc.isValid || npc.isDead || npc.world != session.targetSeat.world || npc.partyLeaderUUID != null || nmsVillager?.activeBuildJob != null) {
-                    standUp(npc, session) // Ensures attributes are safely reset
-                    iterator.remove()
-                    continue
-                }
-
-                // Force NPCs sitting outdoors to stand up and go home when night falls
-                val isNight = isNightTime(npc.world.time)
-                if (isNight && session.preference == Preference.OUTDOOR) {
                     standUp(npc, session)
                     iterator.remove()
                     continue
                 }
 
-                // Terminate session if the maximum duration has been reached
+                // Бездомные жители сидят у костра всю ночь, домашние — уходят домой с наступлением темноты
+                val isNight = isNightTime(npc.world.time)
+                if (isNight && session.preference == Preference.OUTDOOR) {
+                    val hasBed = nmsVillager?.brain?.hasMemoryValue(MemoryModuleType.HOME) ?: false
+                    if (hasBed) {
+                        standUp(npc, session)
+                        iterator.remove()
+                        continue
+                    }
+                }
+
                 if (time - session.startTime > session.maxDuration) {
                     standUp(npc, session)
                     iterator.remove()
                     continue
                 }
 
-                // Process the current state of the session
                 when (session.state) {
                     LeisureState.PATHING -> {
-                        // Cancel leisure pathing if the player suddenly engages the NPC in a dialogue or menu
                         val inDialogue = DialogueSession.activeDialogueSessions.any { it.entity == npc }
                         val inMenu = InteractionHandler.openedMenuList.any { it.villager == npc }
                         if (inDialogue || inMenu) {
@@ -173,14 +175,21 @@ class HumanoidLeisureManager : Listener {
         val world = npc.world
         val centerChunk = npc.location.chunk
 
-        // Synchronously capture metadata
         val npcY = npc.location.blockY
         val minHeight = world.minHeight
         val maxHeight = world.maxHeight
         val occupiedSnapshot = occupiedSeats.toSet()
 
-        val desiredPreference = if (Random.nextDouble() < config.interaction.indoorPreferenceChance) Preference.INDOOR else Preference.OUTDOOR
-        val isSocial = Random.nextBoolean()
+        // ИСПРАВЛЕНО: Ночью бездомный житель строго предпочитает находиться уличный костер
+        val isNight = isNightTime(world.time)
+        val desiredPreference = if (isNight) {
+            Preference.OUTDOOR
+        } else {
+            if (Random.nextDouble() < config.interaction.indoorPreferenceChance) Preference.INDOOR else Preference.OUTDOOR
+        }
+
+        // Ночью у костра веселее сидеть компанией
+        val isSocial = if (isNight) true else Random.nextBoolean()
 
         val snapshots = mutableListOf<org.bukkit.ChunkSnapshot>()
         for (dx in -1..1) {
@@ -288,7 +297,7 @@ class HumanoidLeisureManager : Listener {
                                     for (n in neighbors) {
                                         val neighborMat = getMat(n.first, y, n.second)
                                         if (neighborMat.name.endsWith("STAIRS")) {
-                                            score += config.scoring.benchBonus
+                                            score += config.scoring.campfireBonus
                                             break
                                         }
                                     }
@@ -300,6 +309,8 @@ class HumanoidLeisureManager : Listener {
                                     }
                                     if (nearCampfire) {
                                         score += config.scoring.campfireBonus
+                                        // ИСПРАВЛЕНО: Ночью делаем выбор костра абсолютным
+                                        if (isNight) score += 5000
                                     }
                                 }
 
@@ -313,7 +324,6 @@ class HumanoidLeisureManager : Listener {
             val bestSeat = candidates.maxByOrNull { it.second } ?: return@Runnable
 
             plugin.server.scheduler.runTask(plugin, Runnable {
-                // Safety guard: NPC could have died/unloaded or been assigned another task while the async calculation ran
                 if (!npc.isValid || npc.isDead || activeSessions.containsKey(npc) || npc.partyLeaderUUID != null) return@Runnable
                 if (occupiedSeats.contains(bestSeat.first)) return@Runnable
 
@@ -348,18 +358,51 @@ class HumanoidLeisureManager : Listener {
         )
     }
 
+    // ИСПРАВЛЕНО: Плавный разворот жителя лицом к костру
+    private fun faceCampfire(npc: Villager, seatLoc: Location) {
+        val world = seatLoc.world ?: return
+        var nearestCampfire: Location? = null
+        var minDistSq = Double.MAX_VALUE
+
+        for (x in -6..6) {
+            for (y in -2..2) {
+                for (z in -6..6) {
+                    val checkBlock = seatLoc.clone().add(x.toDouble(), y.toDouble(), z.toDouble()).block
+                    if (checkBlock.type == Material.CAMPFIRE || checkBlock.type == Material.SOUL_CAMPFIRE) {
+                        val distSq = checkBlock.location.distanceSquared(seatLoc)
+                        if (distSq < minDistSq) {
+                            minDistSq = distSq
+                            nearestCampfire = checkBlock.location.add(0.5, 0.5, 0.5)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (nearestCampfire != null) {
+            val dir = nearestCampfire.toVector().subtract(npc.location.toVector())
+            if (dir.lengthSquared() > 0) {
+                val loc = npc.location
+                loc.setDirection(dir)
+                npc.teleport(loc)
+            }
+        }
+    }
+
     private fun handlePathing(session: LeisureSession) {
         val npc = session.villager
         val target = session.targetSeat
 
-        // Switch to sitting state once the NPC is close enough to the target
         if (npc.location.distanceSquared(target) < config.pathing.sitDistanceSquared) {
             session.state = LeisureState.SITTING
+
+            // ИСПРАВЛЕНО: Перед усаживанием разворачиваем жителя лицом к огню
+            faceCampfire(npc, target)
+
             plugin.gameplayManager.humanoidManager.protocolListener.actionController.toggleSitting(npc, true, target.block)
             return
         }
 
-        // Manage pathfinding through the Paper API safely
         val pathfinder: Pathfinder = npc.pathfinder
         val finalPoint = pathfinder.currentPath?.finalPoint
         val distanceSq = finalPoint?.distanceSquared(target) ?: Double.MAX_VALUE
@@ -394,7 +437,6 @@ class HumanoidLeisureManager : Listener {
         val sound = if (isDrink) Sound.ENTITY_GENERIC_DRINK else Sound.ENTITY_GENERIC_EAT
 
         humanoid?.consume(npc.world, item, sound, 7, npc.location, 7) {
-            // Visual consumption completed; no status effects are applied.
         }
     }
 
@@ -429,7 +471,6 @@ class HumanoidLeisureManager : Listener {
 
             if (checkLoc.blockY !in minHeight until maxHeight) continue
 
-            // Guard against evaluating unloaded chunks synchronously.
             if (!world.isChunkLoaded(checkLoc.blockX shr 4, checkLoc.blockZ shr 4)) continue
 
             val block = checkLoc.block
@@ -446,7 +487,6 @@ class HumanoidLeisureManager : Listener {
                         val frontX = checkLoc.blockX + frontFace.modX
                         val frontZ = checkLoc.blockZ + frontFace.modZ
 
-                        // Guard for the block directly in front of the stairs
                         if (!world.isChunkLoaded(frontX shr 4, frontZ shr 4)) {
                             isSeat = false
                         } else {
@@ -526,7 +566,6 @@ class HumanoidLeisureManager : Listener {
             val npcLoc = session.villager.location
             val seatLoc = session.targetSeat
 
-            // Cancel session if either the NPC or its designated destination gets unloaded
             val isNpcInChunk = npcLoc.world == chunk.world && (npcLoc.blockX shr 4) == chunk.x && (npcLoc.blockZ shr 4) == chunk.z
             val isSeatInChunk = seatLoc.world == chunk.world && (seatLoc.blockX shr 4) == chunk.x && (seatLoc.blockZ shr 4) == chunk.z
 

@@ -8,6 +8,7 @@ import org.bukkit.block.BlockFace
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.block.BlockBreakEvent
+import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.world.AsyncStructureSpawnEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
@@ -89,6 +90,33 @@ class VillageGenerationListener : Listener {
     }
 
     @EventHandler
+    fun onCampfireDamage(event: EntityDamageEvent) {
+        val cause = event.cause
+        if (cause == EntityDamageEvent.DamageCause.FIRE ||
+            cause == EntityDamageEvent.DamageCause.FIRE_TICK ||
+            cause == EntityDamageEvent.DamageCause.HOT_FLOOR) {
+
+            val loc = event.entity.location
+            val block = loc.block
+            val blockBelow = block.getRelative(BlockFace.DOWN)
+
+            if (block.type == Material.CAMPFIRE ||
+                block.type == Material.SOUL_CAMPFIRE ||
+                blockBelow.type == Material.CAMPFIRE ||
+                blockBelow.type == Material.SOUL_CAMPFIRE) {
+
+                val worldSettlements = SettlementManager.settlements[loc.world] ?: return
+                // ИСПРАВЛЕНО: Увеличен радиус защиты от горения у костра до 36 блоков, чтобы смещенный костер тоже защищал
+                val isNearCenter = worldSettlements.any { it.data.center.distanceSquared(loc) <= 36.0 }
+                if (isNearCenter) {
+                    event.isCancelled = true
+                    event.entity.fireTicks = 0
+                }
+            }
+        }
+    }
+
+    @EventHandler
     fun onVanillaVillageSpawn(event: AsyncStructureSpawnEvent) {
         val structure = event.structure
 
@@ -155,13 +183,18 @@ class VillageGenerationListener : Listener {
                     }
                 }
 
-                // ИСПРАВЛЕНО: Аварийный fallback удален. Если суша не найдена, спавн безопасно отменяется.
                 if (!foundDryLand) {
                     plugin.logger.info("[Souverainete] Спавн поселения отменен: в зоне генерации пригодная суша отсутствует.")
                     return@Runnable
                 }
 
                 val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
+
+                // ИСПРАВЛЕНО: Костер теперь спавнится со смещением на 4 блока на Восток от центра
+                // Это предотвращает его автоматическое стирание (замену блоками) при последующей застройке Meeting Point (беседки)
+                val groundY = SettlementPlanner.getHighestGroundYAt(world, bestX + 4, bestZ)
+                val safeCampfireLoc = Location(world, bestX.toDouble() + 4.0, groundY.toDouble() + 1.0, bestZ.toDouble())
+                safeCampfireLoc.block.type = Material.CAMPFIRE
 
                 val citizens = mutableSetOf<BukkitVillager>()
                 for (i in 0 until 10) {

@@ -182,6 +182,7 @@ class SettlementPlanner(val settlement: Settlement) {
             while (y > world.minHeight) {
                 val block = world.getBlockAt(x, y, z)
                 val type = block.type
+
                 val isTreeOrPlant = isTreeBlock(type) || block.isIgnorableObstacle()
                 if (isTreeOrPlant) {
                     y--
@@ -368,7 +369,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val records = buildings[settlement.data.id] ?: emptyList()
         val jobId = records.find { it.type == "MEETING_POINT" }?.jobId ?: UUID.randomUUID()
 
-        // ИСПРАВЛЕНО: Теперь метод возвращает список сегментов дороги и финального здания
         val buildJobsList = startVanillaStructureConstruction(cx, baseY, cz, type, StructureRotation.NONE, jobId)
 
         val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
@@ -454,26 +454,19 @@ class SettlementPlanner(val settlement: Settlement) {
         val minRadius = 18
         val maxAttempts = if (isCritical) 600 else 400
 
-        val rawWidth = type.width
-        val rawLength = type.length
-        val buildingHeight = type.height
+        // ИСПРАВЛЕНО: Динамически рассчитываем размеры структуры из NBT без хардкода в Enum
+        val structureSize = VanillaStructureLoader.getStructureSize(type.vanillaPath)
+        val rawWidth = structureSize.blockX
+        val rawLength = structureSize.blockZ
+        val buildingHeight = structureSize.blockY
 
         val rand = Random()
         val recordsList = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
 
+        // ИСПРАВЛЕНО: Умный выбор единственного лучшего кандидата входа (например, нижней половины двери) для идеального позиционирования дверей
         val jigsawPos = VanillaStructureLoader.getRawEntranceCandidates(type.vanillaPath)
         val entrancePos = if (jigsawPos.isNotEmpty()) {
-            var totalWeight = 0.0
-            var sumX = 0.0
-            var sumY = 0.0
-            var sumZ = 0.0
-            for (cand in jigsawPos) {
-                sumX += cand.pos.x * cand.weight
-                sumY += cand.pos.y * cand.weight
-                sumZ += cand.pos.z * cand.weight
-                totalWeight += cand.weight
-            }
-            BlockPos((sumX / totalWeight).toInt(), (sumY / totalWeight).toInt(), (sumZ / totalWeight).toInt())
+            jigsawPos.maxByOrNull { it.weight }?.pos ?: BlockPos(rawWidth / 2, 0, 0)
         } else {
             BlockPos(rawWidth / 2, 0, 0)
         }
@@ -560,6 +553,15 @@ class SettlementPlanner(val settlement: Settlement) {
                         break
                     }
 
+                    // ИСПРАВЛЕНО: Строго запрещаем размещать дома поверх проложенных дорог/тропинок
+                    val isRoadBlock = surfaceBlockType == Material.DIRT_PATH ||
+                            surfaceBlockType.name.contains("PATH") ||
+                            roads.any { it.x == absX && it.z == absZ }
+                    if (isRoadBlock) {
+                        validTerrain = false
+                        break
+                    }
+
                     val hy = getHighestGroundYAt(world, absX, absZ)
                     if (hy < minY) minY = hy
                     if (hy > maxY) maxY = hy
@@ -586,10 +588,12 @@ class SettlementPlanner(val settlement: Settlement) {
 
             while (true) {
                 val hy = getHighestGroundYAt(world, px, pz)
+
                 if (abs(hy - center.blockY) > 9) {
                     pathValid = false
                     break
                 }
+
                 if (px == cx && pz == cz) break
                 val e2 = 2 * err
                 if (e2 > -dZ) { err -= dZ; px += sX }
@@ -642,7 +646,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
             settlement.expandTerritory(15.0)
 
-            // ИСПРАВЛЕНО: Принимаем список пошаговых задач
             val buildJobsList = startVanillaStructureConstruction(cx, finalBaseY, cz, type, bestRotation, jobId)
 
             val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
@@ -661,13 +664,15 @@ class SettlementPlanner(val settlement: Settlement) {
         type: VanillaBuildingType,
         rotation: StructureRotation,
         jobId: UUID
-    ): List<SchematicBuildJob> { // ИСПРАВЛЕНО: Теперь возвращает пошаговые сегментированные задачи
+    ): List<SchematicBuildJob> {
         val jobsList = mutableListOf<SchematicBuildJob>()
         val center = settlement.data.center
 
-        val rawWidth = type.width
-        val rawLength = type.length
-        val height = type.height
+        // ИСПРАВЛЕНО: Динамически берем размеры без хардкода
+        val structureSize = VanillaStructureLoader.getStructureSize(type.vanillaPath)
+        val rawWidth = structureSize.blockX
+        val rawLength = structureSize.blockZ
+        val height = structureSize.blockY
         val vanillaPath = type.vanillaPath
 
         val width = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
@@ -709,10 +714,9 @@ class SettlementPlanner(val settlement: Settlement) {
 
         var prevCenterRoadY: Int? = null
 
-        // Переменные для автоматического разбиения пути на маленькие отрезки
         var currentRoadJob = SchematicBuildJob(world)
         var stepsInSegment = 0
-        val maxStepsPerSegment = 8 // Сегменты дороги ровно по 8 блоков для легкого Pathfinding у ИИ
+        val maxStepsPerSegment = 8
 
         while (true) {
             val naturalCenterY = getHighestGroundYAt(world, currentX, currentZ)
@@ -795,7 +799,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
 
             stepsInSegment++
-            // Складываем готовые короткие сегменты дорог в общий список задач
             if (stepsInSegment >= maxStepsPerSegment) {
                 if (currentRoadJob.getBlocks().isNotEmpty()) {
                     jobsList.add(currentRoadJob)
@@ -816,12 +819,10 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // Забираем последний кусочек дороги, если он не набрал лимит по шагам
         if (currentRoadJob.getBlocks().isNotEmpty()) {
             jobsList.add(currentRoadJob)
         }
 
-        // ИСПРАВЛЕНО: Строго в самом конце создаем финализирующий проект с оригинальным jobId — само здание
         val buildJob = SchematicBuildJob(world, jobId)
 
         val materialCounts = mutableMapOf<Material, Int>()
@@ -844,7 +845,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val finalMimicMaterial = if (mimicMaterial == Material.GRASS_BLOCK) Material.DIRT else mimicMaterial
         val foundationBlockData = finalMimicMaterial.createBlockData()
 
-        // 1. Создаем котлован и фундамент
         for (x in 0 until width) {
             for (z in 0 until length) {
                 val absX = cx - width / 2 + x
@@ -864,7 +864,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // 2. Создаем блоки самой структуры здания
         val rawRelativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
         if (rawRelativeBlocks.isNotEmpty()) {
             rawRelativeBlocks.forEach { relBlock ->

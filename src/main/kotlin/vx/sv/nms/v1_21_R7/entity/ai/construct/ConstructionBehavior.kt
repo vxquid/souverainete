@@ -41,8 +41,6 @@ class ConstructionBehavior(
     companion object {
         private val debugVisualsMap = mutableMapOf<UUID, Pair<BlockDisplay, BlockDisplay>>()
         private val remoteActionsStreakMap = java.util.WeakHashMap<HumanoidVillager, Int>()
-
-        // ИСПРАВЛЕНО: Карта для отслеживания движения жителей в реальном времени
         private val lastLocationMap = java.util.WeakHashMap<HumanoidVillager, Location>()
     }
 
@@ -266,6 +264,14 @@ class ConstructionBehavior(
 
         val settlement = villager.settlement ?: return false
 
+        // ИСПРАВЛЕНО: Стираем социальные цели, чтобы житель не отвлекался на диалоги во время планирования задач
+        if (villager.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {
+            villager.brain.eraseMemory(MemoryModuleType.INTERACTION_TARGET)
+        }
+        if (villager.brain.hasMemoryValue(MemoryModuleType.BREED_TARGET)) {
+            villager.brain.eraseMemory(MemoryModuleType.BREED_TARGET)
+        }
+
         if (villager.activeBuildJob == null && villager.savedJobId != null) {
             val activeList = SettlementPlanner.activeJobs[settlement.data.id]
             val active = activeList?.find { it.jobId == villager.savedJobId }
@@ -373,9 +379,14 @@ class ConstructionBehavior(
 
         handleDebugVisuals(world, villager, block)
 
-        // ИСПРАВЛЕНО: Умное обновление таймера бездействия.
-        // Если житель двигается (пробежал более 0.05 блока за тик) или активно работает (копает/строит),
-        // мы сбрасываем его таймер простоя. Это предотвращает ложную активацию удаленного строительства при беге.
+        // ИСПРАВЛЕНО: Предотвращаем социальные затупы (разговоры, спаривание) во время работы
+        if (villager.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {
+            villager.brain.eraseMemory(MemoryModuleType.INTERACTION_TARGET)
+        }
+        if (villager.brain.hasMemoryValue(MemoryModuleType.BREED_TARGET)) {
+            villager.brain.eraseMemory(MemoryModuleType.BREED_TARGET)
+        }
+
         val currentLoc = villager.bukkitEntity.location
         val lastLoc = lastLocationMap[villager]
 
@@ -383,7 +394,7 @@ class ConstructionBehavior(
             villager.lastBuildActionTime = world.gameTime
         } else if (lastLoc != null && currentLoc.world == lastLoc.world) {
             val distanceMovedSq = currentLoc.distanceSquared(lastLoc)
-            if (distanceMovedSq > 0.0025) { // Движение > 0.05 блока за тик
+            if (distanceMovedSq > 0.0025) {
                 villager.lastBuildActionTime = world.gameTime
             }
         }
@@ -637,11 +648,10 @@ class BuilderSafetyListener : Listener {
     @EventHandler
     fun onNpcDamage(event: EntityDamageEvent) {
         val villager = event.entity as? BukkitVillager ?: return
+        val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager ?: return
 
-        if (event.cause == EntityDamageEvent.DamageCause.SUFFOCATION) {
-            val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager ?: return
-
-            if (nmsVillager.activeBuildJob != null) {
+        if (nmsVillager.activeBuildJob != null) {
+            if (event.cause == EntityDamageEvent.DamageCause.SUFFOCATION) {
                 event.isCancelled = true
 
                 val settlement = nmsVillager.settlement
@@ -655,6 +665,12 @@ class BuilderSafetyListener : Listener {
                     Location(loc.world, loc.x, highestY + 1.0, loc.z, loc.yaw, loc.pitch)
                 }
 
+                val job = nmsVillager.activeBuildJob
+                val assigned = nmsVillager.assignedBlock
+                if (assigned != null && job != null) {
+                    job.unclaimBlock(assigned)
+                }
+
                 nmsVillager.assignedBlock = null
                 nmsVillager.digTicks = 0
                 nmsVillager.buildTicks = 0
@@ -665,6 +681,29 @@ class BuilderSafetyListener : Listener {
 
                 villager.world.playSound(safeLoc, Sound.ENTITY_VILLAGER_HURT, 1.0f, 1.0f)
                 villager.world.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
+            }
+            else if (event.cause == EntityDamageEvent.DamageCause.ENTITY_ATTACK ||
+                event.cause == EntityDamageEvent.DamageCause.PROJECTILE) {
+
+                val job = nmsVillager.activeBuildJob
+                val assigned = nmsVillager.assignedBlock
+
+                if (assigned != null && job != null) {
+                    job.unclaimBlock(assigned)
+                }
+
+                nmsVillager.assignedBlock = null
+                nmsVillager.digTicks = 0
+                nmsVillager.buildTicks = 0
+                nmsVillager.isBuildDistanceHackActive = false
+                nmsVillager.lastBuildActionTime = nmsVillager.level().gameTime
+
+                nmsVillager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                nmsVillager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+                nmsVillager.refreshBrain(nmsVillager.level() as ServerLevel)
+
+                val loc = villager.location
+                loc.world.spawnParticle(Particle.HAPPY_VILLAGER, loc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
             }
         }
     }
