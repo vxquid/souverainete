@@ -197,7 +197,7 @@ class VillageGenerationListener : Listener {
                 safeCampfireLoc.block.type = Material.CAMPFIRE
 
                 val citizens = mutableSetOf<BukkitVillager>()
-                for (i in 0 until 10) {
+                for (i in 0 until 15) {
                     val spawnLoc = centerLoc.clone().add(1.5, 1.0, 1.5)
                     val v = world.spawn(spawnLoc, BukkitVillager::class.java) { villager ->
                         villager.profession = BukkitVillager.Profession.NONE

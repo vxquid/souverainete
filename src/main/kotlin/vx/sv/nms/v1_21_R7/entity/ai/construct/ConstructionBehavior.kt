@@ -1,6 +1,7 @@
 package vx.sv.nms.v1_21_R7.entity.ai.construct
 
 import com.google.common.collect.ImmutableMap
+import net.minecraft.core.BlockPos
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.entity.ai.behavior.Behavior
@@ -226,7 +227,7 @@ class ConstructionBehavior(
             if (!checked.add(current)) continue
 
             val type = current.type
-            val isLog = type.name.contains("LOG") || type.name.contains("WOOD")
+            val isLog = type.name.contains("LOG") || type.name.contains("WOOD") || type.name.contains("STEM") || type.name.contains("HYPHAE")
             val isLeaves = type.name.contains("LEAVES")
 
             if (isLog || isLeaves) {
@@ -247,6 +248,36 @@ class ConstructionBehavior(
         }
     }
 
+    // ИСПРАВЛЕНО: Поиск соприкасающегося ствола дерева в радиусе 7 блоков от листвы
+    private fun findConnectedTrunk(startBlock: Block): Block? {
+        val checked = mutableSetOf<Block>()
+        val queue = ArrayDeque<Block>()
+        queue.add(startBlock)
+
+        var processedCount = 0
+        while (queue.isNotEmpty() && processedCount++ < 100) {
+            val current = queue.poll()
+            if (!checked.add(current)) continue
+
+            val type = current.type
+            val isLog = type.name.contains("LOG") || type.name.contains("WOOD") || type.name.contains("STEM") || type.name.contains("HYPHAE")
+            if (isLog) {
+                return current
+            }
+
+            if (type.name.contains("LEAVES")) {
+                for (face in BlockFace.entries) {
+                    if (face == BlockFace.SELF) continue
+                    val neighbor = current.getRelative(face)
+                    if (neighbor.location.distanceSquared(startBlock.location) <= 49.0) {
+                        queue.add(neighbor)
+                    }
+                }
+            }
+        }
+        return null
+    }
+
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         if (!world.world.isDayTime) return false
         if (world.gameTime < villager.nextBuildAvailableTime) return false
@@ -264,7 +295,6 @@ class ConstructionBehavior(
 
         val settlement = villager.settlement ?: return false
 
-        // ИСПРАВЛЕНО: Стираем социальные цели, чтобы житель не отвлекался на диалоги во время планирования задач
         if (villager.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {
             villager.brain.eraseMemory(MemoryModuleType.INTERACTION_TARGET)
         }
@@ -374,12 +404,22 @@ class ConstructionBehavior(
         val job = villager.activeBuildJob ?: return
 
         val bukkitWorld = world.world
-        val blockPos = assigned.pos
-        val block = bukkitWorld.getBlockAt(blockPos.x, blockPos.y, blockPos.z)
+        var blockPos = assigned.pos
+        var block = bukkitWorld.getBlockAt(blockPos.x, blockPos.y, blockPos.z)
+
+        // ИСПРАВЛЕНО: Умная геолокация ствола.
+        // Если жителю нужно расчистить листву, он мгновенно находит соприкасающийся ствол
+        // и переключает все свои действия (путь, взгляд, копание) на срубание ствола дерева.
+        if (block.type.name.contains("LEAVES")) {
+            val trunk = findConnectedTrunk(block)
+            if (trunk != null) {
+                block = trunk
+                blockPos = BlockPos(trunk.x, trunk.y, trunk.z)
+            }
+        }
 
         handleDebugVisuals(world, villager, block)
 
-        // ИСПРАВЛЕНО: Предотвращаем социальные затупы (разговоры, спаривание) во время работы
         if (villager.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {
             villager.brain.eraseMemory(MemoryModuleType.INTERACTION_TARGET)
         }
@@ -452,7 +492,7 @@ class ConstructionBehavior(
             villager.lookControl.setLookAt(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5)
 
             if (!block.isIgnorableObstacle()) {
-                if (block.type.name.contains("LOG") || block.type.name.contains("WOOD")) {
+                if (block.type.name.contains("LOG") || block.type.name.contains("WOOD") || block.type.name.contains("STEM") || block.type.name.contains("HYPHAE")) {
                     removeWholeTree(block)
 
                     remoteActionsStreakMap[villager] = 0

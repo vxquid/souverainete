@@ -102,7 +102,7 @@ class BuildTestListener : Listener {
             // Стартовый временный колокол больше не ставится на спавне кости.
             // Количество спавнящихся тестовых жителей увеличено до 12.
             val citizens = mutableSetOf<BukkitVillager>()
-            for (i in 0 until 12) {
+            for (i in 0 until 15) {
                 val v = world.spawn(centerLoc, BukkitVillager::class.java) { villager ->
                     villager.profession = BukkitVillager.Profession.NONE
                     villager.villagerLevel = 1
