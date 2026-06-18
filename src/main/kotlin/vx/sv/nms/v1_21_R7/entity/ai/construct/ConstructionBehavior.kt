@@ -248,7 +248,6 @@ class ConstructionBehavior(
         }
     }
 
-    // ИСПРАВЛЕНО: Поиск соприкасающегося ствола дерева в радиусе 7 блоков от листвы
     private fun findConnectedTrunk(startBlock: Block): Block? {
         val checked = mutableSetOf<Block>()
         val queue = ArrayDeque<Block>()
@@ -407,9 +406,6 @@ class ConstructionBehavior(
         var blockPos = assigned.pos
         var block = bukkitWorld.getBlockAt(blockPos.x, blockPos.y, blockPos.z)
 
-        // ИСПРАВЛЕНО: Умная геолокация ствола.
-        // Если жителю нужно расчистить листву, он мгновенно находит соприкасающийся ствол
-        // и переключает все свои действия (путь, взгляд, копание) на срубание ствола дерева.
         if (block.type.name.contains("LEAVES")) {
             val trunk = findConnectedTrunk(block)
             if (trunk != null) {
@@ -463,14 +459,15 @@ class ConstructionBehavior(
         val npcPos = villager.blockPosition()
         val diffX = kotlin.math.abs(blockPos.x - npcPos.x)
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
-        val diffY = kotlin.math.abs(blockPos.y - npcPos.y)
 
+        // ИСПРАВЛЕНО: Полностью удалена проверка высоты diffY.
+        // Жителям теперь достаточно быть близко по горизонтали (X и Z), чтобы строить крыши или копать вниз
         val isWithinReach = if (villager.isBuildDistanceHackActive) {
             true
         } else if (assigned.isRoad) {
-            (diffX * diffX + diffZ * diffZ <= 9.0) && (diffY <= 3)
+            (diffX * diffX + diffZ * diffZ <= 9.0) // макс. 3 блока горизонтально
         } else {
-            (diffX * diffX + diffZ * diffZ <= 16.0) && (diffY <= 4)
+            (diffX * diffX + diffZ * diffZ <= 16.0) // макс. 4 блока горизонтально
         }
 
         if (isWithinReach) {

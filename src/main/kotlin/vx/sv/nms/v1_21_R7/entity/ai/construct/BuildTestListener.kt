@@ -2,8 +2,8 @@ package vx.sv.nms.v1_21_R7.entity.ai.construct
 
 import net.minecraft.core.BlockPos
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
+import org.bukkit.Location
 import org.bukkit.Material
-import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
@@ -61,7 +61,7 @@ class BuildTestListener : Listener {
             val nearbyEntities = player.getNearbyEntities(20.0, 20.0, 20.0)
             val nearbyVillagers = nearbyEntities
                 .filterIsInstance<BukkitVillager>()
-                .mapNotNull { (it as? CraftVillager)?.handle as? HumanoidVillager }
+                .mapNotNull { (it as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager }
 
             if (nearbyVillagers.isEmpty()) {
                 player.sendMessage("§cПоблизости не найдено кастомных NPC HumanoidVillager!")
@@ -99,8 +99,13 @@ class BuildTestListener : Listener {
 
             player.sendMessage("§a§l[Souverainete] §fМгновенная генерация тестового поселения в точке клика...")
 
-            // Стартовый временный колокол больше не ставится на спавне кости.
-            // Количество спавнящихся тестовых жителей увеличено до 12.
+            // ИСПРАВЛЕНО: Генерируем уютный костер со смещением при спавне деревни костью, чтобы он появлялся при тестах!
+            val bestX = centerLoc.blockX
+            val bestZ = centerLoc.blockZ
+            val groundY = SettlementPlanner.getHighestGroundYAt(world, bestX + 4, bestZ)
+            val safeCampfireLoc = Location(world, bestX.toDouble() + 4.0, groundY.toDouble() + 1.0, bestZ.toDouble())
+            safeCampfireLoc.block.type = Material.CAMPFIRE
+
             val citizens = mutableSetOf<BukkitVillager>()
             for (i in 0 until 15) {
                 val v = world.spawn(centerLoc, BukkitVillager::class.java) { villager ->
@@ -125,23 +130,16 @@ class BuildTestListener : Listener {
 
             val planner = SettlementPlanner(settlement)
 
-            // === ИСПРАВЛЕНО: Синхронизированный порядок планирования ===
-            // 1. Сначала ресурсы и выживание (на расстоянии)
             planner.planBuilding(VanillaBuildingType.FARM)
             planner.planBuilding(VanillaBuildingType.SHEPHERD)
-
-            // 2. Затем роскошная ратуша-собор (планируется на расстоянии, как уникальное строение)
             planner.planBuilding(VanillaBuildingType.TOWN_HALL)
-
-            // 3. А геометрический центр площади застраивается открытой беседкой MEETING_POINT
             planner.planMeetingPointAtCenter()
 
-            // 4. Оставшаяся очередь застройки по приоритетам
             repeat(10) {
                 planner.planNextPriorityBuilding()
             }
 
-            player.sendMessage("§a§l[Souverainete] §aПоселение успешно основано! Рабочие заспавнены и приступили к застройке тестовых плит.")
+            player.sendMessage("§a§l[Souverainete] §aПоселение успешно основано! Рабочие заспавнены, безопасный костер зажжен на холме и ИИ начал застройку.")
         }
     }
 }
