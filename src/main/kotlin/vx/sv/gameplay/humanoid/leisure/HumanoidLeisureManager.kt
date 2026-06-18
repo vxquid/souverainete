@@ -62,24 +62,17 @@ class HumanoidLeisureManager : Listener {
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
 
-        // Global ticker: searches for idle NPCs that can start a leisure session.
+        // ТИКЕР 1: Обычный дневной досуг (работает только днем, по одному кандидату, соблюдая лимиты)
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
             if (activeSessions.size > config.maxActiveSessions) return@runTaskTimer
 
             val candidate = plugin.server.worlds
                 .filter { plugin.gameplayManager.allowedWorlds.contains(it) }
-                // ИСПРАВЛЕНО: Убрано ночное ограничение мира, так как бездомные жители бодрствуют ночью у костра
+                .filter { !isNightTime(it.time) } // Только днем
                 .flatMap { it.entities }
                 .filterIsInstance<Villager>()
                 .filter {
                     val nmsVillager = (it as? CraftVillager)?.handle as? HumanoidVillager ?: return@filter false
-                    val isNight = isNightTime(it.world.time)
-
-                    // ИСПРАВЛЕНО: Ночью досугом могут заниматься ТОЛЬКО бездомные жители (нет кровати в памяти)
-                    if (isNight) {
-                        val hasBed = nmsVillager.brain.hasMemoryValue(MemoryModuleType.HOME)
-                        if (hasBed) return@filter false
-                    }
 
                     it.isValid &&
                             !activeSessions.containsKey(it) &&
@@ -95,6 +88,36 @@ class HumanoidLeisureManager : Listener {
 
             startLeisureSearch(candidate)
         }, 200L, config.globalTickerInterval)
+
+        // ИСПРАВЛЕНО: ТИКЕР 2: Форсированный ночной сбор бездомных у костра (вопрос выживания)
+        // Срабатывает каждые 5 секунд, игнорирует лимиты сессий и отправляет ВСЕХ бездомных к костру одновременно
+        plugin.server.scheduler.runTaskTimer(plugin, { _ ->
+            plugin.server.worlds
+                .filter { plugin.gameplayManager.allowedWorlds.contains(it) }
+                .filter { isNightTime(it.time) } // Только ночью [2]
+                .forEach { world ->
+                    val homelessList = world.getEntitiesByClass(Villager::class.java).filter { villager ->
+                        val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager ?: return@filter false
+
+                        // Кровати нет -> бездомный
+                        val hasBed = nmsVillager.brain.hasMemoryValue(MemoryModuleType.HOME)
+
+                        !hasBed &&
+                                villager.isValid &&
+                                !activeSessions.containsKey(villager) &&
+                                villager.vehicle == null &&
+                                villager.pose != Pose.SLEEPING &&
+                                !villager.isSleeping &&
+                                DialogueSession.activeDialogueSessions.none { s -> s.entity == villager } &&
+                                InteractionHandler.openedMenuList.none { m -> m.villager == villager } &&
+                                villager.partyLeaderUUID == null &&
+                                nmsVillager.activeBuildJob == null
+                    }
+
+                    // Отправляем всех бездомных к костру одновременно
+                    homelessList.forEach { startLeisureSearch(it) }
+                }
+        }, 60L, 100L) // Быстрый запуск (через 3 сек), повтор каждые 5 сек [2]
 
         // Session control ticker: manages pathfinding, session timeouts, and eating/drinking chances.
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
@@ -112,7 +135,6 @@ class HumanoidLeisureManager : Listener {
                     continue
                 }
 
-                // Бездомные жители сидят у костра всю ночь, домашние — уходят домой с наступлением темноты
                 val isNight = isNightTime(npc.world.time)
                 if (isNight && session.preference == Preference.OUTDOOR) {
                     val hasBed = nmsVillager?.brain?.hasMemoryValue(MemoryModuleType.HOME) ?: false
@@ -180,7 +202,6 @@ class HumanoidLeisureManager : Listener {
         val maxHeight = world.maxHeight
         val occupiedSnapshot = occupiedSeats.toSet()
 
-        // ИСПРАВЛЕНО: Ночью бездомный житель строго предпочитает находиться уличный костер
         val isNight = isNightTime(world.time)
         val desiredPreference = if (isNight) {
             Preference.OUTDOOR
@@ -188,7 +209,6 @@ class HumanoidLeisureManager : Listener {
             if (Random.nextDouble() < config.interaction.indoorPreferenceChance) Preference.INDOOR else Preference.OUTDOOR
         }
 
-        // Ночью у костра веселее сидеть компанией
         val isSocial = if (isNight) true else Random.nextBoolean()
 
         val snapshots = mutableListOf<org.bukkit.ChunkSnapshot>()
@@ -309,7 +329,6 @@ class HumanoidLeisureManager : Listener {
                                     }
                                     if (nearCampfire) {
                                         score += config.scoring.campfireBonus
-                                        // ИСПРАВЛЕНО: Ночью делаем выбор костра абсолютным
                                         if (isNight) score += 5000
                                     }
                                 }
@@ -350,15 +369,23 @@ class HumanoidLeisureManager : Listener {
     private fun assignSeat(npc: Villager, loc: Location, pref: Preference) {
         if (occupiedSeats.contains(loc)) return
         occupiedSeats.add(loc)
+
+        // ИСПРАВЛЕНО: Ночью у костра жители сидят дольше (до рассвета, от 6 до 10 минут)
+        val isNight = isNightTime(npc.world.time)
+        val duration = if (isNight) {
+            Random.nextLong(360000L, 600000L)
+        } else {
+            Random.nextLong(config.duration.minDurationMs, config.duration.maxDurationMs)
+        }
+
         activeSessions[npc] = LeisureSession(
             villager = npc,
             targetSeat = loc,
             preference = pref,
-            maxDuration = Random.nextLong(config.duration.minDurationMs, config.duration.maxDurationMs)
+            maxDuration = duration
         )
     }
 
-    // ИСПРАВЛЕНО: Плавный разворот жителя лицом к костру
     private fun faceCampfire(npc: Villager, seatLoc: Location) {
         val world = seatLoc.world ?: return
         var nearestCampfire: Location? = null
@@ -395,10 +422,7 @@ class HumanoidLeisureManager : Listener {
 
         if (npc.location.distanceSquared(target) < config.pathing.sitDistanceSquared) {
             session.state = LeisureState.SITTING
-
-            // ИСПРАВЛЕНО: Перед усаживанием разворачиваем жителя лицом к огню
             faceCampfire(npc, target)
-
             plugin.gameplayManager.humanoidManager.protocolListener.actionController.toggleSitting(npc, true, target.block)
             return
         }
@@ -407,8 +431,11 @@ class HumanoidLeisureManager : Listener {
         val finalPoint = pathfinder.currentPath?.finalPoint
         val distanceSq = finalPoint?.distanceSquared(target) ?: Double.MAX_VALUE
 
+        // ИСПРАВЛЕНО: Скорость бега ночью увеличена до 1.25, чтобы бездомные экстренно бежали спасаться к костру
+        val speed = if (isNightTime(npc.world.time)) 1.25 else config.pathing.walkSpeed
+
         if (!pathfinder.hasPath() || distanceSq > config.pathing.repathDistanceSquared) {
-            pathfinder.moveTo(target, config.pathing.walkSpeed)
+            pathfinder.moveTo(target, speed)
         }
     }
 

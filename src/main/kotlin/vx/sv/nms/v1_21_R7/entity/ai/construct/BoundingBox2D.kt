@@ -344,6 +344,63 @@ class SettlementPlanner(val settlement: Settlement) {
                 StructureRotation.COUNTERCLOCKWISE_90 -> BlockPos(pos.z, pos.y, width - 1 - pos.x)
             }
         }
+
+        fun applyStoneVariability(blockData: org.bukkit.block.data.BlockData): org.bukkit.block.data.BlockData {
+            val currentMat = blockData.material
+            var finalBlockData = blockData
+            val r = java.util.Random().nextDouble()
+
+            if (currentMat == Material.COBBLESTONE) {
+                val targetMat = when {
+                    r < 0.15 -> Material.STONE
+                    r < 0.30 -> Material.ANDESITE
+                    r < 0.40 -> Material.MOSSY_COBBLESTONE
+                    else -> Material.COBBLESTONE
+                }
+                finalBlockData = targetMat.createBlockData()
+            } else if (currentMat == Material.COBBLESTONE_STAIRS) {
+                val targetMat = when {
+                    r < 0.15 -> Material.STONE_STAIRS
+                    r < 0.30 -> Material.ANDESITE_STAIRS
+                    r < 0.40 -> Material.MOSSY_COBBLESTONE_STAIRS
+                    else -> Material.COBBLESTONE_STAIRS
+                }
+                val dataStr = blockData.asString.replace("cobblestone", when (targetMat) {
+                    Material.STONE_STAIRS -> "stone"
+                    Material.ANDESITE_STAIRS -> "andesite"
+                    Material.MOSSY_COBBLESTONE_STAIRS -> "mossy_cobblestone"
+                    else -> "cobblestone"
+                })
+                try { finalBlockData = Bukkit.createBlockData(dataStr) } catch (_: Exception) {}
+            } else if (currentMat == Material.COBBLESTONE_SLAB) {
+                val targetMat = when {
+                    r < 0.15 -> Material.STONE_SLAB
+                    r < 0.30 -> Material.ANDESITE_SLAB
+                    r < 0.40 -> Material.MOSSY_COBBLESTONE_SLAB
+                    else -> Material.COBBLESTONE_SLAB
+                }
+                val dataStr = blockData.asString.replace("cobblestone", when (targetMat) {
+                    Material.STONE_SLAB -> "stone"
+                    Material.ANDESITE_SLAB -> "andesite"
+                    Material.MOSSY_COBBLESTONE_SLAB -> "mossy_cobblestone"
+                    else -> "cobblestone"
+                })
+                try { finalBlockData = Bukkit.createBlockData(dataStr) } catch (_: Exception) {}
+            } else if (currentMat == Material.COBBLESTONE_WALL) {
+                val targetMat = when {
+                    r < 0.20 -> Material.ANDESITE_WALL
+                    r < 0.40 -> Material.MOSSY_COBBLESTONE_WALL
+                    else -> Material.COBBLESTONE_WALL
+                }
+                val dataStr = blockData.asString.replace("cobblestone", when (targetMat) {
+                    Material.ANDESITE_WALL -> "andesite"
+                    Material.MOSSY_COBBLESTONE_WALL -> "mossy_cobblestone"
+                    else -> "cobblestone"
+                })
+                try { finalBlockData = Bukkit.createBlockData(dataStr) } catch (_: Exception) {}
+            }
+            return finalBlockData
+        }
     }
 
     init {
@@ -454,7 +511,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val minRadius = 18
         val maxAttempts = if (isCritical) 600 else 400
 
-        // ИСПРАВЛЕНО: Динамически рассчитываем размеры структуры из NBT без хардкода в Enum
         val structureSize = VanillaStructureLoader.getStructureSize(type.vanillaPath)
         val rawWidth = structureSize.blockX
         val rawLength = structureSize.blockZ
@@ -463,7 +519,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val rand = Random()
         val recordsList = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
 
-        // ИСПРАВЛЕНО: Умный выбор единственного лучшего кандидата входа (например, нижней половины двери) для идеального позиционирования дверей
         val jigsawPos = VanillaStructureLoader.getRawEntranceCandidates(type.vanillaPath)
         val entrancePos = if (jigsawPos.isNotEmpty()) {
             jigsawPos.maxByOrNull { it.weight }?.pos ?: BlockPos(rawWidth / 2, 0, 0)
@@ -553,7 +608,6 @@ class SettlementPlanner(val settlement: Settlement) {
                         break
                     }
 
-                    // ИСПРАВЛЕНО: Строго запрещаем размещать дома поверх проложенных дорог/тропинок
                     val isRoadBlock = surfaceBlockType == Material.DIRT_PATH ||
                             surfaceBlockType.name.contains("PATH") ||
                             roads.any { it.x == absX && it.z == absZ }
@@ -705,7 +759,9 @@ class SettlementPlanner(val settlement: Settlement) {
         val sZ = if (currentZ < cz) 1 else -1
         var err = dX - dZ
 
+        // ИСПРАВЛЕНО: Гравийные дороги отменены по просьбе игрока. Всегда используем грунтовую тропинку (DIRT_PATH).
         val roadBlockData = Material.DIRT_PATH.createBlockData()
+
         val airData = Material.AIR.createBlockData()
         val cobbleData = Material.COBBLESTONE.createBlockData()
 
@@ -756,8 +812,15 @@ class SettlementPlanner(val settlement: Settlement) {
 
                     val isInsideAnyBuilding = records.any { record ->
                         val box = record.box
-                        px >= (box.minX - 1.0) && px <= (box.maxX + 1.0) &&
-                                pz >= (box.minZ - 1.0) && pz <= (box.maxZ + 1.0)
+                        // ИСПРАВЛЕНО: Для текущего строящегося здания (record.jobId == jobId) полностью убираем буфер,
+                        // позволяя дороге подойти вплотную к стенам и дверям. Для остальных зданий сохраняем
+                        // безопасный буфер в 1.5 блока, чтобы прокладываемая дорога случайно не разрушила чужие стены.
+                        if (record.jobId == jobId) {
+                            px >= box.minX && px < box.maxX && pz >= box.minZ && pz < box.maxZ
+                        } else {
+                            px >= (box.minX - 1.5) && px <= (box.maxX + 1.5) &&
+                                    pz >= (box.minZ - 1.5) && pz <= (box.maxZ + 1.5)
+                        }
                     }
                     if (isInsideAnyBuilding) continue
 
@@ -823,8 +886,6 @@ class SettlementPlanner(val settlement: Settlement) {
             jobsList.add(currentRoadJob)
         }
 
-        val buildJob = SchematicBuildJob(world, jobId)
-
         val materialCounts = mutableMapOf<Material, Int>()
         for (x in 0 until width) {
             for (z in 0 until length) {
@@ -843,7 +904,10 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val mimicMaterial = materialCounts.maxByOrNull { it.value }?.key ?: Material.COBBLESTONE
         val finalMimicMaterial = if (mimicMaterial == Material.GRASS_BLOCK) Material.DIRT else mimicMaterial
-        val foundationBlockData = finalMimicMaterial.createBlockData()
+
+        val foundationBlockData = applyStoneVariability(finalMimicMaterial.createBlockData())
+
+        val buildJob = SchematicBuildJob(world, jobId)
 
         for (x in 0 until width) {
             for (z in 0 until length) {
@@ -859,18 +923,34 @@ class SettlementPlanner(val settlement: Settlement) {
                 }
 
                 for (y in highest + 1 until baseY) {
-                    buildJob.addBlock(BlockPos(absX, y, absZ), foundationBlockData, isRoad = false)
+                    val singleFoundationData = applyStoneVariability(foundationBlockData)
+                    buildJob.addBlock(BlockPos(absX, y, absZ), singleFoundationData, isRoad = false)
                 }
             }
         }
 
         val rawRelativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
+
+        val isBirchOverride = java.util.Random().nextDouble() < 0.30
+
         if (rawRelativeBlocks.isNotEmpty()) {
             rawRelativeBlocks.forEach { relBlock ->
                 val rotPos = rotateCoords(relBlock.relativePos, rotation, rawWidth, rawLength)
 
-                val rotData = relBlock.blockData.clone()
+                var rotData = relBlock.blockData.clone()
                 rotData.rotate(rotation)
+
+                rotData = applyStoneVariability(rotData)
+
+                if (isBirchOverride) {
+                    val dataStr = rotData.asString
+                    if (dataStr.contains("oak") && !dataStr.contains("dark_oak")) {
+                        val birchDataStr = dataStr.replace("oak", "birch")
+                        try {
+                            rotData = Bukkit.createBlockData(birchDataStr)
+                        } catch (_: Exception) {}
+                    }
+                }
 
                 val absoluteX = cx - width / 2 + rotPos.x
                 val absoluteY = baseY + rotPos.y

@@ -94,6 +94,9 @@ class HumanoidVillager(
             if (!pdc.has(initKey, PersistentDataType.BYTE)) {
                 this.populateStarterItems(bukkitVillager)
             }
+
+            // ИСПРАВЛЕНО: Отключаем коллизию, чтобы жители могли беспрепятственно проходить сквозь друг друга и не забивали проходы/двери
+            bukkitVillager.isCollidable = false
         }
 
         this.refreshBrain(level as ServerLevel)
@@ -130,7 +133,6 @@ class HumanoidVillager(
 
         bukkitVillager.race.spawnItems.forEach { item -> inv.addItem(item.build()) }
 
-        // ИСПРАВЛЕНО: Даем жителю стартовый набор сытной еды, чтобы они не умирали до завершения ферм
         inv.addItem(ItemStack(Material.BREAD, 32))
         inv.addItem(ItemStack(Material.BAKED_POTATO, 32))
 
@@ -200,6 +202,9 @@ class HumanoidVillager(
 
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
         if (bukkitVillager != null) {
+            // ИСПРАВЛЕНО: Гарантируем отключение коллизии после загрузки сущности из файла сохранения
+            bukkitVillager.isCollidable = false
+
             val pdc = bukkitVillager.persistentDataContainer
 
             val legacyKey = NamespacedKey(plugin, "Inventory")
@@ -306,16 +311,14 @@ class HumanoidVillager(
             Pair.of(1, BowAttackBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(1, TacticalAttackBehavior(0.65f, 15) as BehaviorControl<Villager>),
 
-            // Взаимоисключающие поведения приоритета 2
             Pair.of(2, BuildBreakBehavior(0.6f) as BehaviorControl<Villager>),
             Pair.of(2, ConstructionBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ShepherdBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ButcherBehavior(0.65f) as BehaviorControl<Villager>),
 
-            // ИСПРАВЛЕНО: Интегрирован ИИ Шахтёра под приоритет 2
             Pair.of(2, MinerBehavior(0.65f) as BehaviorControl<Villager>),
 
-            Pair.of(3, FollowLeaderBehavior(0.65f, 4.0f, 32.0f) as BehaviorControl<Villager>),
+            Pair.of(3, FindEnemyBehavior(120.0) as BehaviorControl<Villager>),
             Pair.of(4, LookAndFollowDuringConversation(0.65f) as BehaviorControl<Villager>)
         )
 
@@ -371,25 +374,23 @@ class HumanoidVillager(
 
     override fun consume(world: World, item: ItemStack, sound: Sound, duration: Int, location: Location, period: Long, onDone: () -> Unit) {
         val nmsItem = CraftItemStack.asNMSCopy(item)
-        var ticks = 0
-
         this.setItemInHand(InteractionHand.MAIN_HAND, nmsItem)
-        this.startUsingItem(InteractionHand.MAIN_HAND)
 
+        var ticks = 0
         plugin.server.scheduler.runTaskTimer(plugin, { task ->
-            this.navigation.stop()
-            this.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-            this.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
-
+            if (!this.bukkitEntity.isValid || this.bukkitEntity.isDead) {
+                task.cancel()
+                return@runTaskTimer
+            }
             world.playSound(location, sound, 1F, 1F)
+            this.swing(InteractionHand.MAIN_HAND)
             ticks++
             if (ticks >= duration) {
-                this.stopUsingItem()
                 this.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
                 onDone.invoke()
                 task.cancel()
             }
-        }, 0, period)
+        }, 0L, period)
     }
 
     override fun equip(slot: org.bukkit.inventory.EquipmentSlot, item: ItemStack) {
