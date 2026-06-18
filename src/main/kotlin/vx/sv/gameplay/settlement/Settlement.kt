@@ -41,7 +41,7 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
     val world = plugin.server.getWorld(data.worldUUID)!!
 
     // ИСПРАВЛЕНО: Увеличен радиус территории деревни со 64.0 до 120.0 блоков во все стороны для простора
-    var territory = BoundingBox.of(data.center, 120.0, 128.0, 120.0)
+    var territory = BoundingBox.of(data.center, 126.0, 128.0, 126.0)
 
     fun electLeader() {
         if (villagers.isEmpty()) return
