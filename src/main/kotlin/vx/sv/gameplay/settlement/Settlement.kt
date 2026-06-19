@@ -28,8 +28,8 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
 
         var activeProjectId: UUID? = null,
 
-        // ПЕРСИСТЕНТНЫЙ ВИРТУАЛЬНЫЙ ИНВЕНТАРЬ ПОСЕЛЕНИЯ
-        val villageInventory: MutableList<ItemStack> = mutableListOf() // fixme; itemstack isnt serializable (gson)
+        // ПЕРСИСТЕНТНЫЙ СПИСОК СЕРИАЛИЗОВАННЫХ ПРЕДМЕТОВ В BASE64 (БЕЗОПАСНО ДЛЯ GSON)
+        val serializedInventory: MutableList<String> = mutableListOf()
     )
 
     data class RaidData(
@@ -47,13 +47,50 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
     // ИСПРАВЛЕНО: Увеличен радиус территории деревни со 64.0 до 120.0 блоков во все стороны для простора
     var territory = BoundingBox.of(data.center, 126.0, 128.0, 126.0)
 
+    // РАКТИВНЫЙ РАНТАЙМ-ИНВЕНТАРЬ (ХРАНИТ РЕАЛЬНЫЕ ITEMSTACK В ПАМЯТИ)
+    val villageInventory: MutableList<ItemStack> = mutableListOf()
+
     init {
+        // Десериализуем предметы из Base64 при инициализации поселения
+        if (data.serializedInventory.isNotEmpty()) {
+            for (base64 in data.serializedInventory) {
+                try {
+                    val bytes = Base64.getDecoder().decode(base64)
+                    val item = ItemStack.deserializeBytes(bytes)
+                    villageInventory.add(item)
+                } catch (e: Exception) {
+                    plugin.logger.warning("Failed to deserialize item in settlement ${data.settlementName}: ${e.message}")
+                }
+            }
+        }
+
         // Деревенский инвентарь не должен быть пустым с самого начала
-        if (data.villageInventory.isEmpty()) {
-            data.villageInventory.add(ItemStack(org.bukkit.Material.BREAD, 64))
-            data.villageInventory.add(ItemStack(org.bukkit.Material.BREAD, 64))
-            data.villageInventory.add(ItemStack(org.bukkit.Material.BAKED_POTATO, 64))
-            data.villageInventory.add(ItemStack(org.bukkit.Material.BAKED_POTATO, 64))
+        if (villageInventory.isEmpty()) {
+            villageInventory.add(ItemStack(org.bukkit.Material.BREAD, 64))
+            villageInventory.add(ItemStack(org.bukkit.Material.BREAD, 64))
+            villageInventory.add(ItemStack(org.bukkit.Material.BAKED_POTATO, 64))
+            villageInventory.add(ItemStack(org.bukkit.Material.BAKED_POTATO, 64))
+            // Сразу синхронизируем дефолтный инвентарь в персистентную структуру
+            syncToData()
+        }
+    }
+
+    // Синхронизирует активные предметы в плоский Base64 список перед сохранением мира
+    fun syncToData() {
+        data.serializedInventory.clear()
+        for (item in villageInventory) {
+            try {
+                // Ограничиваем размер стака до maxStackSize во избежание Mojang-ошибок range [1;99]
+                val maxStack = item.type.maxStackSize
+                if (item.amount > maxStack) {
+                    item.amount = maxStack
+                }
+
+                val base64 = Base64.getEncoder().encodeToString(item.serializeAsBytes())
+                data.serializedInventory.add(base64)
+            } catch (e: Exception) {
+                plugin.logger.warning("Failed to serialize item ${item.type} in settlement ${data.settlementName}: ${e.message}")
+            }
         }
     }
 

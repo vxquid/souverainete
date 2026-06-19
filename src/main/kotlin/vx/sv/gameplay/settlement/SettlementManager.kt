@@ -82,19 +82,30 @@ class SettlementManager : Listener {
         event.isCancelled = true
         item.remove()
 
-        val virtualInv = settlement.data.villageInventory
+        val virtualInv = settlement.villageInventory
+        val maxStack = itemStack.type.maxStackSize
         var remaining = itemStack.amount
+
+        // Сначала пытаемся заполнить уже существующие неполные стаки
         for (stored in virtualInv) {
             if (stored.isSimilar(itemStack)) {
-                stored.amount += remaining
-                remaining = 0
-                break
+                val space = maxStack - stored.amount
+                if (space > 0) {
+                    val toAdd = minOf(space, remaining)
+                    stored.amount += toAdd
+                    remaining -= toAdd
+                    if (remaining <= 0) break
+                }
             }
         }
-        if (remaining > 0) {
+
+        // Если что-то осталось, создаем новые стаки, не превышающие лимит
+        while (remaining > 0) {
             val copy = itemStack.clone()
-            copy.amount = remaining
+            val toAdd = minOf(maxStack, remaining)
+            copy.amount = toAdd
             virtualInv.add(copy)
+            remaining -= toAdd
         }
 
         villager.world.playSound(villager.location, Sound.ENTITY_ITEM_PICKUP, 1.0f, 1.0f)
@@ -240,7 +251,6 @@ class SettlementManager : Listener {
                                 val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
                                 if (freeVillager != null) {
                                     freeVillager.profession = Villager.Profession.TOOLSMITH
-                                    // ИСПРАВЛЕНО: Уровень 2 навсегда закрепляет профессию и предотвращает спам сбросов
                                     freeVillager.villagerLevel = 2
                                     freeVillager.villagerExperience = 10
 
@@ -291,8 +301,6 @@ class SettlementManager : Listener {
                 }
             }
 
-            // ИСПРАВЛЕНО: world.entities заменено на getEntitiesByClass,
-            // чтобы не сканировать миллионы монстров, предметов на земле и дропов в основном потоке.
             val homelessVillagers = world.getEntitiesByClass(Villager::class.java)
                 .filter { it.settlement == null }
 
@@ -546,7 +554,12 @@ class SettlementManager : Listener {
         }
 
         fun saveSettlements(world: World) {
-            val data = settlements[world]?.map { it.data } ?: return
+            val list = settlements[world] ?: return
+
+            // ПЕРЕД СЕРИАЛИЗАЦИЕЙ СИНХРОНИЗИРУЕМ РАНТАЙМ-ПРЕДМЕТЫ В BASE64 СТРОКИ
+            list.forEach { it.syncToData() }
+
+            val data = list.map { it.data }
             val json = gson.toJson(data)
 
             val compressedBytes = SettlementPlanner.compress(json)

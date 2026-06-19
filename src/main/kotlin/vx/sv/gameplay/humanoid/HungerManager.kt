@@ -70,24 +70,35 @@ object HungerManager {
     private fun Villager.hasAnyEdibleItem(): Boolean {
         val s = this.settlement
         if (s != null) {
-            return s.data.villageInventory.any { it.type.isEdible }
+            return s.villageInventory.any { it.type.isEdible }
         }
         return this.inventory.filterNotNull().any { it.type.isEdible }
     }
 
     private fun addVirtualItem(inv: MutableList<ItemStack>, item: ItemStack) {
+        val maxStack = item.type.maxStackSize
         var remaining = item.amount
+
+        // Заполняем свободное место в уже имеющихся неполных стаках
         for (stored in inv) {
             if (stored.isSimilar(item)) {
-                stored.amount += remaining
-                remaining = 0
-                break
+                val space = maxStack - stored.amount
+                if (space > 0) {
+                    val toAdd = minOf(space, remaining)
+                    stored.amount += toAdd
+                    remaining -= toAdd
+                    if (remaining <= 0) break
+                }
             }
         }
-        if (remaining > 0) {
+
+        // Если предметы остались, упаковываем в новые стаки с соблюдением лимитов
+        while (remaining > 0) {
             val copy = item.clone()
-            copy.amount = remaining
+            val toAdd = minOf(maxStack, remaining)
+            copy.amount = toAdd
             inv.add(copy)
+            remaining -= toAdd
         }
     }
 
@@ -96,7 +107,7 @@ object HungerManager {
         val s = villager.settlement
 
         val food = if (s != null) {
-            s.data.villageInventory.find { it.type.isEdible }
+            s.villageInventory.find { it.type.isEdible }
         } else {
             villager.inventory.filterNotNull().find { it.type.isEdible }
         } ?: return
@@ -112,7 +123,7 @@ object HungerManager {
         humanoid.consume(world, food, sound, 7, location) {
             // Нативное списание съеденного предмета
             if (s != null) {
-                val virtualInv = s.data.villageInventory
+                val virtualInv = s.villageInventory
                 val found = virtualInv.find { it.isSimilar(food) }
                 if (found != null) {
                     if (found.amount <= 1) {
@@ -136,7 +147,7 @@ object HungerManager {
 
             if (food.type.toString().contains("STEW") || food.type == Material.BEETROOT_SOUP) {
                 if (s != null) {
-                    addVirtualItem(s.data.villageInventory, ItemStack(Material.BOWL))
+                    addVirtualItem(s.villageInventory, ItemStack(Material.BOWL))
                     SettlementManager.saveSettlements(s.world)
                 } else {
                     villager.inventory.addItem(ItemStack(Material.BOWL))
@@ -145,7 +156,7 @@ object HungerManager {
             }
             if (food.type == Material.HONEY_BOTTLE) {
                 if (s != null) {
-                    addVirtualItem(s.data.villageInventory, ItemStack(Material.GLASS_BOTTLE))
+                    addVirtualItem(s.villageInventory, ItemStack(Material.GLASS_BOTTLE))
                     SettlementManager.saveSettlements(s.world)
                 } else {
                     villager.inventory.addItem(ItemStack(Material.GLASS_BOTTLE))
