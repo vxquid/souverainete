@@ -3,6 +3,7 @@ package vx.sv.gameplay.settlement
 import org.bukkit.Location
 import org.bukkit.NamespacedKey
 import org.bukkit.entity.Villager
+import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
@@ -25,7 +26,10 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         var diplomaticHistory: MutableMap<UUID, MutableList<String>>? = null,
         var activeRaid: RaidData? = null,
 
-        var activeProjectId: UUID? = null
+        var activeProjectId: UUID? = null,
+
+        // ПЕРСИСТЕНТНЫЙ ВИРТУАЛЬНЫЙ ИНВЕНТАРЬ ПОСЕЛЕНИЯ
+        val villageInventory: MutableList<ItemStack> = mutableListOf() // fixme; itemstack isnt serializable (gson)
     )
 
     data class RaidData(
@@ -42,6 +46,16 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
 
     // ИСПРАВЛЕНО: Увеличен радиус территории деревни со 64.0 до 120.0 блоков во все стороны для простора
     var territory = BoundingBox.of(data.center, 126.0, 128.0, 126.0)
+
+    init {
+        // Деревенский инвентарь не должен быть пустым с самого начала
+        if (data.villageInventory.isEmpty()) {
+            data.villageInventory.add(ItemStack(org.bukkit.Material.BREAD, 64))
+            data.villageInventory.add(ItemStack(org.bukkit.Material.BREAD, 64))
+            data.villageInventory.add(ItemStack(org.bukkit.Material.BAKED_POTATO, 64))
+            data.villageInventory.add(ItemStack(org.bukkit.Material.BAKED_POTATO, 64))
+        }
+    }
 
     fun electLeader() {
         if (villagers.isEmpty()) return

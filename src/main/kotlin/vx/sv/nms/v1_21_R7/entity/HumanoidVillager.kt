@@ -97,6 +97,9 @@ class HumanoidVillager(
 
             // ИСПРАВЛЕНО: Отключаем коллизию, чтобы жители могли беспрепятственно проходить сквозь друг друга и не забивали проходы/двери
             bukkitVillager.isCollidable = false
+
+            // АКТИВИРУЕМ ПОДНЯТИЕ ПРЕДМЕТОВ
+            bukkitVillager.canPickupItems = true
         }
 
         this.refreshBrain(level as ServerLevel)
@@ -204,6 +207,9 @@ class HumanoidVillager(
         if (bukkitVillager != null) {
             // ИСПРАВЛЕНО: Гарантируем отключение коллизии после загрузки сущности из файла сохранения
             bukkitVillager.isCollidable = false
+
+            // АКТИВИРУЕМ ПОДНЯТИЕ ПРЕДМЕТОВ ПОСЛЕ ЗАГРУЗКИ
+            bukkitVillager.canPickupItems = true
 
             val pdc = bukkitVillager.persistentDataContainer
 

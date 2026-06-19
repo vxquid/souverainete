@@ -9,11 +9,12 @@ import org.bukkit.inventory.meta.SuspiciousStewMeta
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
-import vx.sv.persistent.LivingEntityExtend.hasEdibleItem
 import vx.sv.persistent.LivingEntityExtend.hunger
+import vx.sv.persistent.LivingEntityExtend.settlement
 import kotlin.random.Random
 
 object HungerManager {
@@ -43,7 +44,7 @@ object HungerManager {
                 applyHungerEffects(villager)
 
                 // If below eat threshold and has edible item, schedule eat
-                if (villager.hunger <= hungerEatThreshold && villager.hasEdibleItem()) {
+                if (villager.hunger <= hungerEatThreshold && villager.hasAnyEdibleItem()) {
                     plugin.server.scheduler.runTaskLaterAsynchronously(plugin, { _ -> villager.eat() }, 5 + (index * 2L).coerceAtMost(40) + Random.nextInt(250))
                 }
             }
@@ -66,22 +67,64 @@ object HungerManager {
         }
     }
 
+    private fun Villager.hasAnyEdibleItem(): Boolean {
+        val s = this.settlement
+        if (s != null) {
+            return s.data.villageInventory.any { it.type.isEdible }
+        }
+        return this.inventory.filterNotNull().any { it.type.isEdible }
+    }
+
+    private fun addVirtualItem(inv: MutableList<ItemStack>, item: ItemStack) {
+        var remaining = item.amount
+        for (stored in inv) {
+            if (stored.isSimilar(item)) {
+                stored.amount += remaining
+                remaining = 0
+                break
+            }
+        }
+        if (remaining > 0) {
+            val copy = item.clone()
+            copy.amount = remaining
+            inv.add(copy)
+        }
+    }
+
     fun LivingEntity.eat() {
         val villager = this as? Villager ?: return
-        val inv = villager.inventory
+        val s = villager.settlement
 
-        inv.filterNotNull().find { it.type.isEdible }?.let { food ->
-            val sound = when (food.type) {
-                Material.HONEY_BOTTLE -> Sound.ITEM_HONEY_BOTTLE_DRINK
-                Material.MUSHROOM_STEW, Material.RABBIT_STEW, Material.SUSPICIOUS_STEW, Material.BEETROOT_SOUP -> Sound.ENTITY_GENERIC_DRINK
-                else -> Sound.ENTITY_GENERIC_EAT
-            }
+        val food = if (s != null) {
+            s.data.villageInventory.find { it.type.isEdible }
+        } else {
+            villager.inventory.filterNotNull().find { it.type.isEdible }
+        } ?: return
 
-            // Use the Humanoid consume method
-            val humanoid = this.asHumanoid() ?: return
-            humanoid.consume(world, food, sound, 7, location) {
-                // Нативное списание съеденного предмета
-                val found = inv.filterNotNull().find { it.isSimilar(food) }
+        val sound = when (food.type) {
+            Material.HONEY_BOTTLE -> Sound.ITEM_HONEY_BOTTLE_DRINK
+            Material.MUSHROOM_STEW, Material.RABBIT_STEW, Material.SUSPICIOUS_STEW, Material.BEETROOT_SOUP -> Sound.ENTITY_GENERIC_DRINK
+            else -> Sound.ENTITY_GENERIC_EAT
+        }
+
+        // Use the Humanoid consume method
+        val humanoid = this.asHumanoid() ?: return
+        humanoid.consume(world, food, sound, 7, location) {
+            // Нативное списание съеденного предмета
+            if (s != null) {
+                val virtualInv = s.data.villageInventory
+                val found = virtualInv.find { it.isSimilar(food) }
+                if (found != null) {
+                    if (found.amount <= 1) {
+                        virtualInv.remove(found)
+                    } else {
+                        found.amount -= 1
+                    }
+                }
+                SettlementManager.saveSettlements(s.world)
+            } else {
+                val inv = villager.inventory
+                val found = inv.filterNotNull().find { foundItem -> foundItem.isSimilar(food) }
                 if (found != null) {
                     if (found.amount <= 1) {
                         inv.removeItem(found)
@@ -89,20 +132,30 @@ object HungerManager {
                         found.amount -= 1
                     }
                 }
-
-                if (food.type.toString().contains("STEW") || food.type == Material.BEETROOT_SOUP) {
-                    inv.addItem(ItemStack(Material.BOWL))
-                    (food.itemMeta as? SuspiciousStewMeta)?.customEffects?.forEach { addPotionEffect(it) }
-                }
-                if (food.type == Material.HONEY_BOTTLE) {
-                    inv.addItem(ItemStack(Material.GLASS_BOTTLE))
-                }
-
-                world.playSound(location, getVoiceSound(), 1F, getVoicePitch())
-                world.playSound(location, Sound.ENTITY_PLAYER_BURP, 1F, 1F)
-                hunger = (hunger + calculateFoodRestoration(food)).coerceAtMost(hungerMax)
-                applyHungerEffects(this)
             }
+
+            if (food.type.toString().contains("STEW") || food.type == Material.BEETROOT_SOUP) {
+                if (s != null) {
+                    addVirtualItem(s.data.villageInventory, ItemStack(Material.BOWL))
+                    SettlementManager.saveSettlements(s.world)
+                } else {
+                    villager.inventory.addItem(ItemStack(Material.BOWL))
+                }
+                (food.itemMeta as? SuspiciousStewMeta)?.customEffects?.forEach { addPotionEffect(it) }
+            }
+            if (food.type == Material.HONEY_BOTTLE) {
+                if (s != null) {
+                    addVirtualItem(s.data.villageInventory, ItemStack(Material.GLASS_BOTTLE))
+                    SettlementManager.saveSettlements(s.world)
+                } else {
+                    villager.inventory.addItem(ItemStack(Material.GLASS_BOTTLE))
+                }
+            }
+
+            world.playSound(location, getVoiceSound(), 1F, getVoicePitch())
+            world.playSound(location, Sound.ENTITY_PLAYER_BURP, 1F, 1F)
+            hunger = (hunger + calculateFoodRestoration(food)).coerceAtMost(hungerMax)
+            applyHungerEffects(this)
         }
     }
 

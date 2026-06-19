@@ -12,6 +12,7 @@ import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
+import org.bukkit.event.entity.EntityPickupItemEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.world.ChunkLoadEvent
 import org.bukkit.inventory.meta.CompassMeta
@@ -42,6 +43,62 @@ class SettlementManager : Listener {
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
+    }
+
+    @EventHandler
+    fun onVillagerPickup(event: EntityPickupItemEvent) {
+        val villager = event.entity as? Villager ?: return
+        val settlement = villager.settlement ?: return
+
+        val item = event.item
+        val itemStack = item.itemStack
+
+        // 1. Исключаем оружие, броню и инструменты
+        val name = itemStack.type.name
+        val isEquipmentOrTool = name.contains("SWORD") ||
+                name.contains("AXE") ||
+                name.contains("SHOVEL") ||
+                name.contains("PICKAXE") ||
+                name.contains("HOE") ||
+                name.contains("HELMET") ||
+                name.contains("CHESTPLATE") ||
+                name.contains("LEGGINGS") ||
+                name.contains("BOOTS") ||
+                name.contains("SHIELD") ||
+                name.contains("BOW") ||
+                name.contains("CROSSBOW") ||
+                name.contains("SHEARS") ||
+                name.contains("LEAD")
+
+        if (isEquipmentOrTool) return
+
+        // 2. Исключаем предметы-подарки из DialogueSession (если сессия ждет подарок)
+        val hasActiveAwaitingSession = vx.sv.gameplay.dialogue.DialogueSession.activeDialogueSessions.any {
+            it.entity == villager && it.giftAwaiting
+        }
+        if (hasActiveAwaitingSession) return
+
+        // Отправляем предмет в бесконечный виртуальный инвентарь поселения
+        event.isCancelled = true
+        item.remove()
+
+        val virtualInv = settlement.data.villageInventory
+        var remaining = itemStack.amount
+        for (stored in virtualInv) {
+            if (stored.isSimilar(itemStack)) {
+                stored.amount += remaining
+                remaining = 0
+                break
+            }
+        }
+        if (remaining > 0) {
+            val copy = itemStack.clone()
+            copy.amount = remaining
+            virtualInv.add(copy)
+        }
+
+        villager.world.playSound(villager.location, Sound.ENTITY_ITEM_PICKUP, 1.0f, 1.0f)
+        saveSettlements(settlement.world)
     }
 
     fun handleWorldLoad(world: World) {

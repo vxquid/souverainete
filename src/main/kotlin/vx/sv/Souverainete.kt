@@ -208,7 +208,7 @@ class Souverainete : JavaPlugin(), Listener {
         gson = GsonBuilder()
             .setPrettyPrinting()
             .registerTypeAdapter(Location::class.java, LocationSerializer())
-            .registerTypeAdapter(ItemStack::class.java, ItemStackSerializer())
+            .registerTypeHierarchyAdapter(ItemStack::class.java, ItemStackSerializer())
             .registerTypeAdapter(UUID::class.java, UUIDSerializer())
             .create()
     }

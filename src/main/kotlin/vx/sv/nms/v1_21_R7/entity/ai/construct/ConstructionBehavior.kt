@@ -340,15 +340,7 @@ class ConstructionBehavior(
         addItemsSmart(bukkitInv, Material.DIRT, 64)
         addItemsSmart(bukkitInv, Material.IRON_SHOVEL, 1)
 
-        val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
-        val isClear = currentBlock.isIgnorableObstacle()
-        val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
-
-        if (isClear && !isPathTransformation && !assigned.material.isAir && !bukkitInv.contains(assigned.material)) {
-            job.unclaimBlock(assigned)
-            villager.assignedBlock = null
-            return false
-        }
+        // ИСПРАВЛЕНО: Поскольку строительные материалы бесконечны, проверка bukkitInv.contains убрана
         return true
     }
 
@@ -358,14 +350,8 @@ class ConstructionBehavior(
 
         val assigned = villager.assignedBlock ?: return false
 
-        val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
-        val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
-
-        val isClear = currentBlock.isIgnorableObstacle()
-        val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
-        val hasResources = !isClear || isPathTransformation || assigned.material.isAir || bukkitInv.contains(assigned.material)
-
-        return world.world.isDayTime && hasResources
+        // ИСПРАВЛЕНО: Ресурсы бесконечны, строитель продолжает работу независимо от наличия блоков
+        return world.world.isDayTime
     }
 
     override fun start(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -461,7 +447,6 @@ class ConstructionBehavior(
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
 
         // ИСПРАВЛЕНО: Полностью удалена проверка высоты diffY.
-        // Жителям теперь достаточно быть близко по горизонтали (X и Z), чтобы строить крыши или копать вниз
         val isWithinReach = if (villager.isBuildDistanceHackActive) {
             true
         } else if (assigned.isRoad) {
@@ -573,13 +558,7 @@ class ConstructionBehavior(
                 val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
                 val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
 
-                if (!isPathTransformation && !bukkitInv.contains(material)) {
-                    job.unclaimBlock(assigned)
-                    villager.assignedBlock = null
-                    villager.buildTicks = 0
-                    doStop(world, villager, time)
-                    return
-                }
+                // ИСПРАВЛЕНО: Бесконечные строительные материалы — проверка наличия предметов в инвентаре полностью удалена
 
                 if (assigned.blockData.material.isSolid) {
                     val targetBox = BoundingBox(block.x.toDouble(), block.y.toDouble(), block.z.toDouble(), block.x + 1.0, block.y + 1.0, block.z + 1.0)
@@ -619,7 +598,7 @@ class ConstructionBehavior(
                         bukkitWorld.playSound(block.location, Sound.ITEM_SHOVEL_FLATTEN, 1.0f, 1.0f)
                     } else {
                         bukkitWorld.playSound(block.location, assigned.blockData.soundGroup.placeSound, 1.0f, 1.0f)
-                        takeItem(bukkitInv, material, 1)
+                        // ИСПРАВЛЕНО: Стройматериалы бесконечны, списание предмета убрано
                     }
 
                     job.completeBlock(assigned)
