@@ -87,6 +87,9 @@ class HumanoidVillager(
 
         this.expandInventory(54)
 
+        // ИСПРАВЛЕНО: Предотвращаем усыпление жителя ядром Spigot Entity Activation Range (EAR)
+        this.activatedTick = java.lang.Long.MAX_VALUE
+
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
         if (bukkitVillager != null) {
             val pdc = bukkitVillager.persistentDataContainer
@@ -138,6 +141,13 @@ class HumanoidVillager(
                 item.velocity = vector
             }
         }
+    }
+
+    override fun inactiveTick() {
+        // ИСПРАВЛЕНО: Если игроков нет рядом, Spigot пытается усыпить жителя через этот метод.
+        // Мы пресекаем это, выставляя максимальные тики активации и принудительно вызывая полноценный tick().
+        this.activatedTick = java.lang.Long.MAX_VALUE
+        this.tick()
     }
 
     private fun expandInventory(size: Int) {
@@ -236,6 +246,9 @@ class HumanoidVillager(
         super.readAdditionalSaveData(input)
 
         this.expandInventory(54)
+
+        // ИСПРАВЛЕНО: Гарантируем обход Spigot EAR после загрузки сущности из файла сохранения
+        this.activatedTick = java.lang.Long.MAX_VALUE
 
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
         if (bukkitVillager != null) {
