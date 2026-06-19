@@ -14,6 +14,7 @@ import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
+import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import java.util.*
 import org.bukkit.entity.Villager as BukkitVillager
 
@@ -36,7 +37,8 @@ class VillageGenerationListener : Listener {
 
             world.spawn(spawnLoc, org.bukkit.entity.Sheep::class.java) { sheep ->
                 val name = sheepNames.getOrElse(i % sheepNames.size) { "Деревенская овца" }
-                sheep.customName(net.kyori.adventure.text.Component.text("§a$name", net.kyori.adventure.text.format.NamedTextColor.GREEN))
+                // ИСПРАВЛЕНО: Убран цветовой код § из текста компонента для предотвращения LegacyFormattingDetected
+                sheep.customName(net.kyori.adventure.text.Component.text(name, net.kyori.adventure.text.format.NamedTextColor.GREEN))
                 sheep.isCustomNameVisible = true
 
                 sheep.persistentDataContainer.set(
@@ -58,7 +60,8 @@ class VillageGenerationListener : Listener {
 
             world.spawn(spawnLoc, org.bukkit.entity.Cat::class.java) { cat ->
                 val name = catNames.getOrElse(i % catNames.size) { "Деревенский кот" }
-                cat.customName(net.kyori.adventure.text.Component.text("§e$name", net.kyori.adventure.text.format.NamedTextColor.YELLOW))
+                // ИСПРАВЛЕНО: Убран цветовой код § из текста компонента для предотвращения LegacyFormattingDetected
+                cat.customName(net.kyori.adventure.text.Component.text(name, net.kyori.adventure.text.format.NamedTextColor.YELLOW))
                 cat.isCustomNameVisible = true
 
                 cat.persistentDataContainer.set(
@@ -105,7 +108,7 @@ class VillageGenerationListener : Listener {
                 blockBelow.type == Material.CAMPFIRE ||
                 blockBelow.type == Material.SOUL_CAMPFIRE) {
 
-                val worldSettlements = SettlementManager.settlements[loc.world] ?: return
+                val worldSettlements = settlements[loc.world] ?: return
                 // ИСПРАВЛЕНО: Увеличен радиус защиты от горения у костра до 36 блоков, чтобы смещенный костер тоже защищал
                 val isNearCenter = worldSettlements.any { it.data.center.distanceSquared(loc) <= 36.0 }
                 if (isNearCenter) {

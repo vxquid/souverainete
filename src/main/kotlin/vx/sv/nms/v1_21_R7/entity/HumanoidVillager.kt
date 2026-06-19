@@ -106,6 +106,40 @@ class HumanoidVillager(
         this.setPersistenceRequired()
     }
 
+    override fun aiStep() {
+        super.aiStep()
+
+        // === АВТОМАТИЧЕСКИЙ СБОР ПРЕДМЕТОВ С ЗЕМЛИ ===
+        val bukkitNpc = this.bukkitEntity as? org.bukkit.entity.Villager ?: return
+        if (this.settlement == null) return // Затягиваем ресурсы только если житель состоит в поселении
+
+        val currentLoc = bukkitNpc.location
+        val bukkitWorld = bukkitNpc.world
+
+        val nearbyItems = bukkitWorld.getEntitiesByClass(org.bukkit.entity.Item::class.java).filter { item ->
+            item.isValid && !item.isDead && item.location.distanceSquared(currentLoc) <= 16.0 // в радиусе 4 блоков
+        }
+        for (item in nearbyItems) {
+            val itemLoc = item.location
+            val distanceSq = itemLoc.distanceSquared(currentLoc)
+            if (distanceSq <= 2.25) { // 1.5 блока — критическая близость
+                val pickupEvent = org.bukkit.event.entity.EntityPickupItemEvent(
+                    bukkitNpc,
+                    item,
+                    0
+                )
+                Bukkit.getPluginManager().callEvent(pickupEvent)
+                if (pickupEvent.isCancelled) {
+                    bukkitNpc.playPickupItemAnimation(item, 1)
+                }
+            } else {
+                // Притягиваем предмет к жителю с легким ускорением в воздухе
+                val vector = currentLoc.toVector().subtract(itemLoc.toVector()).normalize().multiply(0.2)
+                item.velocity = vector
+            }
+        }
+    }
+
     private fun expandInventory(size: Int) {
         try {
             val inventoryField = AbstractVillager::class.java.declaredFields.firstOrNull {

@@ -41,8 +41,10 @@ class ConstructionBehavior(
 
     companion object {
         private val debugVisualsMap = mutableMapOf<UUID, Pair<BlockDisplay, BlockDisplay>>()
-        private val remoteActionsStreakMap = java.util.WeakHashMap<HumanoidVillager, Int>()
         private val lastLocationMap = java.util.WeakHashMap<HumanoidVillager, Location>()
+
+        // УЧЕТ ВРЕМЕНИ ДЛЯ УМНОЙ АКТИВАЦИИ ДИСТАНЦИОННОГО ХАКА И СБРОСОВ
+        private val assignedBlockTicksMap = java.util.WeakHashMap<HumanoidVillager, Int>()
     }
 
     private fun handleDebugVisuals(world: ServerLevel, villager: HumanoidVillager, block: Block) {
@@ -111,60 +113,6 @@ class ConstructionBehavior(
         val displays = debugVisualsMap.remove(villager.uuid)
         displays?.first?.remove()
         displays?.second?.remove()
-    }
-
-    private fun handleStuckTeleport(world: ServerLevel, villager: HumanoidVillager) {
-        val settlement = villager.settlement ?: return
-        val center = settlement.data.center
-        val bukkitWorld = world.world
-
-        val groundY = SettlementPlanner.getHighestGroundYAt(bukkitWorld, center.blockX, center.blockZ)
-        val safeLoc = Location(
-            bukkitWorld,
-            center.x + 0.5,
-            groundY.toDouble() + 1.0,
-            center.z + 0.5,
-            villager.bukkitEntity.location.yaw,
-            villager.bukkitEntity.location.pitch
-        )
-
-        val job = villager.activeBuildJob
-        val assigned = villager.assignedBlock
-        if (assigned != null && job != null) {
-            job.unclaimBlock(assigned)
-        }
-
-        villager.assignedBlock = null
-        villager.activeBuildJob = null
-        villager.digTicks = 0
-        villager.buildTicks = 0
-        villager.isBuildDistanceHackActive = false
-        villager.nextBuildAvailableTime = world.gameTime + 100L
-
-        villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-        villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
-        villager.refreshBrain(world)
-
-        villager.bukkitEntity.teleport(safeLoc)
-
-        bukkitWorld.playSound(safeLoc, Sound.ENTITY_VILLAGER_NO, 1.0f, 1.0f)
-        bukkitWorld.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
-    }
-
-    private fun updateStreakAndCheck(world: ServerLevel, villager: HumanoidVillager, wasRemote: Boolean): Boolean {
-        if (wasRemote) {
-            val currentStreak = (remoteActionsStreakMap[villager] ?: 0) + 1
-            remoteActionsStreakMap[villager] = currentStreak
-
-            if (currentStreak >= 3) {
-                remoteActionsStreakMap.remove(villager)
-                handleStuckTeleport(world, villager)
-                return true
-            }
-        } else {
-            remoteActionsStreakMap[villager] = 0
-        }
-        return false
     }
 
     private fun takeItem(inventory: Inventory, material: Material, amount: Int) {
@@ -340,7 +288,6 @@ class ConstructionBehavior(
         addItemsSmart(bukkitInv, Material.DIRT, 64)
         addItemsSmart(bukkitInv, Material.IRON_SHOVEL, 1)
 
-        // ИСПРАВЛЕНО: Поскольку строительные материалы бесконечны, проверка bukkitInv.contains убрана
         return true
     }
 
@@ -350,7 +297,6 @@ class ConstructionBehavior(
 
         val assigned = villager.assignedBlock ?: return false
 
-        // ИСПРАВЛЕНО: Ресурсы бесконечны, строитель продолжает работу независимо от наличия блоков
         return world.world.isDayTime
     }
 
@@ -412,6 +358,10 @@ class ConstructionBehavior(
         val currentLoc = villager.bukkitEntity.location
         val lastLoc = lastLocationMap[villager]
 
+        // Ведем учет тиков работы над конкретной задачей блока
+        val pursuitTicks = (assignedBlockTicksMap[villager] ?: 0) + 1
+        assignedBlockTicksMap[villager] = pursuitTicks
+
         if (villager.digTicks > 0 || villager.buildTicks > 0) {
             villager.lastBuildActionTime = world.gameTime
         } else if (lastLoc != null && currentLoc.world == lastLoc.world) {
@@ -422,16 +372,18 @@ class ConstructionBehavior(
         }
         lastLocationMap[villager] = currentLoc
 
-        val idleTicks = world.gameTime - villager.lastBuildActionTime
-
-        if (idleTicks > 120L) {
+        // 1. Быстрая активация телекинеза (дистанционного хака), если житель тупит из-за рельефа (прошло 80 тиков / 4 сек)
+        if (pursuitTicks > 80) {
             if (!villager.isBuildDistanceHackActive) {
                 villager.isBuildDistanceHackActive = true
                 bukkitWorld.spawnParticle(Particle.GLOW, villager.bukkitEntity.location.add(0.0, 1.5, 0.0), 6, 0.2, 0.2, 0.2)
             }
         }
 
-        if (idleTicks > 240L) {
+        // 2. Сброс зависшей задачи, если за 240 тиков (12 сек) физически нет прогресса ИЛИ общий таймаут работы над блоком превысил 300 тиков (15 сек)
+        val idleTicks = world.gameTime - villager.lastBuildActionTime
+        if (idleTicks > 240L || pursuitTicks > 300) {
+            assignedBlockTicksMap.remove(villager)
             villager.isBuildDistanceHackActive = false
             job.unclaimBlock(assigned)
             villager.assignedBlock = null
@@ -446,14 +398,18 @@ class ConstructionBehavior(
         val diffX = kotlin.math.abs(blockPos.x - npcPos.x)
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
 
-        // ИСПРАВЛЕНО: Полностью удалена проверка высоты diffY.
+        // ИСПРАВЛЕНО: Добавлено +1 к радиусу горизонтального строительства ( Roads: 4 блока, Buildings: 5 блоков )
         val isWithinReach = if (villager.isBuildDistanceHackActive) {
             true
         } else if (assigned.isRoad) {
-            (diffX * diffX + diffZ * diffZ <= 9.0) // макс. 3 блока горизонтально
+            (diffX * diffX + diffZ * diffZ <= 16.0) // Добавлено +1 к радиусу (макс. 4 блока горизонтально)
         } else {
-            (diffX * diffX + diffZ * diffZ <= 16.0) // макс. 4 блока горизонтально
+            (diffX * diffX + diffZ * diffZ <= 25.0) // Добавлено +1 к радиусу (макс. 5 блоков горизонтально)
         }
+
+        val material = assigned.material
+        // ИСПРАВЛЕНО: Игрок прокладывает дорожки лопатой по ПКМ. Если это дорожная трансформация, землю копать и ломать НЕ НУЖНО.
+        val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
 
         if (isWithinReach) {
             villager.stuckTicks = 0
@@ -473,12 +429,12 @@ class ConstructionBehavior(
             villager.xRot = (-Math.toDegrees(kotlin.math.atan2(dY, distance))).toFloat()
             villager.lookControl.setLookAt(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5)
 
-            if (!block.isIgnorableObstacle()) {
+            // ИСПРАВЛЕНО: Пропускаем шаг разрушения блоков, если это трансформация лопатой в тропинку
+            if (!block.isIgnorableObstacle() && !isPathTransformation) {
                 if (block.type.name.contains("LOG") || block.type.name.contains("WOOD") || block.type.name.contains("STEM") || block.type.name.contains("HYPHAE")) {
                     removeWholeTree(block)
 
-                    remoteActionsStreakMap[villager] = 0
-
+                    assignedBlockTicksMap.remove(villager)
                     villager.digTicks = 0
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
@@ -505,16 +461,14 @@ class ConstructionBehavior(
                     villager.digTicks = 0
                     villager.nextBuildAvailableTime = world.gameTime + 2L
 
-                    val wasRemote = villager.isBuildDistanceHackActive
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
 
-                    if (updateStreakAndCheck(world, villager, wasRemote)) return
+                    assignedBlockTicksMap.remove(villager)
 
                     doStop(world, villager, time)
                 }
             } else {
-                val material = assigned.material
 
                 if (material.isAir) {
                     if (block.isLiquid) {
@@ -530,11 +484,10 @@ class ConstructionBehavior(
                             villager.buildTicks = 0
                             villager.nextBuildAvailableTime = world.gameTime + 2L
 
-                            val wasRemote = villager.isBuildDistanceHackActive
                             villager.isBuildDistanceHackActive = false
                             villager.lastBuildActionTime = world.gameTime
 
-                            if (updateStreakAndCheck(world, villager, wasRemote)) return
+                            assignedBlockTicksMap.remove(villager)
 
                             doStop(world, villager, time)
                         }
@@ -544,11 +497,10 @@ class ConstructionBehavior(
                         villager.buildTicks = 0
                         villager.nextBuildAvailableTime = world.gameTime + 2L
 
-                        val wasRemote = villager.isBuildDistanceHackActive
                         villager.isBuildDistanceHackActive = false
                         villager.lastBuildActionTime = world.gameTime
 
-                        if (updateStreakAndCheck(world, villager, wasRemote)) return
+                        assignedBlockTicksMap.remove(villager)
 
                         doStop(world, villager, time)
                     }
@@ -556,9 +508,6 @@ class ConstructionBehavior(
                 }
 
                 val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
-                val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
-
-                // ИСПРАВЛЕНО: Бесконечные строительные материалы — проверка наличия предметов в инвентаре полностью удалена
 
                 if (assigned.blockData.material.isSolid) {
                     val targetBox = BoundingBox(block.x.toDouble(), block.y.toDouble(), block.z.toDouble(), block.x + 1.0, block.y + 1.0, block.z + 1.0)
@@ -598,7 +547,6 @@ class ConstructionBehavior(
                         bukkitWorld.playSound(block.location, Sound.ITEM_SHOVEL_FLATTEN, 1.0f, 1.0f)
                     } else {
                         bukkitWorld.playSound(block.location, assigned.blockData.soundGroup.placeSound, 1.0f, 1.0f)
-                        // ИСПРАВЛЕНО: Стройматериалы бесконечны, списание предмета убрано
                     }
 
                     job.completeBlock(assigned)
@@ -606,11 +554,10 @@ class ConstructionBehavior(
                     villager.buildTicks = 0
                     villager.nextBuildAvailableTime = world.gameTime + 2L
 
-                    val wasRemote = villager.isBuildDistanceHackActive
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
 
-                    if (updateStreakAndCheck(world, villager, wasRemote)) return
+                    assignedBlockTicksMap.remove(villager)
 
                     doStop(world, villager, time)
                 }
@@ -629,6 +576,8 @@ class ConstructionBehavior(
 
         val job = villager.activeBuildJob
         val assigned = villager.assignedBlock
+
+        assignedBlockTicksMap.remove(villager)
 
         if (assigned != null) {
             job?.unclaimBlock(assigned)

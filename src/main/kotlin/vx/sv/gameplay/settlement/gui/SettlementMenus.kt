@@ -31,11 +31,11 @@ object SettlementMenus : Listener {
         plugin.server.pluginManager.registerEvents(this, plugin)
     }
 
-    class SettlementHolder(val settlement: Settlement, val type: MenuType) : InventoryHolder {
+    class SettlementHolder(val settlement: Settlement, val type: MenuType, var page: Int = 0) : InventoryHolder {
         override fun getInventory(): Inventory = throw UnsupportedOperationException()
     }
 
-    enum class MenuType { MAIN, POPULATION, SETTINGS }
+    enum class MenuType { MAIN, POPULATION, SETTINGS, INVENTORY }
 
     // --- MAIN MENU ---
     fun openMainMenu(player: Player, settlement: Settlement) {
@@ -53,14 +53,21 @@ object SettlementMenus : Listener {
             langList("settlement.menu.main.population.lore", listOf("§7Click to view", "§7resident list."))
         ))
 
-        // 2. Кнопка настроек
+        // 2. Кнопка склада (виртуальный инвентарь поселения)
+        inv.setItem(14, createItem(
+            Material.CHEST,
+            lang("settlement.menu.main.inventory.name", "§6📦 Warehouse"),
+            langList("settlement.menu.main.inventory.lore", listOf("§7Click to view", "§7settlement warehouse."))
+        ))
+
+        // 3. Кнопка настроек
         inv.setItem(15, createItem(
             Material.COMPARATOR,
             lang("settlement.menu.main.settings.name", "§6⚙ Management"),
             langList("settlement.menu.main.settings.lore", listOf("§7Rename and settings."))
         ))
 
-        // 3. Книга статистики (Считаем кровати в основном потоке, т.к. это быстро через TileEntities)
+        // 4. Книга статистики
         val bedCount = countValidBeds(settlement)
         val statsLore = langList("settlement.menu.main.stats.lore", listOf(
             "§7Population: §b{pop}",
@@ -101,7 +108,6 @@ object SettlementMenus : Listener {
         for (villager in citizens) {
             val texture = try { villager.skin() } catch (e: Exception) { null }
 
-            // Получаем голову (используем твой метод)
             val head = if (texture != null) {
                 getSkull(texture.value)
             } else {
@@ -152,6 +158,102 @@ object SettlementMenus : Listener {
         inv.setItem(26, createItem(Material.ARROW, lang("settlement.menu.common.back", "§cBack"), emptyList()))
 
         fillBorders(inv)
+        player.openInventory(inv)
+        playClickSound(player)
+    }
+
+    // --- WAREHOUSE MENU (PAGINATED) ---
+    fun openInventoryMenu(player: Player, settlement: Settlement, page: Int = 0) {
+        // Агрегируем дубликаты предметов по их типу и метаданным (isSimilar)
+        val aggregatedMap = mutableMapOf<ItemStack, Int>()
+        for (item in settlement.villageInventory) {
+            if (item.type == Material.AIR) continue
+            var found = false
+            for ((key, amount) in aggregatedMap) {
+                if (key.isSimilar(item)) {
+                    key.amount += item.amount
+                    found = true
+                    break
+                }
+            }
+            if (!found) {
+                aggregatedMap[item.clone()] = item.amount
+            }
+        }
+
+        val itemsList = aggregatedMap.map { (item, amount) ->
+            item.apply { this.amount = amount }
+        }
+
+        val totalItems = itemsList.size
+        val itemsPerPage = 45
+        val maxPage = maxOf(0, (totalItems - 1) / itemsPerPage)
+        val currentPage = page.coerceIn(0, maxPage)
+
+        val titleRaw = lang("settlement.menu.inventory.title", "§8Warehouse (Page {current}/{total})")
+            .replace("{current}", (currentPage + 1).toString())
+            .replace("{total}", (maxPage + 1).toString())
+        val title = LegacyComponentSerializer.legacySection().deserialize(titleRaw)
+
+        val inv = Bukkit.createInventory(SettlementHolder(settlement, MenuType.INVENTORY, currentPage), 54, title)
+
+        val startIndex = currentPage * itemsPerPage
+        val endIndex = minOf(startIndex + itemsPerPage, totalItems)
+
+        // Заполняем слоты инвентаря
+        for (i in startIndex until endIndex) {
+            val aggregatedItem = itemsList[i]
+            val displayItem = aggregatedItem.clone()
+            val totalCount = aggregatedItem.amount
+            displayItem.amount = 1 // Визуально в слоте отображаем ровно 1 штуку
+
+            val meta = displayItem.itemMeta
+            if (meta != null) {
+                val originalName = if (meta.hasDisplayName()) {
+                    meta.displayName
+                } else {
+                    displayItem.type.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
+                }
+                // Название в форме name - count
+                meta.setDisplayName("§e$originalName §7- §b$totalCount")
+                displayItem.itemMeta = meta
+            }
+            inv.setItem(i - startIndex, displayItem)
+        }
+
+        // Заполняем нижнюю панель
+        val glass = createItem(Material.GRAY_STAINED_GLASS_PANE, " ", emptyList())
+        for (slot in 45..53) {
+            inv.setItem(slot, glass)
+        }
+
+        // Возврат назад
+        inv.setItem(49, createItem(Material.ARROW, lang("settlement.menu.common.back", "§cBack"), emptyList()))
+
+        // Стрелка назад (Предыдущая страница)
+        if (currentPage > 0) {
+            inv.setItem(45, createItem(Material.PLAYER_HEAD, lang("settlement.menu.inventory.prev", "§a« Previous Page"), emptyList()).apply {
+                editMeta(SkullMeta::class.java) { meta ->
+                    val uuid = UUID.randomUUID()
+                    val profile = Bukkit.createProfile(uuid, uuid.toString().substring(0, 16))
+                    profile.setProperty(ProfileProperty("textures", "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly90ZXh0dXJlcy5taW5lY3JhZnQubmV0L3RleHR1cmUvNTQyMzdiYzhjOTg1NjUxYjY5MTQ3Yjg1MDJmMTg1NDA1YzY5YTM2NjFjOTFkMjhhODg0N2YyODg0NGEifX19"))
+                    meta.playerProfile = profile
+                }
+            })
+        }
+
+        // Стрелка вперед (Следующая страница)
+        if (currentPage < maxPage) {
+            inv.setItem(53, createItem(Material.PLAYER_HEAD, lang("settlement.menu.inventory.next", "§aNext Page »"), emptyList()).apply {
+                editMeta(SkullMeta::class.java) { meta ->
+                    val uuid = UUID.randomUUID()
+                    val profile = Bukkit.createProfile(uuid, uuid.toString().substring(0, 16))
+                    profile.setProperty(ProfileProperty("textures", "eyJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHA6Ly80MDY4MmY0MzYyYWE1MTY3YWM1MDNhNWI1Yzg5M2Y3YWE3YTIyZTZmNjE0NTg3YTkyYmRlYTI2YmFmYmUifX19"))
+                    meta.playerProfile = profile
+                }
+            })
+        }
+
         player.openInventory(inv)
         playClickSound(player)
     }
@@ -220,6 +322,7 @@ object SettlementMenus : Listener {
             MenuType.MAIN -> {
                 when (event.slot) {
                     11 -> openPopulationMenu(player, holder.settlement)
+                    14 -> openInventoryMenu(player, holder.settlement, 0)
                     15 -> openSettingsMenu(player, holder.settlement)
                 }
             }
@@ -232,6 +335,21 @@ object SettlementMenus : Listener {
                         player.sendFormattedMessage(lang("settlement.menu.rename.prompt", "§eWrite new name in chat (or 'cancel'):"))
                     }
                     26 -> openMainMenu(player, holder.settlement)
+                }
+            }
+            MenuType.INVENTORY -> {
+                when (event.slot) {
+                    49 -> openMainMenu(player, holder.settlement)
+                    45 -> {
+                        if (item.type == Material.PLAYER_HEAD) {
+                            openInventoryMenu(player, holder.settlement, holder.page - 1)
+                        }
+                    }
+                    53 -> {
+                        if (item.type == Material.PLAYER_HEAD) {
+                            openInventoryMenu(player, holder.settlement, holder.page + 1)
+                        }
+                    }
                 }
             }
         }
