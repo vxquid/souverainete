@@ -11,7 +11,6 @@ import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
 import org.bukkit.*
 import org.bukkit.block.Block
-import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.BlockDisplay
@@ -164,60 +163,161 @@ class ConstructionBehavior(
         }
     }
 
+    private fun isLogBlock(material: Material): Boolean {
+        val name = material.name
+        return name.contains("LOG") || name.contains("WOOD") || name.contains("STEM") || name.contains("HYPHAE")
+    }
+
+    private fun isLeafBlock(material: Material): Boolean {
+        return material.name.contains("LEAVES")
+    }
+
+    // ИСПРАВЛЕНО: Интеллектуальный алгоритм рубки деревьев (TreeCapitator) с BoundingBox-фильтрацией
     private fun removeWholeTree(startBlock: Block) {
-        val checked = mutableSetOf<Block>()
-        val queue = ArrayDeque<Block>()
-        queue.add(startBlock)
+        val logs = mutableSetOf<Block>()
+        val logQueue = ArrayDeque<Block>()
 
-        var processedCount = 0
-        while (queue.isNotEmpty() && processedCount++ < 250) {
-            val current = queue.poll()
-            if (!checked.add(current)) continue
+        logs.add(startBlock)
+        logQueue.add(startBlock)
 
-            val type = current.type
-            val isLog = type.name.contains("LOG") || type.name.contains("WOOD") || type.name.contains("STEM") || type.name.contains("HYPHAE")
-            val isLeaves = type.name.contains("LEAVES")
+        // 1. Поиск всех связанных логов (Лимит 300 блоков)
+        while (logQueue.isNotEmpty() && logs.size < 300) {
+            val current = logQueue.removeFirst()
 
-            if (isLog || isLeaves) {
-                if (isLog) {
-                    current.breakNaturally()
-                } else {
-                    current.type = Material.AIR
-                }
-
-                for (face in BlockFace.entries) {
-                    if (face == BlockFace.SELF) continue
-                    val neighbor = current.getRelative(face)
-                    if (neighbor.location.distanceSquared(startBlock.location) <= 225.0) {
-                        queue.add(neighbor)
+            for (dx in -1..1) {
+                for (dy in -1..1) {
+                    for (dz in -1..1) {
+                        if (dx == 0 && dy == 0 && dz == 0) continue
+                        val neighbor = current.getRelative(dx, dy, dz)
+                        if (isLogBlock(neighbor.type) && !logs.contains(neighbor)) {
+                            logs.add(neighbor)
+                            logQueue.add(neighbor)
+                        }
                     }
                 }
             }
         }
+
+        // 2. Валидация структуры: является ли это настоящим деревом (должно быть связано с листьями)
+        var isRealTree = false
+        var leafCount = 0
+
+        for (log in logs) {
+            for (dx in -2..2) {
+                for (dy in -2..2) {
+                    for (dz in -2..2) {
+                        if (isLeafBlock(log.getRelative(dx, dy, dz).type)) {
+                            leafCount++
+                            if (leafCount >= 3) {
+                                isRealTree = true
+                                break
+                            }
+                        }
+                    }
+                }
+                if (isRealTree) break
+            }
+            if (isRealTree) break
+        }
+
+        // Защита от ложного срабатывания (постройки игрока / заборы)
+        if (!isRealTree) {
+            startBlock.breakNaturally()
+            return
+        }
+
+        // 3. Поиск кроны (Flood fill листвы)
+        val leaves = mutableSetOf<Block>()
+        val leafQueue = ArrayDeque<Block>()
+
+        // Сначала добавляем всю листву, которая прилегает непосредственно к стволу
+        for (log in logs) {
+            for (dx in -1..1) {
+                for (dy in -1..1) {
+                    for (dz in -1..1) {
+                        val neighbor = log.getRelative(dx, dy, dz)
+                        if (isLeafBlock(neighbor.type) && !leaves.contains(neighbor)) {
+                            leaves.add(neighbor)
+                            leafQueue.add(neighbor)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Рекурсивно ищем остальную крону (до 1500 блоков для гигантских деревьев)
+        while (leafQueue.isNotEmpty() && leaves.size < 1500) {
+            val current = leafQueue.removeFirst()
+
+            for (dx in -1..1) {
+                for (dy in -1..1) {
+                    for (dz in -1..1) {
+                        if (dx == 0 && dy == 0 && dz == 0) continue
+                        val neighbor = current.getRelative(dx, dy, dz)
+                        if (isLeafBlock(neighbor.type) && !leaves.contains(neighbor)) {
+                            leaves.add(neighbor)
+                            leafQueue.add(neighbor)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Отфильтровываем листья, чтобы не задеть соседние деревья ("эффект лесного пожара")
+        // Оставляем только те листья, которые находятся не дальше 5 блоков от габаритов ствола
+        var minX = startBlock.x; var maxX = startBlock.x
+        var minY = startBlock.y; var maxY = startBlock.y
+        var minZ = startBlock.z; var maxZ = startBlock.z
+
+        for (log in logs) {
+            if (log.x < minX) minX = log.x
+            if (log.x > maxX) maxX = log.x
+            if (log.y < minY) minY = log.y
+            if (log.y > maxY) maxY = log.y
+            if (log.z < minZ) minZ = log.z
+            if (log.z > maxZ) maxZ = log.z
+        }
+
+        val padding = 5
+        val validLeaves = leaves.filter { leaf ->
+            leaf.x in (minX - padding)..(maxX + padding) &&
+                    leaf.y in (minY - padding)..(maxY + padding) &&
+                    leaf.z in (minZ - padding)..(maxZ + padding)
+        }
+
+        // 4. Безопасное уничтожение
+        logs.forEach { it.breakNaturally() }
+        validLeaves.forEach { it.type = Material.AIR }
     }
 
+    // ИСПРАВЛЕНО: Безопасный поиск ствола сверху вниз
     private fun findConnectedTrunk(startBlock: Block): Block? {
         val checked = mutableSetOf<Block>()
         val queue = ArrayDeque<Block>()
         queue.add(startBlock)
+        checked.add(startBlock)
 
         var processedCount = 0
-        while (queue.isNotEmpty() && processedCount++ < 100) {
-            val current = queue.poll()
-            if (!checked.add(current)) continue
+        while (queue.isNotEmpty() && processedCount++ < 150) {
+            val current = queue.removeFirst()
 
-            val type = current.type
-            val isLog = type.name.contains("LOG") || type.name.contains("WOOD") || type.name.contains("STEM") || type.name.contains("HYPHAE")
-            if (isLog) {
+            if (isLogBlock(current.type)) {
                 return current
             }
 
-            if (type.name.contains("LEAVES")) {
-                for (face in BlockFace.entries) {
-                    if (face == BlockFace.SELF) continue
-                    val neighbor = current.getRelative(face)
-                    if (neighbor.location.distanceSquared(startBlock.location) <= 49.0) {
-                        queue.add(neighbor)
+            if (isLeafBlock(current.type)) {
+                for (dx in -1..1) {
+                    for (dy in -1..1) {
+                        for (dz in -1..1) {
+                            if (dx == 0 && dy == 0 && dz == 0) continue
+                            val neighbor = current.getRelative(dx, dy, dz)
+                            if (neighbor.location.distanceSquared(startBlock.location) <= 49.0) {
+                                if (!checked.contains(neighbor)) {
+                                    checked.add(neighbor)
+                                    queue.add(neighbor)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -358,7 +458,6 @@ class ConstructionBehavior(
         val currentLoc = villager.bukkitEntity.location
         val lastLoc = lastLocationMap[villager]
 
-        // Ведем учет тиков работы над конкретной задачей блока
         val pursuitTicks = (assignedBlockTicksMap[villager] ?: 0) + 1
         assignedBlockTicksMap[villager] = pursuitTicks
 
@@ -372,7 +471,6 @@ class ConstructionBehavior(
         }
         lastLocationMap[villager] = currentLoc
 
-        // 1. Быстрая активация телекинеза (дистанционного хака), если житель тупит из-за рельефа (прошло 80 тиков / 4 сек)
         if (pursuitTicks > 80) {
             if (!villager.isBuildDistanceHackActive) {
                 villager.isBuildDistanceHackActive = true
@@ -380,7 +478,6 @@ class ConstructionBehavior(
             }
         }
 
-        // 2. Сброс зависшей задачи, если за 240 тиков (12 сек) физически нет прогресса ИЛИ общий таймаут работы над блоком превысил 300 тиков (15 сек)
         val idleTicks = world.gameTime - villager.lastBuildActionTime
         if (idleTicks > 240L || pursuitTicks > 300) {
             assignedBlockTicksMap.remove(villager)
@@ -398,17 +495,15 @@ class ConstructionBehavior(
         val diffX = kotlin.math.abs(blockPos.x - npcPos.x)
         val diffZ = kotlin.math.abs(blockPos.z - npcPos.z)
 
-        // ИСПРАВЛЕНО: Добавлено +1 к радиусу горизонтального строительства ( Roads: 4 блока, Buildings: 5 блоков )
         val isWithinReach = if (villager.isBuildDistanceHackActive) {
             true
         } else if (assigned.isRoad) {
-            (diffX * diffX + diffZ * diffZ <= 16.0) // Добавлено +1 к радиусу (макс. 4 блока горизонтально)
+            (diffX * diffX + diffZ * diffZ <= 16.0)
         } else {
-            (diffX * diffX + diffZ * diffZ <= 25.0) // Добавлено +1 к радиусу (макс. 5 блоков горизонтально)
+            (diffX * diffX + diffZ * diffZ <= 25.0)
         }
 
         val material = assigned.material
-        // ИСПРАВЛЕНО: Игрок прокладывает дорожки лопатой по ПКМ. Если это дорожная трансформация, землю копать и ломать НЕ НУЖНО.
         val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
 
         if (isWithinReach) {
@@ -429,9 +524,8 @@ class ConstructionBehavior(
             villager.xRot = (-Math.toDegrees(kotlin.math.atan2(dY, distance))).toFloat()
             villager.lookControl.setLookAt(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5)
 
-            // ИСПРАВЛЕНО: Пропускаем шаг разрушения блоков, если это трансформация лопатой в тропинку
             if (!block.isIgnorableObstacle() && !isPathTransformation) {
-                if (block.type.name.contains("LOG") || block.type.name.contains("WOOD") || block.type.name.contains("STEM") || block.type.name.contains("HYPHAE")) {
+                if (isLogBlock(block.type)) {
                     removeWholeTree(block)
 
                     assignedBlockTicksMap.remove(villager)
@@ -623,7 +717,6 @@ class BuilderSafetyListener : Listener {
                 val safeLoc = if (settlement != null) {
                     val center = settlement.data.center
 
-                    // ИСПРАВЛЕНО: Продвинутый поиск безопасного блока в радиусе 3 блоков, Y-высота которого гарантированно НЕ превышает высоту центра (колокола) поселения
                     var targetY = center.blockY
                     var targetX = center.blockX + 2
                     var targetZ = center.blockZ + 2
@@ -636,7 +729,6 @@ class BuilderSafetyListener : Listener {
                             val tz = center.blockZ + oz
                             val gy = world.getHighestBlockYAt(tx, tz)
 
-                            // Строго ограничиваем высоту Y-координатой центра, чтобы житель не очутился на крыше meeting_point/town_hall
                             if (gy <= center.blockY + 1) {
                                 val feetBlock = world.getBlockAt(tx, gy + 1, tz)
                                 val headBlock = world.getBlockAt(tx, gy + 2, tz)

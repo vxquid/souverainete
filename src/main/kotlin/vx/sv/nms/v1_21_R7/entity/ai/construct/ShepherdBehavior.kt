@@ -9,6 +9,7 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
+import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.Sound
@@ -30,8 +31,11 @@ class ShepherdBehavior(
     ),
     200
 ) {
+    private var lastSheepSearchTime = 0L
+    private var cachedTargetSheep: Sheep? = null
+    private var isHerding = false
+
     companion object {
-        // Глобальная потокобезопасная карта резервирования овец
         val reservedSheep = ConcurrentHashMap<UUID, UUID>()
 
         fun isSheepFree(sheep: Sheep, villager: HumanoidVillager): Boolean {
@@ -59,14 +63,7 @@ class ShepherdBehavior(
         if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.SHEPHERD || villager.settlement == null) {
             return false
         }
-
-        // ИСПРАВЛЕНО: Пастух работает строго в рабочее время (с 8:00 до 15:00)
-        val timeOfDay = world.world.time
-        if (timeOfDay < 2000 || timeOfDay > 9000) {
-            return false
-        }
-
-        return true
+        return world.world.time in 0..12000
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
@@ -74,9 +71,7 @@ class ShepherdBehavior(
         if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.SHEPHERD || villager.settlement == null) {
             return false
         }
-
-        val timeOfDay = world.world.time
-        return timeOfDay in 2000..9000
+        return world.world.time in 0..12000
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -84,8 +79,8 @@ class ShepherdBehavior(
         val center = settlement.data.center
         val bukkitWorld = world.world
         val npcLoc = villager.bukkitEntity.location
+        val gameTime = world.gameTime
 
-        // === АНТИ-ЗАСТРЕВАНИЕ (Stuck Prevention) ===
         val nmsPos = villager.position()
         val lastPos = villager.lastPosition
         if (lastPos != null && lastPos.distanceToSqr(nmsPos) < 0.01) {
@@ -95,35 +90,27 @@ class ShepherdBehavior(
             villager.lastPosition = nmsPos
         }
 
-        // 1. ПРОВЕРЯЕМ, ВЕДЕМ ЛИ МЫ УЖЕ ОВЦУ НА ПОВОДКЕ
-        val leashedSheep = bukkitWorld.getEntitiesByClass(Sheep::class.java).find {
-            it.isLeashed && it.leashHolder == villager.bukkitEntity
-        }
-
+        // Если овца уже на поводке, отводим её в центр
+        val leashedSheep = cachedTargetSheep?.takeIf { it.isLeashed && it.leashHolder == villager.bukkitEntity }
         if (leashedSheep != null) {
             claimSheep(leashedSheep, villager)
 
-            // Если пастух завис на месте с овцой больше 5 секунд — веревка обрывается
             if (villager.stuckTicks > 100) {
                 leashedSheep.setLeashHolder(null)
                 releaseReservations(villager.uuid)
                 villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+                cachedTargetSheep = null
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
                 villager.stuckTicks = 0
                 return
             }
 
-            if (leashedSheep.location.distanceSquared(center) <= 36.0) {
+            if (leashedSheep.location.distanceSquared(center) <= 100.0) {
                 leashedSheep.setLeashHolder(null)
-
-                leashedSheep.persistentDataContainer.set(
-                    NamespacedKey(plugin, "village_animal"),
-                    PersistentDataType.BYTE,
-                    1.toByte()
-                )
-
+                leashedSheep.persistentDataContainer.set(NamespacedKey(plugin, "village_animal"), PersistentDataType.BYTE, 1.toByte())
                 releaseReservations(villager.uuid)
                 villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+                cachedTargetSheep = null
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
             } else {
                 villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.LEAD)))
@@ -134,123 +121,95 @@ class ShepherdBehavior(
             return
         }
 
-        val allSheep = bukkitWorld.getEntitiesByClass(Sheep::class.java).filter {
-            it.location.distanceSquared(npcLoc) <= 2025.0
-        }
+        // Троттлинг поиска овец через легкий getNearbyEntities (каждые 20 тиков)
+        if (cachedTargetSheep == null && gameTime - lastSheepSearchTime > 20L) {
+            lastSheepSearchTime = gameTime
+            val allSheep = npcLoc.getNearbyEntities(45.0, 20.0, 45.0).filterIsInstance<Sheep>()
 
-        // 2. СТРИЖКА ОВЕЦ (Приоритет 2)
-        val sheepToShear = allSheep.find { sheep ->
-            sheep.isAdult && !sheep.isSheared && sheep.location.distanceSquared(center) <= 900.0 && isSheepFree(sheep, villager)
-        }
-
-        if (sheepToShear != null) {
-            claimSheep(sheepToShear, villager)
-
-            // Защита от зависания при попытке дойти до овцы
-            if (villager.stuckTicks > 100) {
-                releaseReservations(villager.uuid)
-                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-                villager.stuckTicks = 0
-                return
+            cachedTargetSheep = allSheep.find { sheep ->
+                sheep.isAdult && !sheep.isSheared && sheep.location.distanceSquared(center) <= 900.0 && isSheepFree(sheep, villager)
             }
+            isHerding = false
 
-            val distSq = npcLoc.distanceSquared(sheepToShear.location)
-            if (distSq <= 4.0) {
-                sheepToShear.isSheared = true
-                bukkitWorld.playSound(sheepToShear.location, Sound.ENTITY_SHEEP_SHEAR, 1.0f, 1.0f)
-
-                val woolMat = try {
-                    Material.valueOf(sheepToShear.color?.name + "_WOOL")
-                } catch (e: Exception) {
-                    Material.WHITE_WOOL
+            if (cachedTargetSheep == null) {
+                cachedTargetSheep = allSheep.find { sheep ->
+                    val isVillageAnimal = sheep.persistentDataContainer.has(NamespacedKey(plugin, "village_animal"), PersistentDataType.BYTE)
+                    val needsHerding = if (isVillageAnimal) sheep.location.distanceSquared(center) > 900.0 else sheep.location.distanceSquared(center) <= 1600.0
+                    needsHerding && !sheep.isLeashed && isSheepFree(sheep, villager)
                 }
-                bukkitWorld.dropItemNaturally(sheepToShear.location, ItemStack(woolMat, 1 + world.random.nextInt(3)))
-
-                villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.SHEARS)))
-                villager.swing(InteractionHand.MAIN_HAND)
-
-                releaseReservations(villager.uuid)
-            } else {
-                val targetPos = BlockPos(sheepToShear.location.blockX, sheepToShear.location.blockY, sheepToShear.location.blockZ)
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
-                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
+                if (cachedTargetSheep != null) isHerding = true
             }
-            return
         }
 
-        // 3. ИЩЕМ СБЕЖАВШУЮ ИЛИ ДИКУЮ ОВЦУ (Приоритет 3)
-        val sheepToHerd = allSheep.find { sheep ->
-            val isVillageAnimal = sheep.persistentDataContainer.has(NamespacedKey(plugin, "village_animal"), PersistentDataType.BYTE)
-            val needsHerding = if (isVillageAnimal) {
-                sheep.location.distanceSquared(center) > 900.0 && !sheep.isLeashed
-            } else {
-                sheep.location.distanceSquared(center) <= 1600.0 && !sheep.isLeashed
-            }
-            needsHerding && isSheepFree(sheep, villager)
-        }
-
-        if (sheepToHerd != null) {
-            claimSheep(sheepToHerd, villager)
+        // Валидация кэша овцы
+        val sheep = cachedTargetSheep
+        if (sheep != null && sheep.isValid && !sheep.isDead) {
+            claimSheep(sheep, villager)
 
             if (villager.stuckTicks > 100) {
                 releaseReservations(villager.uuid)
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
                 villager.stuckTicks = 0
+                cachedTargetSheep = null
                 return
             }
 
-            val distSq = npcLoc.distanceSquared(sheepToHerd.location)
-            if (distSq <= 9.0) {
-                sheepToHerd.setLeashHolder(villager.bukkitEntity)
-                villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.LEAD)))
-            } else {
-                val targetPos = BlockPos(sheepToHerd.location.blockX, sheepToHerd.location.blockY, sheepToHerd.location.blockZ)
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
-                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
-            }
-            return
-        }
+            val distSq = npcLoc.distanceSquared(sheep.location)
 
-        // 4. КОРМЛЕНИЕ И РАЗВЕДЕНИЕ (Приоритет 4)
-        val villageSheep = allSheep.filter { sheep ->
-            sheep.location.distanceSquared(center) <= 900.0 && sheep.isAdult
-        }
-
-        if (villageSheep.size < 12) {
-            val breedingSheep = villageSheep.find { sheep ->
-                !sheep.isLoveMode && sheep.canBreed() && isSheepFree(sheep, villager)
-            }
-
-            if (breedingSheep != null) {
-                claimSheep(breedingSheep, villager)
-
-                if (villager.stuckTicks > 100) {
-                    releaseReservations(villager.uuid)
-                    villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-                    villager.stuckTicks = 0
-                    return
-                }
-
-                val distSq = npcLoc.distanceSquared(breedingSheep.location)
-                if (distSq <= 4.0) {
-                    breedingSheep.loveModeTicks = 600
-                    bukkitWorld.playSound(breedingSheep.location, Sound.ENTITY_COW_MILK, 1.0f, 1.0f)
-
-                    villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.WHEAT)))
-                    villager.swing(InteractionHand.MAIN_HAND)
-
-                    releaseReservations(villager.uuid)
+            if (isHerding) {
+                if (distSq <= 9.0) {
+                    sheep.setLeashHolder(villager.bukkitEntity)
+                    villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.LEAD)))
                 } else {
-                    val targetPos = BlockPos(breedingSheep.location.blockX, breedingSheep.location.blockY, breedingSheep.location.blockZ)
+                    val targetPos = BlockPos(sheep.location.blockX, sheep.location.blockY, sheep.location.blockZ)
                     villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
                     villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
                 }
-                return
+            } else {
+                if (distSq <= 4.0) {
+                    sheep.isSheared = true
+                    bukkitWorld.playSound(sheep.location, Sound.ENTITY_SHEEP_SHEAR, 1.0f, 1.0f)
+                    val woolMat = try { Material.valueOf(sheep.color?.name + "_WOOL") } catch (e: Exception) { Material.WHITE_WOOL }
+                    bukkitWorld.dropItemNaturally(sheep.location, ItemStack(woolMat, 1 + world.random.nextInt(3)))
+
+                    villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.SHEARS)))
+                    villager.swing(InteractionHand.MAIN_HAND)
+
+                    releaseReservations(villager.uuid)
+                    cachedTargetSheep = null
+                } else {
+                    val targetPos = BlockPos(sheep.location.blockX, sheep.location.blockY, sheep.location.blockZ)
+                    villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
+                    villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
+                }
             }
+            return
+        } else {
+            cachedTargetSheep = null
         }
 
-        releaseReservations(villager.uuid)
-        villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+        // Если овец нет, идем к станку (O(1) получение из кэша)
+        val loomPos = SettlementPlanner.getWorkstationFor(villager)
+        if (loomPos != null) {
+            val distSq = npcLoc.distanceSquared(Location(bukkitWorld, loomPos.x + 0.5, loomPos.y + 0.5, loomPos.z + 0.5))
+            val targetPos = BlockPos(loomPos.x, loomPos.y, loomPos.z)
+            if (distSq <= 6.0) {
+                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
+                if (world.random.nextInt(60) == 0) {
+                    villager.swing(InteractionHand.MAIN_HAND)
+                    bukkitWorld.playSound(Location(bukkitWorld, loomPos.x + 0.5, loomPos.y + 0.5, loomPos.z + 0.5), Sound.UI_LOOM_TAKE_RESULT, 1.0f, 1.0f)
+                }
+            } else {
+                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
+                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
+            }
+        } else {
+            releaseReservations(villager.uuid)
+            villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+            val targetPos = BlockPos(center.blockX, center.blockY, center.blockZ)
+            villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 3))
+        }
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -259,5 +218,6 @@ class ShepherdBehavior(
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
         villager.stuckTicks = 0
         villager.lastPosition = null
+        cachedTargetSheep = null
     }
 }

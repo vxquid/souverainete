@@ -30,18 +30,12 @@ class MinerBehavior(
 ) {
     private var mineBlockTicks = 0
 
-    // ИСПРАВЛЕНО: Кэширование рабочей станции для защиты от ежетикового спама поиска
-    private var cachedTablePos: BlockPos? = null
-    private var lastSearchTime = 0L
-
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
         if (bukkitVillager.profession != Villager.Profession.TOOLSMITH || villager.settlement == null) {
             return false
         }
-
-        val timeOfDay = world.world.time
-        return timeOfDay in 2000..9000
+        return world.world.time in 0..12000
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
@@ -49,9 +43,7 @@ class MinerBehavior(
         if (bukkitVillager.profession != Villager.Profession.TOOLSMITH || villager.settlement == null) {
             return false
         }
-
-        val timeOfDay = world.world.time
-        return timeOfDay in 2000..9000
+        return world.world.time in 0..12000
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -59,44 +51,9 @@ class MinerBehavior(
         val center = settlement.data.center
         val bukkitWorld = world.world
         val npcLoc = villager.bukkitEntity.location
-        val gameTime = world.gameTime
 
-        // Проверяем актуальность кэша стола
-        var tablePos = cachedTablePos
-        if (tablePos != null) {
-            val chunkX = tablePos.x shr 4
-            val chunkZ = tablePos.z shr 4
-            if (!bukkitWorld.isChunkLoaded(chunkX, chunkZ) ||
-                bukkitWorld.getBlockAt(tablePos.x, tablePos.y, tablePos.z).type != Material.SMITHING_TABLE) {
-                tablePos = null
-                cachedTablePos = null
-            }
-        }
-
-        // ИСПРАВЛЕНО: Поиск кузнечного стола выполняется максимум один раз в 10 секунд (200 тиков)
-        // и только в уже загруженных чанках во избежание фризов основного потока.
-        if (tablePos == null && gameTime - lastSearchTime > 200L) {
-            lastSearchTime = gameTime
-            val r = 35
-            searchLoop@ for (cx in -r..r) {
-                for (cz in -r..r) {
-                    val px = center.blockX + cx
-                    val pz = center.blockZ + cz
-
-                    if (!bukkitWorld.isChunkLoaded(px shr 4, pz shr 4)) continue
-
-                    for (cy in -12..12) {
-                        val py = center.blockY + cy
-                        val block = bukkitWorld.getBlockAt(px, py, pz)
-                        if (block.type == Material.SMITHING_TABLE) {
-                            tablePos = BlockPos(px, py, pz)
-                            cachedTablePos = tablePos
-                            break@searchLoop
-                        }
-                    }
-                }
-            }
-        }
+        // Мгновенное чтение рабочего стола из кэша
+        val tablePos = SettlementPlanner.getWorkstationFor(villager)
 
         if (tablePos == null) {
             val targetPos = BlockPos(center.blockX, center.blockY, center.blockZ)
@@ -143,10 +100,7 @@ class MinerBehavior(
                 bukkitWorld.playSound(stoneBlock.location, Sound.BLOCK_STONE_BREAK, 1.0f, 1.0f)
                 bukkitWorld.spawnParticle(Particle.BLOCK, stoneBlock.location.add(0.5, 0.5, 0.5), 15, Material.STONE.createBlockData())
 
-                val random = world.random
-                val roll = random.nextInt(100)
-
-                val dropMaterial = when (roll) {
+                val dropMaterial = when (world.random.nextInt(100)) {
                     in 0..4 -> Material.EMERALD
                     in 5..14 -> Material.RAW_GOLD
                     in 15..34 -> Material.RAW_IRON
@@ -156,8 +110,8 @@ class MinerBehavior(
                 }
 
                 val amount = when (dropMaterial) {
-                    Material.COBBLESTONE, Material.COAL -> 2 + random.nextInt(3)
-                    else -> 1 + random.nextInt(3)
+                    Material.COBBLESTONE, Material.COAL -> 2 + world.random.nextInt(3)
+                    else -> 1 + world.random.nextInt(3)
                 }
 
                 bukkitWorld.dropItemNaturally(stoneBlock.location.add(0.5, 0.5, 0.5), ItemStack(dropMaterial, amount))

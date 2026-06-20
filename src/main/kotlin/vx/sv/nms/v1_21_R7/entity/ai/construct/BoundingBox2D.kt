@@ -66,6 +66,84 @@ class SettlementPlanner(val settlement: Settlement) {
         private val buildingDisplays = ConcurrentHashMap<String, BlockDisplay>()
         private val planningCooldowns = ConcurrentHashMap<UUID, Long>()
 
+        // Кэш рабочих станций
+        private val workstationCache = ConcurrentHashMap<String, BlockPos>()
+        private val activeScans = ConcurrentHashMap.newKeySet<String>()
+
+        // ИСПРАВЛЕНО: Флаг активного асинхронного планирования места застройки для поселения
+        private val activePlanning = ConcurrentHashMap.newKeySet<UUID>()
+
+        fun getWorkstationFor(villager: HumanoidVillager): BlockPos? {
+            val s = villager.settlement ?: return null
+            val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return null
+            val prof = bukkitVillager.profession
+
+            val (buildingTypeName, targetMaterial) = when (prof) {
+                org.bukkit.entity.Villager.Profession.FARMER -> Pair("FARM", Material.COMPOSTER)
+                org.bukkit.entity.Villager.Profession.SHEPHERD -> Pair("SHEPHERD", Material.LOOM)
+                org.bukkit.entity.Villager.Profession.TOOLSMITH -> Pair("MINE", Material.SMITHING_TABLE)
+                org.bukkit.entity.Villager.Profession.BUTCHER -> Pair("BAKERY", Material.SMOKER)
+                else -> return null
+            }
+
+            val key = "${s.data.id}_${buildingTypeName}"
+            val cached = workstationCache[key]
+
+            if (cached != null) {
+                if (s.world.getBlockAt(cached.x, cached.y, cached.z).type == targetMaterial) {
+                    return cached
+                }
+                workstationCache.remove(key)
+            }
+
+            if (activeScans.add(key)) {
+                val records = buildings[s.data.id] ?: run { activeScans.remove(key); return null }
+                val record = records.find { it.type.startsWith(buildingTypeName) } ?: run { activeScans.remove(key); return null }
+                val box = record.box
+                val world = s.world
+
+                val minCX = box.minX.toInt() shr 4
+                val maxCX = box.maxX.toInt() shr 4
+                val minCZ = box.minZ.toInt() shr 4
+                val maxCZ = box.maxZ.toInt() shr 4
+
+                val snapshots = mutableMapOf<Pair<Int, Int>, ChunkSnapshot>()
+                for (cx in minCX..maxCX) {
+                    for (cz in minCZ..maxCZ) {
+                        if (world.isChunkLoaded(cx, cz)) {
+                            snapshots[Pair(cx, cz)] = world.getChunkAt(cx, cz).chunkSnapshot
+                        }
+                    }
+                }
+
+                plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+                    var found: BlockPos? = null
+                    scan@ for (x in box.minX.toInt()..box.maxX.toInt()) {
+                        for (z in box.minZ.toInt()..box.maxZ.toInt()) {
+                            val cx = x shr 4
+                            val cz = z shr 4
+                            val snap = snapshots[Pair(cx, cz)] ?: continue
+                            val localX = x and 15
+                            val localZ = z and 15
+
+                            for (y in box.minY.toInt()..box.maxY.toInt()) {
+                                if (snap.getBlockType(localX, y, localZ) == targetMaterial) {
+                                    found = BlockPos(x, y, z)
+                                    break@scan
+                                }
+                            }
+                        }
+                    }
+
+                    if (found != null) {
+                        workstationCache[key] = found
+                    }
+                    activeScans.remove(key)
+                })
+            }
+            return null
+        }
+
         init {
             Bukkit.getScheduler().runTaskTimer(plugin, Runnable {
                 val spyglassPlayers = Bukkit.getOnlinePlayers().filter {
@@ -177,6 +255,12 @@ class SettlementPlanner(val settlement: Settlement) {
                     name.contains("SAPLING")
         }
 
+        fun isIgnorableObstacleMat(type: Material): Boolean {
+            if (type.isAir || type == Material.WATER || type == Material.LAVA) return true
+            if (!type.isSolid && type != Material.WITHER_ROSE) return true
+            return false
+        }
+
         fun getHighestGroundYAt(world: World, x: Int, z: Int): Int {
             var y = world.getHighestBlockYAt(x, z)
             while (y > world.minHeight) {
@@ -185,6 +269,25 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 val isTreeOrPlant = isTreeBlock(type) || block.isIgnorableObstacle()
                 if (isTreeOrPlant) {
+                    y--
+                } else {
+                    break
+                }
+            }
+            return y
+        }
+
+        // Асинхронный аналог для работы со слепками
+        fun snapshotGetHighestGroundYAt(snapshots: Map<Pair<Int, Int>, ChunkSnapshot>, world: World, x: Int, z: Int): Int {
+            val cx = x shr 4
+            val cz = z shr 4
+            val snap = snapshots[Pair(cx, cz)] ?: return world.minHeight - 1
+
+            var y = snap.getHighestBlockYAt(x and 15, z and 15)
+            val minHeight = world.minHeight
+            while (y > minHeight) {
+                val type = snap.getBlockType(x and 15, y, z and 15)
+                if (isTreeBlock(type) || isIgnorableObstacleMat(type)) {
                     y--
                 } else {
                     break
@@ -437,6 +540,12 @@ class SettlementPlanner(val settlement: Settlement) {
 
     fun planNextPriorityBuilding(): Boolean {
         val settlementId = settlement.data.id
+
+        // Предохранитель от параллельного запуска асинхронного поиска
+        if (activePlanning.contains(settlementId)) {
+            return false
+        }
+
         val gameTime = world.gameTime
         val lastFailed = planningCooldowns[settlementId] ?: 0L
 
@@ -466,17 +575,14 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val maxResidentialAllowed = maxOf(6, settlement.villagers.size)
 
-        // ИСПРАВЛЕНО: Лимиты домов разделяются поровну на 33% для каждого размера, убирая доминирование маленьких домиков
         val allowedSmall = if (existingSmall < 2) 2 else if (existingLarge >= 2 && existingMedium >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
         val allowedLarge = if (existingLarge < 2) 2 else if (existingSmall >= 2 && existingMedium >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
         val allowedMedium = if (existingMedium < 2) 2 else if (existingSmall >= 2 && existingLarge >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
 
         val totalBuildingsBuilt = records.size
-        val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(6)
+        val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(4)
 
-        // ИСПРАВЛЕНО: Установлен строгий приоритет: еда (FARM) -> дерево (WOOD_FARM) -> шахта (MINE) -> овчарня (SHEPHERD) -> дома -> всё остальное
         val priorityList = listOf(
-            Pair(VanillaBuildingType.MEETING_POINT, 1),
             Pair(VanillaBuildingType.FARM, 2),
             Pair(VanillaBuildingType.WOOD_FARM, 1),
             Pair(VanillaBuildingType.MINE, 1),
@@ -484,6 +590,7 @@ class SettlementPlanner(val settlement: Settlement) {
             Pair(VanillaBuildingType.HOUSE_SMALL, allowedSmall),
             Pair(VanillaBuildingType.HOUSE_LARGE, allowedLarge),
             Pair(VanillaBuildingType.HOUSE_MEDIUM, allowedMedium),
+            Pair(VanillaBuildingType.MEETING_POINT, 1),
             Pair(VanillaBuildingType.LAMP, maxLampsAllowed),
             Pair(VanillaBuildingType.ANIMAL_PEN, 1),
             Pair(VanillaBuildingType.STABLE, 1),
@@ -492,19 +599,15 @@ class SettlementPlanner(val settlement: Settlement) {
             Pair(VanillaBuildingType.LIBRARY, 1),
             Pair(VanillaBuildingType.ARMORY, 1),
             Pair(VanillaBuildingType.CARTOGRAPHER, 1),
-            Pair(VanillaBuildingType.TEMPLE, 1),
-            Pair(VanillaBuildingType.LAMP, maxLampsAllowed / 2)
+            Pair(VanillaBuildingType.TEMPLE, 1)
         )
 
-        // Разделяем наш приоритетный список на жилые дома и общественные/производственные здания
         val houses = priorityList.filter { it.first.typeName.startsWith("HOUSE_") }
         val nonHouses = priorityList.filter { !it.first.typeName.startsWith("HOUSE_") }
 
-        // Проверяем, было ли последнее запланированное здание домом
         val lastPlanned = records.lastOrNull()
         val lastWasHouse = lastPlanned != null && lastPlanned.type.startsWith("HOUSE_")
 
-        // ИСПРАВЛЕНО: Чередуем строительство жилых домов и прочих общественных построек во избежание спама домов подряд
         if (lastWasHouse) {
             for ((type, maxCount) in nonHouses) {
                 val currentCount = existingCounts[type.typeName] ?: 0
@@ -515,7 +618,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
                 }
             }
-            // Если все доступные не-дома уже построены/запланированы, снимаем ограничение и строим дома
             for ((type, maxCount) in houses) {
                 val currentCount = existingCounts[type.typeName] ?: 0
                 if (currentCount < maxCount) {
@@ -541,7 +643,12 @@ class SettlementPlanner(val settlement: Settlement) {
         return false
     }
 
+    // ИСПРАВЛЕНО: Асинхронный поиск безопасного места с помощью слепков (ChunkSnapshot)
     fun planBuilding(type: VanillaBuildingType): Boolean {
+        val settlementId = settlement.data.id
+        if (activePlanning.contains(settlementId)) return false
+        activePlanning.add(settlementId)
+
         val center = settlement.data.center
 
         val isCritical = type == VanillaBuildingType.FARM ||
@@ -560,8 +667,8 @@ class SettlementPlanner(val settlement: Settlement) {
         val rawLength = structureSize.blockZ
         val buildingHeight = structureSize.blockY
 
-        val rand = Random()
-        val recordsList = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
+        val recordsListCopy = buildings[settlementId]?.toList() ?: emptyList()
+        val roadsCopy = settlementRoads[settlementId]?.toSet() ?: emptySet()
 
         val jigsawPos = VanillaStructureLoader.getRawEntranceCandidates(type.vanillaPath)
         val entrancePos = if (jigsawPos.isNotEmpty()) {
@@ -570,191 +677,236 @@ class SettlementPlanner(val settlement: Settlement) {
             BlockPos(rawWidth / 2, 0, 0)
         }
 
-        for (attempt in 0..maxAttempts) {
-            val angle = rand.nextDouble() * 2 * Math.PI
-            val distance = rand.nextInt(maxRadius - minRadius) + minRadius
+        // Подготовка слепков чанков для асинхронного доступа (синхронно, но только загруженные чанки)
+        val snapshots = mutableMapOf<Pair<Int, Int>, ChunkSnapshot>()
+        val maxDist = maxRadius + 20
+        val minCX = (center.blockX - maxDist) shr 4
+        val maxCX = (center.blockX + maxDist) shr 4
+        val minCZ = (center.blockZ - maxDist) shr 4
+        val maxCZ = (center.blockZ + maxDist) shr 4
 
-            val cx = center.blockX + (cos(angle) * distance).toInt()
-            val cz = center.blockZ + (sin(angle) * distance).toInt()
-
-            val settlementId = settlement.data.id
-            val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
-            var targetX = center.blockX
-            var targetZ = center.blockZ
-
-            if (roads.isNotEmpty()) {
-                var minRoadDistSq = Double.MAX_VALUE
-                for (pos in roads) {
-                    val dx = pos.x - cx
-                    val dz = pos.z - cz
-                    val distSq = (dx * dx + dz * dz).toDouble()
-                    if (distSq < minRoadDistSq) {
-                        minRoadDistSq = distSq
-                        targetX = pos.x
-                        targetZ = pos.z
-                    }
+        for (cx in minCX..maxCX) {
+            for (cz in minCZ..maxCZ) {
+                if (world.isChunkLoaded(cx, cz)) {
+                    snapshots[Pair(cx, cz)] = world.getChunkAt(cx, cz).chunkSnapshot
                 }
             }
-
-            var bestRotation = StructureRotation.NONE
-            var minJigsawDistSq = Double.MAX_VALUE
-
-            for (rot in StructureRotation.values()) {
-                val rotJigsaw = rotateCoords(entrancePos, rot, rawWidth, rawLength)
-                val rotWidth = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
-                val rotLength = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
-
-                val absX = cx - rotWidth / 2 + rotJigsaw.x
-                val absZ = cz - rotLength / 2 + rotJigsaw.z
-
-                val dx = absX - targetX
-                val dz = absZ - targetZ
-                val distSq = (dx * dx + dz * dz).toDouble()
-
-                if (distSq < minJigsawDistSq) {
-                    minJigsawDistSq = distSq
-                    bestRotation = rot
-                }
-            }
-
-            val width = if (bestRotation == StructureRotation.CLOCKWISE_90 || bestRotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
-            val length = if (bestRotation == StructureRotation.CLOCKWISE_90 || bestRotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
-
-            var minY = Int.MAX_VALUE
-            var maxY = Int.MIN_VALUE
-
-            var sumY = 0
-            var countY = 0
-
-            var validTerrain = true
-
-            for (x in -width / 2..width / 2) {
-                for (z in -length / 2..length / 2) {
-                    val absX = cx + x
-                    val absZ = cz + z
-
-                    if (!world.isChunkLoaded(absX shr 4, absZ shr 4)) {
-                        validTerrain = false
-                        break
-                    }
-
-                    val highestY = world.getHighestBlockYAt(absX, absZ)
-                    val surfaceBlock = world.getBlockAt(absX, highestY, absZ)
-                    val surfaceBlockType = surfaceBlock.type
-
-                    if (surfaceBlock.isLiquid ||
-                        surfaceBlockType == Material.WATER ||
-                        surfaceBlockType == Material.LAVA ||
-                        surfaceBlockType.name.contains("WATER") ||
-                        surfaceBlockType.name.contains("ICE") ||
-                        surfaceBlockType.name.contains("LAVA")) {
-                        validTerrain = false
-                        break
-                    }
-
-                    val isRoadBlock = surfaceBlockType == Material.DIRT_PATH ||
-                            surfaceBlockType.name.contains("PATH") ||
-                            roads.any { it.x == absX && it.z == absZ }
-                    if (isRoadBlock) {
-                        validTerrain = false
-                        break
-                    }
-
-                    val hy = getHighestGroundYAt(world, absX, absZ)
-                    if (hy < minY) minY = hy
-                    if (hy > maxY) maxY = hy
-
-                    sumY += hy
-                    countY++
-                }
-                if (!validTerrain) break
-            }
-
-            if (!validTerrain) continue
-            val maxAllowedVariance = if (isCritical) 9 else 5
-            if (maxY - minY > maxAllowedVariance) continue
-            if (abs(maxY - center.blockY) > 15) continue
-
-            var pathValid = true
-            var px = center.blockX
-            var pz = center.blockZ
-            val dX = abs(cx - px)
-            val dZ = abs(cz - pz)
-            val sX = if (px < cx) 1 else -1
-            val sZ = if (pz < cz) 1 else -1
-            var err = dX - dZ
-
-            while (true) {
-                val hy = getHighestGroundYAt(world, px, pz)
-
-                if (abs(hy - center.blockY) > 9) {
-                    pathValid = false
-                    break
-                }
-
-                if (px == cx && pz == cz) break
-                val e2 = 2 * err
-                if (e2 > -dZ) { err -= dZ; px += sX }
-                if (e2 < dX) { err += dX; pz += sZ }
-            }
-
-            if (!pathValid) continue
-
-            val averageY = if (countY > 0) Math.round(sumY.toDouble() / countY).toInt() else center.blockY
-            val baseY = averageY
-
-            var excavationCount = 0
-            val totalArea = width * length
-            for (x in -width / 2..width / 2) {
-                for (z in -length / 2..length / 2) {
-                    val absX = cx + x
-                    val absZ = cz + z
-                    val hy = getHighestGroundYAt(world, absX, absZ)
-                    if (hy >= baseY) {
-                        excavationCount++
-                    }
-                }
-            }
-
-            val finalBaseY = if (excavationCount.toDouble() / totalArea > 0.30) baseY + 1 else baseY
-
-            val minX = cx - width / 2
-            val minZ = cz - length / 2
-            val maxX = minX + width
-            val maxZ = minZ + length
-
-            val potentialBox = BoundingBox(
-                minX.toDouble(), (finalBaseY - 2).toDouble(), minZ.toDouble(),
-                maxX.toDouble(), (finalBaseY + buildingHeight).toDouble(), maxZ.toDouble()
-            )
-
-            val buffer = 5.0
-            val isColliding2D = recordsList.any { record ->
-                val other = record.box
-                val xOverlap = minX.toDouble() < other.maxX + buffer && maxX.toDouble() > other.minX - buffer
-                val zOverlap = minZ.toDouble() < other.maxZ + buffer && maxZ.toDouble() > other.minZ - buffer
-                xOverlap && zOverlap
-            }
-            if (isColliding2D) continue
-
-            val uniqueName = type.typeName + "_" + (recordsList.count { it.type.startsWith(type.typeName) } + 1)
-            val jobId = UUID.randomUUID()
-
-            recordsList.add(BuildingRecord(uniqueName, potentialBox, jobId))
-
-            settlement.expandTerritory(15.0)
-
-            val buildJobsList = startVanillaStructureConstruction(cx, finalBaseY, cz, type, bestRotation, jobId)
-
-            val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
-            synchronized(queue) {
-                buildJobsList.forEach { queue.offer(it) }
-            }
-            return true
         }
 
-        plugin.logger.warning("Не удалось найти безопасное место для здания ${type.displayName} в поселении ${settlement.data.settlementName}.")
-        return false
+        // Переносим 99% CPU-нагрузки (перебор координат и ландшафта) в асинхронный пул
+        plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+            val rand = Random()
+            var found = false
+
+            for (attempt in 0..maxAttempts) {
+                val angle = rand.nextDouble() * 2 * Math.PI
+                val distance = rand.nextInt(maxRadius - minRadius) + minRadius
+
+                val cx = center.blockX + (cos(angle) * distance).toInt()
+                val cz = center.blockZ + (sin(angle) * distance).toInt()
+
+                var targetX = center.blockX
+                var targetZ = center.blockZ
+
+                if (roadsCopy.isNotEmpty()) {
+                    var minRoadDistSq = Double.MAX_VALUE
+                    for (pos in roadsCopy) {
+                        val dx = pos.x - cx
+                        val dz = pos.z - cz
+                        val distSq = (dx * dx + dz * dz).toDouble()
+                        if (distSq < minRoadDistSq) {
+                            minRoadDistSq = distSq
+                            targetX = pos.x
+                            targetZ = pos.z
+                        }
+                    }
+                }
+
+                var bestRotation = StructureRotation.NONE
+                var minJigsawDistSq = Double.MAX_VALUE
+
+                for (rot in StructureRotation.values()) {
+                    val rotJigsaw = rotateCoords(entrancePos, rot, rawWidth, rawLength)
+                    val rotWidth = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
+                    val rotLength = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
+
+                    val absX = cx - rotWidth / 2 + rotJigsaw.x
+                    val absZ = cz - rotLength / 2 + rotJigsaw.z
+
+                    val dx = absX - targetX
+                    val dz = absZ - targetZ
+                    val distSq = (dx * dx + dz * dz).toDouble()
+
+                    if (distSq < minJigsawDistSq) {
+                        minJigsawDistSq = distSq
+                        bestRotation = rot
+                    }
+                }
+
+                val width = if (bestRotation == StructureRotation.CLOCKWISE_90 || bestRotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
+                val length = if (bestRotation == StructureRotation.CLOCKWISE_90 || bestRotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
+
+                var minY = Int.MAX_VALUE
+                var maxY = Int.MIN_VALUE
+
+                var sumY = 0
+                var countY = 0
+
+                var validTerrain = true
+
+                for (x in -width / 2..width / 2) {
+                    for (z in -length / 2..length / 2) {
+                        val absX = cx + x
+                        val absZ = cz + z
+
+                        val chunkX = absX shr 4
+                        val chunkZ = absZ shr 4
+                        val snap = snapshots[Pair(chunkX, chunkZ)]
+
+                        if (snap == null) {
+                            validTerrain = false
+                            break
+                        }
+
+                        val localX = absX and 15
+                        val localZ = absZ and 15
+
+                        val highestY = snap.getHighestBlockYAt(localX, localZ)
+                        val surfaceBlockType = snap.getBlockType(localX, highestY, localZ)
+
+                        if (surfaceBlockType == Material.WATER ||
+                            surfaceBlockType == Material.LAVA ||
+                            surfaceBlockType.name.contains("WATER") ||
+                            surfaceBlockType.name.contains("ICE") ||
+                            surfaceBlockType.name.contains("LAVA")) {
+                            validTerrain = false
+                            break
+                        }
+
+                        val isRoadBlock = surfaceBlockType == Material.DIRT_PATH ||
+                                surfaceBlockType.name.contains("PATH") ||
+                                roadsCopy.any { it.x == absX && it.z == absZ }
+                        if (isRoadBlock) {
+                            validTerrain = false
+                            break
+                        }
+
+                        val hy = snapshotGetHighestGroundYAt(snapshots, world, absX, absZ)
+                        if (hy < minY) minY = hy
+                        if (hy > maxY) maxY = hy
+
+                        sumY += hy
+                        countY++
+                    }
+                    if (!validTerrain) break
+                }
+
+                if (!validTerrain) continue
+                val maxAllowedVariance = if (isCritical) 9 else 5
+                if (maxY - minY > maxAllowedVariance) continue
+                if (abs(maxY - center.blockY) > 15) continue
+
+                var pathValid = true
+                var px = center.blockX
+                var pz = center.blockZ
+                val dX = abs(cx - px)
+                val dZ = abs(cz - pz)
+                val sX = if (px < cx) 1 else -1
+                val sZ = if (pz < cz) 1 else -1
+                var err = dX - dZ
+
+                while (true) {
+                    val hy = snapshotGetHighestGroundYAt(snapshots, world, px, pz)
+
+                    if (abs(hy - center.blockY) > 9) {
+                        pathValid = false
+                        break
+                    }
+
+                    if (px == cx && pz == cz) break
+                    val e2 = 2 * err
+                    if (e2 > -dZ) { err -= dZ; px += sX }
+                    if (e2 < dX) { err += dX; pz += sZ }
+                }
+
+                if (!pathValid) continue
+
+                val averageY = if (countY > 0) Math.round(sumY.toDouble() / countY).toInt() else center.blockY
+                val baseY = averageY
+
+                var excavationCount = 0
+                val totalArea = width * length
+                for (x in -width / 2..width / 2) {
+                    for (z in -length / 2..length / 2) {
+                        val absX = cx + x
+                        val absZ = cz + z
+                        val hy = snapshotGetHighestGroundYAt(snapshots, world, absX, absZ)
+                        if (hy >= baseY) {
+                            excavationCount++
+                        }
+                    }
+                }
+
+                val finalBaseY = if (excavationCount.toDouble() / totalArea > 0.30) baseY + 1 else baseY
+
+                val minX = cx - width / 2
+                val minZ = cz - length / 2
+                val maxX = minX + width
+                val maxZ = minZ + length
+
+                val potentialBox = BoundingBox(
+                    minX.toDouble(), (finalBaseY - 2).toDouble(), minZ.toDouble(),
+                    maxX.toDouble(), (finalBaseY + buildingHeight).toDouble(), maxZ.toDouble()
+                )
+
+                val buffer = 5.0
+                val isColliding2D = recordsListCopy.any { record ->
+                    val other = record.box
+                    val xOverlap = minX.toDouble() < other.maxX + buffer && maxX.toDouble() > other.minX - buffer
+                    val zOverlap = minZ.toDouble() < other.maxZ + buffer && maxZ.toDouble() > other.minZ - buffer
+                    xOverlap && zOverlap
+                }
+                if (isColliding2D) continue
+
+                found = true
+
+                // Если место успешно найдено, возвращаемся в главный поток для регистрации
+                plugin.server.scheduler.runTask(plugin, Runnable {
+                    activePlanning.remove(settlementId)
+
+                    val realRecordsList = buildings.computeIfAbsent(settlementId) { mutableListOf() }
+
+                    // Контрольная проверка коллизии (на случай, если за миллисекунды асинка другая деревня воткнула здание)
+                    val stillColliding = realRecordsList.any { record ->
+                        val other = record.box
+                        val xOverlap = minX.toDouble() < other.maxX + buffer && maxX.toDouble() > other.minX - buffer
+                        val zOverlap = minZ.toDouble() < other.maxZ + buffer && maxZ.toDouble() > other.minZ - buffer
+                        xOverlap && zOverlap
+                    }
+                    if (stillColliding) return@Runnable
+
+                    val uniqueName = type.typeName + "_" + (realRecordsList.count { it.type.startsWith(type.typeName) } + 1)
+                    val jobId = UUID.randomUUID()
+
+                    realRecordsList.add(BuildingRecord(uniqueName, potentialBox, jobId))
+                    settlement.expandTerritory(15.0)
+
+                    val buildJobsList = startVanillaStructureConstruction(cx, finalBaseY, cz, type, bestRotation, jobId)
+
+                    val queue = pendingJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
+                    synchronized(queue) {
+                        buildJobsList.forEach { queue.offer(it) }
+                    }
+                })
+
+                return@Runnable // Завершаем асинхронный поиск
+            }
+
+            // Если за maxAttempts так и не нашли место:
+            activePlanning.remove(settlementId)
+        })
+
+        return true
     }
 
     private fun startVanillaStructureConstruction(
@@ -1007,7 +1159,9 @@ class SettlementPlanner(val settlement: Settlement) {
 
 fun Settlement.expandTerritory(amount: Double) {
     try {
-        // Логика расширения территории
+        val center = data.center
+        val newRadius = (territory.maxX - center.x) + amount
+        territory = BoundingBox.of(center, newRadius, 128.0, newRadius)
     } catch (e: Exception) {
         plugin.logger.warning("Не удалось расширить границу поселения: ${e.message}")
     }
