@@ -15,7 +15,6 @@ data class EntranceCandidate(val pos: BlockPos, val facing: BlockFace?, val weig
 
 object VanillaStructureLoader {
 
-    // ИСПРАВЛЕНО: Автоматическое определение реального размера структуры из NBT без хардкода
     fun getStructureSize(structurePath: String): BlockVector {
         if (structurePath == "custom/mine") {
             return BlockVector(7, 6, 7)
@@ -28,10 +27,6 @@ object VanillaStructureLoader {
         return structure.size
     }
 
-    /**
-     * Нативно загружает встроенную структуру Minecraft из ресурсов сервера по NamespacedKey.
-     * Добавлена процедурная генерация шахты "custom/mine" без внешних схематиков.
-     */
     fun loadVanillaStructure(structurePath: String): List<RelativeBlock> {
         if (structurePath == "custom/mine") {
             return generateCustomMine()
@@ -47,7 +42,6 @@ object VanillaStructureLoader {
         val relativeBlocks = mutableListOf<RelativeBlock>()
         val palette = structure.palettes.firstOrNull() ?: return emptyList()
 
-        // 1. Строим карту твердых недеструктивных блоков в структуре для поиска смежного контекста
         val solidBlocksMap = mutableMapOf<BlockPos, org.bukkit.block.data.BlockData>()
         palette.blocks.forEach { blockState ->
             val type = blockState.type
@@ -56,22 +50,20 @@ object VanillaStructureLoader {
             }
         }
 
-        // 2. Итерируем и собираем схему строительства
         palette.blocks.forEach { blockState ->
             if (blockState.type == Material.AIR || blockState.type == Material.STRUCTURE_VOID) return@forEach
 
             val relPos = BlockPos(blockState.x, blockState.y, blockState.z)
             var blockData = blockState.blockData
 
-            // ИСПРАВЛЕНО: Заменяем блок пазла (JIGSAW) ближайшим твердым соседним блоком из структуры
             if (blockState.type == Material.JIGSAW) {
                 val neighborOffsets = listOf(
-                    BlockPos(0, -1, 0),  // Снизу (под ногами / закрывает дыры в полу)
-                    BlockPos(1, 0, 0),   // Сбоку (X+)
-                    BlockPos(-1, 0, 0),  // Сбоку (X-)
-                    BlockPos(0, 0, 1),   // Сбоку (Z+)
-                    BlockPos(0, 0, -1),  // Сбоку (Z-)
-                    BlockPos(0, 1, 0)    // Сверху (Y+)
+                    BlockPos(0, -1, 0),
+                    BlockPos(1, 0, 0),
+                    BlockPos(-1, 0, 0),
+                    BlockPos(0, 0, 1),
+                    BlockPos(0, 0, -1),
+                    BlockPos(0, 1, 0)
                 )
 
                 var foundNeighbor = false
@@ -85,10 +77,14 @@ object VanillaStructureLoader {
                     }
                 }
 
-                // Если все соседи воздух, ставим дефолтный булыжник во избежание пустот
                 if (!foundNeighbor) {
                     blockData = Material.COBBLESTONE.createBlockData()
                 }
+            }
+
+            // ИСПРАВЛЕНО: Превращаем готовую пашню в обычную землю, чтобы фермеры сами её вспахали
+            if (blockData.material == Material.FARMLAND) {
+                blockData = Material.DIRT.createBlockData()
             }
 
             if (blockData is Ageable) {
@@ -113,16 +109,14 @@ object VanillaStructureLoader {
         return relativeBlocks
     }
 
-    /**
-     * Алгоритмически выстраивает шахту со ступенями, балками поддержки и центром забоя.
-     */
     private fun generateCustomMine(): List<RelativeBlock> {
         val blocks = mutableListOf<RelativeBlock>()
 
         val width = 7
         val length = 7
         val minHeight = -4
-        val maxHeight = 1
+        val groundY = 0
+        val topY = 1
 
         val airData = Material.AIR.createBlockData()
         val cobbleData = Material.COBBLESTONE.createBlockData()
@@ -136,28 +130,35 @@ object VanillaStructureLoader {
 
         for (x in 0 until width) {
             for (z in 0 until length) {
-                for (y in minHeight..maxHeight) {
+                for (y in minHeight..topY) {
                     val pos = BlockPos(x, y, z)
                     val isWall = x == 0 || x == width - 1 || z == 0 || z == length - 1
 
+                    val isEntrance = (x == 3 && z == 0 && (y == groundY || y == topY))
+
+                    if (isEntrance) {
+                        blocks.add(RelativeBlock(pos, airData))
+                        continue
+                    }
+
                     if (isWall) {
-                        if (y <= 0) {
+                        if (y < groundY) {
                             blocks.add(RelativeBlock(pos, cobbleData))
-                        } else if (y == 1) {
-                            if ((x == 1 && z == 0) || (x == 0 && z == 1)) {
-                                blocks.add(RelativeBlock(pos, airData))
-                            } else if ((x == 0 || x == width - 1) && (z == 0 || z == length - 1)) {
-                                blocks.add(RelativeBlock(pos, logData)) // угловые столбы
+                        } else if (y == groundY) {
+                            blocks.add(RelativeBlock(pos, cobbleData))
+                        } else if (y == topY) {
+                            if ((x == 0 || x == width - 1) && (z == 0 || z == length - 1)) {
+                                blocks.add(RelativeBlock(pos, logData))
                             } else {
                                 blocks.add(RelativeBlock(pos, fenceData))
                             }
                         }
                     } else {
                         if (y == minHeight) {
-                            if (x == 3 && z == 3) {
-                                blocks.add(RelativeBlock(pos, stoneData))
-                            } else if (x == 3 && z == 2) {
+                            if (x == 3 && z == 4) {
                                 blocks.add(RelativeBlock(pos, tableData))
+                            } else if (x == 3 && z == 5) {
+                                blocks.add(RelativeBlock(pos, stoneData))
                             } else {
                                 blocks.add(RelativeBlock(pos, cobbleData))
                             }
@@ -169,12 +170,11 @@ object VanillaStructureLoader {
             }
         }
 
-        blocks.add(RelativeBlock(BlockPos(1, 0, 1), stairData))
-        blocks.add(RelativeBlock(BlockPos(1, -1, 2), stairData))
-        blocks.add(RelativeBlock(BlockPos(1, -2, 3), stairData))
-        blocks.add(RelativeBlock(BlockPos(1, -3, 4), stairData))
+        blocks.add(RelativeBlock(BlockPos(3, -1, 1), stairData))
+        blocks.add(RelativeBlock(BlockPos(3, -2, 2), stairData))
+        blocks.add(RelativeBlock(BlockPos(3, -3, 3), stairData))
 
-        for (y in minHeight + 1..0) {
+        for (y in minHeight + 1..topY) {
             blocks.add(RelativeBlock(BlockPos(1, y, 1), logData))
             blocks.add(RelativeBlock(BlockPos(5, y, 1), logData))
             blocks.add(RelativeBlock(BlockPos(1, y, 5), logData))
@@ -184,10 +184,9 @@ object VanillaStructureLoader {
         return blocks
     }
 
-    // ИСПРАВЛЕНО: Умный поиск дверей с учетом их направления (facing) и веса для разворота к дороге
     fun getRawEntranceCandidates(structurePath: String): List<EntranceCandidate> {
         if (structurePath == "custom/mine") {
-            return listOf(EntranceCandidate(BlockPos(1, 1, 1), BlockFace.NORTH, 10.0))
+            return listOf(EntranceCandidate(BlockPos(3, 0, 0), BlockFace.NORTH, 100.0))
         }
 
         val key = NamespacedKey.minecraft(structurePath)

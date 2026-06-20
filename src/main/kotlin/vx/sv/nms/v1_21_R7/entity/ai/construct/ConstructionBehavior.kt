@@ -25,6 +25,8 @@ import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import java.util.*
+import kotlin.math.abs
+import kotlin.math.max
 import org.bukkit.entity.Villager as BukkitVillager
 
 class ConstructionBehavior(
@@ -41,8 +43,6 @@ class ConstructionBehavior(
     companion object {
         private val debugVisualsMap = mutableMapOf<UUID, Pair<BlockDisplay, BlockDisplay>>()
         private val lastLocationMap = java.util.WeakHashMap<HumanoidVillager, Location>()
-
-        // УЧЕТ ВРЕМЕНИ ДЛЯ УМНОЙ АКТИВАЦИИ ДИСТАНЦИОННОГО ХАКА И СБРОСОВ
         private val assignedBlockTicksMap = java.util.WeakHashMap<HumanoidVillager, Int>()
     }
 
@@ -114,35 +114,6 @@ class ConstructionBehavior(
         displays?.second?.remove()
     }
 
-    private fun takeItem(inventory: Inventory, material: Material, amount: Int) {
-        val index = inventory.first(material)
-        if (index != -1) {
-            val item = inventory.getItem(index) ?: return
-            if (item.amount <= amount) {
-                inventory.setItem(index, null)
-            } else {
-                item.amount -= amount
-                inventory.setItem(index, item)
-            }
-        }
-    }
-
-    private fun addItemsSmart(inventory: Inventory, material: Material, amount: Int) {
-        val maxStack = material.maxStackSize
-        if (maxStack == 1) {
-            if (!inventory.contains(material)) {
-                inventory.addItem(ItemStack(material, 1))
-            }
-        } else {
-            val currentAmount = inventory.filterNotNull()
-                .filter { it.type == material }
-                .sumOf { it.amount }
-            if (currentAmount < amount) {
-                inventory.addItem(ItemStack(material, amount - currentAmount))
-            }
-        }
-    }
-
     private fun clearConstructionBlocks(inventory: Inventory) {
         for (i in 0 until inventory.size) {
             val item = inventory.getItem(i) ?: continue
@@ -172,25 +143,22 @@ class ConstructionBehavior(
         return material.name.contains("LEAVES")
     }
 
-    // ИСПРАВЛЕНО: Интеллектуальный алгоритм рубки деревьев (TreeCapitator) с BoundingBox-фильтрацией
     private fun removeWholeTree(startBlock: Block) {
-        val logs = mutableSetOf<Block>()
+        val targetLogs = mutableSetOf<Block>()
         val logQueue = ArrayDeque<Block>()
 
-        logs.add(startBlock)
+        targetLogs.add(startBlock)
         logQueue.add(startBlock)
 
-        // 1. Поиск всех связанных логов (Лимит 300 блоков)
-        while (logQueue.isNotEmpty() && logs.size < 300) {
+        while (logQueue.isNotEmpty() && targetLogs.size < 400) {
             val current = logQueue.removeFirst()
-
             for (dx in -1..1) {
                 for (dy in -1..1) {
                     for (dz in -1..1) {
                         if (dx == 0 && dy == 0 && dz == 0) continue
                         val neighbor = current.getRelative(dx, dy, dz)
-                        if (isLogBlock(neighbor.type) && !logs.contains(neighbor)) {
-                            logs.add(neighbor)
+                        if (isLogBlock(neighbor.type) && !targetLogs.contains(neighbor)) {
+                            targetLogs.add(neighbor)
                             logQueue.add(neighbor)
                         }
                     }
@@ -198,11 +166,10 @@ class ConstructionBehavior(
             }
         }
 
-        // 2. Валидация структуры: является ли это настоящим деревом (должно быть связано с листьями)
         var isRealTree = false
         var leafCount = 0
 
-        for (log in logs) {
+        for (log in targetLogs) {
             for (dx in -2..2) {
                 for (dy in -2..2) {
                     for (dz in -2..2) {
@@ -220,77 +187,84 @@ class ConstructionBehavior(
             if (isRealTree) break
         }
 
-        // Защита от ложного срабатывания (постройки игрока / заборы)
         if (!isRealTree) {
             startBlock.breakNaturally()
             return
         }
 
-        // 3. Поиск кроны (Flood fill листвы)
-        val leaves = mutableSetOf<Block>()
-        val leafQueue = ArrayDeque<Block>()
+        val potentialLeaves = mutableSetOf<Block>()
+        val leafQueue = ArrayDeque<Pair<Block, Int>>()
 
-        // Сначала добавляем всю листву, которая прилегает непосредственно к стволу
-        for (log in logs) {
+        for (log in targetLogs) {
             for (dx in -1..1) {
                 for (dy in -1..1) {
                     for (dz in -1..1) {
                         val neighbor = log.getRelative(dx, dy, dz)
-                        if (isLeafBlock(neighbor.type) && !leaves.contains(neighbor)) {
-                            leaves.add(neighbor)
-                            leafQueue.add(neighbor)
+                        if (isLeafBlock(neighbor.type) && !potentialLeaves.contains(neighbor)) {
+                            potentialLeaves.add(neighbor)
+                            leafQueue.add(Pair(neighbor, 1))
                         }
                     }
                 }
             }
         }
 
-        // Рекурсивно ищем остальную крону (до 1500 блоков для гигантских деревьев)
-        while (leafQueue.isNotEmpty() && leaves.size < 1500) {
-            val current = leafQueue.removeFirst()
+        while (leafQueue.isNotEmpty() && potentialLeaves.size < 2000) {
+            val (current, dist) = leafQueue.removeFirst()
+            if (dist >= 6) continue
 
             for (dx in -1..1) {
                 for (dy in -1..1) {
                     for (dz in -1..1) {
-                        if (dx == 0 && dy == 0 && dz == 0) continue
                         val neighbor = current.getRelative(dx, dy, dz)
-                        if (isLeafBlock(neighbor.type) && !leaves.contains(neighbor)) {
-                            leaves.add(neighbor)
-                            leafQueue.add(neighbor)
+                        if (isLeafBlock(neighbor.type) && !potentialLeaves.contains(neighbor)) {
+                            potentialLeaves.add(neighbor)
+                            leafQueue.add(Pair(neighbor, dist + 1))
                         }
                     }
                 }
             }
         }
 
-        // Отфильтровываем листья, чтобы не задеть соседние деревья ("эффект лесного пожара")
-        // Оставляем только те листья, которые находятся не дальше 5 блоков от габаритов ствола
         var minX = startBlock.x; var maxX = startBlock.x
         var minY = startBlock.y; var maxY = startBlock.y
         var minZ = startBlock.z; var maxZ = startBlock.z
 
-        for (log in logs) {
-            if (log.x < minX) minX = log.x
-            if (log.x > maxX) maxX = log.x
-            if (log.y < minY) minY = log.y
-            if (log.y > maxY) maxY = log.y
-            if (log.z < minZ) minZ = log.z
-            if (log.z > maxZ) maxZ = log.z
+        for (leaf in potentialLeaves) {
+            if (leaf.x < minX) minX = leaf.x; if (leaf.x > maxX) maxX = leaf.x
+            if (leaf.y < minY) minY = leaf.y; if (leaf.y > maxY) maxY = leaf.y
+            if (leaf.z < minZ) minZ = leaf.z; if (leaf.z > maxZ) maxZ = leaf.z
         }
 
-        val padding = 5
-        val validLeaves = leaves.filter { leaf ->
-            leaf.x in (minX - padding)..(maxX + padding) &&
-                    leaf.y in (minY - padding)..(maxY + padding) &&
-                    leaf.z in (minZ - padding)..(maxZ + padding)
+        val world = startBlock.world
+        val foreignLogs = mutableSetOf<Block>()
+
+        for (x in (minX - 3)..(maxX + 3)) {
+            for (y in (minY - 3)..(maxY + 3)) {
+                for (z in (minZ - 3)..(maxZ + 3)) {
+                    val block = world.getBlockAt(x, y, z)
+                    if (isLogBlock(block.type) && !targetLogs.contains(block)) {
+                        foreignLogs.add(block)
+                    }
+                }
+            }
         }
 
-        // 4. Безопасное уничтожение
-        logs.forEach { it.breakNaturally() }
+        val validLeaves = if (foreignLogs.isEmpty()) {
+            potentialLeaves
+        } else {
+            potentialLeaves.filter { leaf ->
+                val isNearForeign = foreignLogs.any { foreignLog ->
+                    max(max(abs(leaf.x - foreignLog.x), abs(leaf.y - foreignLog.y)), abs(leaf.z - foreignLog.z)) <= 4
+                }
+                !isNearForeign
+            }
+        }
+
+        targetLogs.forEach { it.breakNaturally() }
         validLeaves.forEach { it.type = Material.AIR }
     }
 
-    // ИСПРАВЛЕНО: Безопасный поиск ствола сверху вниз
     private fun findConnectedTrunk(startBlock: Block): Block? {
         val checked = mutableSetOf<Block>()
         val queue = ArrayDeque<Block>()
@@ -331,15 +305,6 @@ class ConstructionBehavior(
         if (world.gameTime < villager.buildBreakUntilTime) return false
 
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
-        val prof = bukkitVillager.profession
-
-        if (prof == org.bukkit.entity.Villager.Profession.FARMER ||
-            prof == org.bukkit.entity.Villager.Profession.SHEPHERD ||
-            prof == org.bukkit.entity.Villager.Profession.BUTCHER ||
-            prof == org.bukkit.entity.Villager.Profession.TOOLSMITH) {
-            return false
-        }
-
         val settlement = villager.settlement ?: return false
 
         if (villager.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {
@@ -379,15 +344,6 @@ class ConstructionBehavior(
         val assigned = villager.assignedBlock ?: job.claimNextBlock(villager) ?: return false
         villager.assignedBlock = assigned
 
-        val bukkitInv = bukkitVillager.inventory
-
-        if (!assigned.material.isAir) {
-            addItemsSmart(bukkitInv, assigned.material, 64)
-        }
-        addItemsSmart(bukkitInv, Material.COBBLESTONE, 64)
-        addItemsSmart(bukkitInv, Material.DIRT, 64)
-        addItemsSmart(bukkitInv, Material.IRON_SHOVEL, 1)
-
         return true
     }
 
@@ -396,7 +352,6 @@ class ConstructionBehavior(
         if (job.isFinished()) return false
 
         val assigned = villager.assignedBlock ?: return false
-
         return world.world.isDayTime
     }
 
@@ -600,8 +555,6 @@ class ConstructionBehavior(
                     }
                     return
                 }
-
-                val bukkitInv = (villager.bukkitEntity as BukkitVillager).inventory
 
                 if (assigned.blockData.material.isSolid) {
                     val targetBox = BoundingBox(block.x.toDouble(), block.y.toDouble(), block.z.toDouble(), block.x + 1.0, block.y + 1.0, block.z + 1.0)

@@ -9,7 +9,6 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
-import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.Sound
@@ -34,6 +33,7 @@ class ShepherdBehavior(
     private var lastSheepSearchTime = 0L
     private var cachedTargetSheep: Sheep? = null
     private var isHerding = false
+    private var noWorkUntil = 0L
 
     companion object {
         val reservedSheep = ConcurrentHashMap<UUID, UUID>()
@@ -63,6 +63,9 @@ class ShepherdBehavior(
         if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.SHEPHERD || villager.settlement == null) {
             return false
         }
+        val gameTime = world.gameTime
+        if (gameTime < noWorkUntil) return false
+
         return world.world.time in 0..12000
     }
 
@@ -71,6 +74,9 @@ class ShepherdBehavior(
         if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.SHEPHERD || villager.settlement == null) {
             return false
         }
+        val gameTime = world.gameTime
+        if (gameTime < noWorkUntil) return false
+
         return world.world.time in 0..12000
     }
 
@@ -90,7 +96,6 @@ class ShepherdBehavior(
             villager.lastPosition = nmsPos
         }
 
-        // Если овца уже на поводке, отводим её в центр
         val leashedSheep = cachedTargetSheep?.takeIf { it.isLeashed && it.leashHolder == villager.bukkitEntity }
         if (leashedSheep != null) {
             claimSheep(leashedSheep, villager)
@@ -121,7 +126,6 @@ class ShepherdBehavior(
             return
         }
 
-        // Троттлинг поиска овец через легкий getNearbyEntities (каждые 20 тиков)
         if (cachedTargetSheep == null && gameTime - lastSheepSearchTime > 20L) {
             lastSheepSearchTime = gameTime
             val allSheep = npcLoc.getNearbyEntities(45.0, 20.0, 45.0).filterIsInstance<Sheep>()
@@ -141,7 +145,6 @@ class ShepherdBehavior(
             }
         }
 
-        // Валидация кэша овцы
         val sheep = cachedTargetSheep
         if (sheep != null && sheep.isValid && !sheep.isDead) {
             claimSheep(sheep, villager)
@@ -183,32 +186,13 @@ class ShepherdBehavior(
                     villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
                 }
             }
-            return
-        } else {
-            cachedTargetSheep = null
-        }
-
-        // Если овец нет, идем к станку (O(1) получение из кэша)
-        val loomPos = SettlementPlanner.getWorkstationFor(villager)
-        if (loomPos != null) {
-            val distSq = npcLoc.distanceSquared(Location(bukkitWorld, loomPos.x + 0.5, loomPos.y + 0.5, loomPos.z + 0.5))
-            val targetPos = BlockPos(loomPos.x, loomPos.y, loomPos.z)
-            if (distSq <= 6.0) {
-                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
-                if (world.random.nextInt(60) == 0) {
-                    villager.swing(InteractionHand.MAIN_HAND)
-                    bukkitWorld.playSound(Location(bukkitWorld, loomPos.x + 0.5, loomPos.y + 0.5, loomPos.z + 0.5), Sound.UI_LOOM_TAKE_RESULT, 1.0f, 1.0f)
-                }
-            } else {
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
-                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
-            }
         } else {
             releaseReservations(villager.uuid)
             villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
-            val targetPos = BlockPos(center.blockX, center.blockY, center.blockZ)
-            villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 3))
+            cachedTargetSheep = null
+
+            // Если овец нет, уступаем приоритет строительству
+            noWorkUntil = gameTime + 200L
         }
     }
 

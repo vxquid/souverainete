@@ -11,8 +11,9 @@ import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
 import org.bukkit.Location
 import org.bukkit.Material
+import org.bukkit.Particle
 import org.bukkit.Sound
-import org.bukkit.block.data.Ageable
+import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.inventory.ItemStack
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.SettlementManager
@@ -30,17 +31,23 @@ class FarmerBehavior(
 ) {
     private var farmTicks = 0
     private var lastCropSearchTime = 0L
+    private var noWorkUntil = 0L
 
     @Volatile private var isScanningCrops = false
 
     private var targetCropPos: BlockPos? = null
     private var targetPlantPos: BlockPos? = null
+    private var targetTillPos: BlockPos? = null
+    private var targetBoneMealPos: BlockPos? = null
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
         if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.FARMER || villager.settlement == null) {
             return false
         }
+        val gameTime = world.gameTime
+        if (gameTime < noWorkUntil) return false
+
         val timeOfDay = world.world.time
         return timeOfDay in 0..12000
     }
@@ -50,6 +57,9 @@ class FarmerBehavior(
         if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.FARMER || villager.settlement == null) {
             return false
         }
+        val gameTime = world.gameTime
+        if (gameTime < noWorkUntil) return false
+
         val timeOfDay = world.world.time
         return timeOfDay in 0..12000
     }
@@ -59,6 +69,8 @@ class FarmerBehavior(
         val bukkitWorld = world.world
         val npcLoc = villager.bukkitEntity.location
         val gameTime = world.gameTime
+        val timeOfDay = bukkitWorld.time
+        val isBoneMealTime = timeOfDay in 6000..8000
 
         val composterPos = SettlementPlanner.getWorkstationFor(villager)
         if (composterPos == null) {
@@ -68,84 +80,102 @@ class FarmerBehavior(
             return
         }
 
-        // АСИНХРОННЫЙ ПОИСК УРОЖАЯ ЧЕРЕЗ CHUNK SNAPSHOTS
-        if (targetCropPos == null && targetPlantPos == null && gameTime - lastCropSearchTime > 60L && !isScanningCrops) {
+        // АСИНХРОННЫЙ ПОИСК РАБОТЫ (Урожай, Вспашка, Посадка, Костная мука)
+        if (targetCropPos == null && targetPlantPos == null && targetTillPos == null && targetBoneMealPos == null && gameTime - lastCropSearchTime > 60L && !isScanningCrops) {
             lastCropSearchTime = gameTime
             isScanningCrops = true
 
-            val r = 12
-            val minX = composterPos.x - r
-            val maxX = composterPos.x + r
-            val minZ = composterPos.z - r
-            val maxZ = composterPos.z + r
-
-            val minCX = minX shr 4
-            val maxCX = maxX shr 4
-            val minCZ = minZ shr 4
-            val maxCZ = maxZ shr 4
-
-            // 1. Берем слепки чанков на главном потоке
-            val snapshots = mutableMapOf<Pair<Int, Int>, org.bukkit.ChunkSnapshot>()
-            for (cx in minCX..maxCX) {
-                for (cz in minCZ..maxCZ) {
-                    if (bukkitWorld.isChunkLoaded(cx, cz)) {
-                        snapshots[Pair(cx, cz)] = bukkitWorld.getChunkAt(cx, cz).chunkSnapshot
-                    }
-                }
+            val farmBoxes = SettlementPlanner.buildings[settlement.data.id]?.filter { it.type.startsWith("FARM") }?.map { it.box } ?: emptyList()
+            if (farmBoxes.isEmpty()) {
+                noWorkUntil = gameTime + 200L
+                isScanningCrops = false
+                return
             }
 
-            val yMin = composterPos.y - 3
-            val yMax = composterPos.y + 3
+            val hasBoneMeal = settlement.villageInventory.any { it.type == Material.BONE_MEAL }
 
-            // 2. Ищем блоки асинхронно
             plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
                 var foundCrop: BlockPos? = null
-                var foundFarmland: BlockPos? = null
+                var foundPlant: BlockPos? = null
+                var foundTill: BlockPos? = null
+                var foundBoneMeal: BlockPos? = null
 
-                scan@ for (x in minX..maxX) {
-                    for (z in minZ..maxZ) {
-                        val cx = x shr 4
-                        val cz = z shr 4
-                        val snap = snapshots[Pair(cx, cz)] ?: continue
-                        val localX = x and 15
-                        val localZ = z and 15
+                scan@ for (box in farmBoxes) {
+                    val minCX = box.minX.toInt() shr 4
+                    val maxCX = box.maxX.toInt() shr 4
+                    val minCZ = box.minZ.toInt() shr 4
+                    val maxCZ = box.maxZ.toInt() shr 4
 
-                        for (y in yMin..yMax) {
-                            val type = snap.getBlockType(localX, y, localZ)
-                            if (type == Material.WHEAT || type == Material.CARROTS || type == Material.POTATOES || type == Material.BEETROOTS) {
-                                val data = snap.getBlockData(localX, y, localZ) as? org.bukkit.block.data.Ageable
-                                if (data != null && data.age == data.maximumAge) {
-                                    foundCrop = BlockPos(x, y, z)
-                                    break@scan
-                                }
+                    val snapshots = mutableMapOf<Pair<Int, Int>, org.bukkit.ChunkSnapshot>()
+                    for (cx in minCX..maxCX) {
+                        for (cz in minCZ..maxCZ) {
+                            if (bukkitWorld.isChunkLoaded(cx, cz)) {
+                                snapshots[Pair(cx, cz)] = bukkitWorld.getChunkAt(cx, cz).chunkSnapshot
                             }
-                            if (type == Material.FARMLAND && foundFarmland == null) {
+                        }
+                    }
+
+                    for (x in box.minX.toInt()..box.maxX.toInt()) {
+                        for (z in box.minZ.toInt()..box.maxZ.toInt()) {
+                            val cx = x shr 4
+                            val cz = z shr 4
+                            val snap = snapshots[Pair(cx, cz)] ?: continue
+                            val localX = x and 15
+                            val localZ = z and 15
+
+                            for (y in box.minY.toInt()..box.maxY.toInt()) {
+                                val type = snap.getBlockType(localX, y, localZ)
                                 val typeAbove = snap.getBlockType(localX, y + 1, localZ)
-                                if (typeAbove == Material.AIR) {
-                                    foundFarmland = BlockPos(x, y, z)
+
+                                if (type == Material.WHEAT || type == Material.CARROTS || type == Material.POTATOES || type == Material.BEETROOTS) {
+                                    val data = snap.getBlockData(localX, y, localZ) as? org.bukkit.block.data.Ageable
+                                    if (data != null) {
+                                        if (data.age == data.maximumAge) {
+                                            foundCrop = BlockPos(x, y, z)
+                                        } else if (foundBoneMeal == null && isBoneMealTime && hasBoneMeal) {
+                                            foundBoneMeal = BlockPos(x, y, z)
+                                        }
+                                    }
+                                }
+
+                                if (type == Material.FARMLAND && typeAbove == Material.AIR && foundPlant == null) {
+                                    foundPlant = BlockPos(x, y, z)
+                                }
+
+                                if ((type == Material.DIRT || type == Material.GRASS_BLOCK) && typeAbove == Material.AIR && foundTill == null) {
+                                    // Убеждаемся, что земля находится примерно на уровне компостера (внутри фермы)
+                                    if (y <= composterPos.y && y >= composterPos.y - 2) {
+                                        foundTill = BlockPos(x, y, z)
+                                    }
+                                }
+
+                                if (foundCrop != null && foundPlant != null && foundTill != null && foundBoneMeal != null) {
+                                    break@scan
                                 }
                             }
                         }
                     }
                 }
 
-                // 3. Возвращаем координаты в память
                 plugin.server.scheduler.runTask(plugin, Runnable {
                     targetCropPos = foundCrop
-                    targetPlantPos = foundFarmland
+                    targetPlantPos = foundPlant
+                    targetTillPos = foundTill
+                    targetBoneMealPos = foundBoneMeal
+
+                    if (targetCropPos == null && targetPlantPos == null && targetTillPos == null && targetBoneMealPos == null) {
+                        noWorkUntil = gameTime + 200L // Даем возможность пойти строить дома
+                    }
                     isScanningCrops = false
                 })
             })
         }
 
-        // Если идет сканирование, просто ждем
         if (isScanningCrops) return
 
         if (targetCropPos != null) {
             val cropBlock = bukkitWorld.getBlockAt(targetCropPos!!.x, targetCropPos!!.y, targetCropPos!!.z)
-            val ageable = cropBlock.blockData as? Ageable
-
-            // Валидация перед сбором
+            val ageable = cropBlock.blockData as? org.bukkit.block.data.Ageable
             if (cropBlock.type == Material.AIR || ageable == null || ageable.age != ageable.maximumAge) {
                 targetCropPos = null
                 return
@@ -163,7 +193,6 @@ class FarmerBehavior(
                 if (farmTicks >= 15) {
                     farmTicks = 0
                     val type = cropBlock.type
-
                     val drop = when (type) {
                         Material.WHEAT -> Material.WHEAT
                         Material.CARROTS -> Material.CARROT
@@ -204,11 +233,11 @@ class FarmerBehavior(
                 villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetCropPos!!), speedModifier, 1))
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetCropPos!!))
             }
+
         } else if (targetPlantPos != null) {
             val farmlandBlock = bukkitWorld.getBlockAt(targetPlantPos!!.x, targetPlantPos!!.y, targetPlantPos!!.z)
             val blockAbove = farmlandBlock.getRelative(org.bukkit.block.BlockFace.UP)
 
-            // Валидация
             if (farmlandBlock.type != Material.FARMLAND || blockAbove.type != Material.AIR) {
                 targetPlantPos = null
                 return
@@ -225,11 +254,9 @@ class FarmerBehavior(
 
                 if (farmTicks >= 15) {
                     farmTicks = 0
-
                     val seeds = settlement.villageInventory.find {
                         it.type == Material.WHEAT_SEEDS || it.type == Material.CARROT || it.type == Material.POTATO || it.type == Material.BEETROOT_SEEDS
                     }
-
                     val cropType = when (seeds?.type) {
                         Material.WHEAT_SEEDS -> Material.WHEAT
                         Material.CARROT -> Material.CARROTS
@@ -239,11 +266,7 @@ class FarmerBehavior(
                     }
 
                     if (seeds != null) {
-                        if (seeds.amount <= 1) {
-                            settlement.villageInventory.remove(seeds)
-                        } else {
-                            seeds.amount -= 1
-                        }
+                        if (seeds.amount <= 1) settlement.villageInventory.remove(seeds) else seeds.amount -= 1
                         SettlementManager.saveSettlements(world.world)
                     }
 
@@ -255,21 +278,85 @@ class FarmerBehavior(
                 villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPlantPos!!), speedModifier, 1))
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPlantPos!!))
             }
-        } else {
-            val distSq = npcLoc.distanceSquared(Location(bukkitWorld, composterPos.x + 0.5, composterPos.y + 0.5, composterPos.z + 0.5))
-            val targetPos = BlockPos(composterPos.x, composterPos.y, composterPos.z)
 
-            if (distSq <= 6.0) {
+        } else if (targetTillPos != null) {
+            val dirtBlock = bukkitWorld.getBlockAt(targetTillPos!!.x, targetTillPos!!.y, targetTillPos!!.z)
+            val blockAbove = dirtBlock.getRelative(org.bukkit.block.BlockFace.UP)
+
+            if ((dirtBlock.type != Material.DIRT && dirtBlock.type != Material.GRASS_BLOCK) || blockAbove.type != Material.AIR) {
+                targetTillPos = null
+                return
+            }
+
+            val distSq = npcLoc.distanceSquared(Location(bukkitWorld, dirtBlock.x + 0.5, dirtBlock.y + 0.5, dirtBlock.z + 0.5))
+
+            if (distSq <= 4.0) {
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
+                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetTillPos!!))
 
-                if (world.random.nextInt(60) == 0) {
-                    villager.swing(InteractionHand.MAIN_HAND)
-                    bukkitWorld.playSound(Location(bukkitWorld, composterPos.x + 0.5, composterPos.y + 0.5, composterPos.z + 0.5), Sound.BLOCK_COMPOSTER_FILL, 1.0f, 1.0f)
+                val expectedTool = CraftItemStack.asNMSCopy(ItemStack(Material.IRON_HOE))
+                if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, expectedTool)) {
+                    villager.setItemInHand(InteractionHand.MAIN_HAND, expectedTool)
+                }
+
+                farmTicks++
+                if (farmTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+
+                if (farmTicks >= 15) {
+                    farmTicks = 0
+                    dirtBlock.type = Material.FARMLAND
+                    bukkitWorld.playSound(dirtBlock.location, Sound.ITEM_HOE_TILL, 1.0f, 1.0f)
+                    targetTillPos = null
+                    villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
                 }
             } else {
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
-                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
+                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetTillPos!!), speedModifier, 1))
+                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetTillPos!!))
+            }
+
+        } else if (targetBoneMealPos != null) {
+            val cropBlock = bukkitWorld.getBlockAt(targetBoneMealPos!!.x, targetBoneMealPos!!.y, targetBoneMealPos!!.z)
+            val ageable = cropBlock.blockData as? org.bukkit.block.data.Ageable
+
+            if (cropBlock.type == Material.AIR || ageable == null || ageable.age == ageable.maximumAge || !isBoneMealTime || !settlement.villageInventory.any { it.type == Material.BONE_MEAL }) {
+                targetBoneMealPos = null
+                return
+            }
+
+            val distSq = npcLoc.distanceSquared(Location(bukkitWorld, cropBlock.x + 0.5, cropBlock.y + 0.5, cropBlock.z + 0.5))
+
+            if (distSq <= 4.0) {
+                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetBoneMealPos!!))
+
+                val expectedTool = CraftItemStack.asNMSCopy(ItemStack(Material.BONE_MEAL))
+                if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, expectedTool)) {
+                    villager.setItemInHand(InteractionHand.MAIN_HAND, expectedTool)
+                }
+
+                farmTicks++
+                if (farmTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+
+                if (farmTicks >= 15) {
+                    farmTicks = 0
+
+                    val boneMeal = settlement.villageInventory.find { it.type == Material.BONE_MEAL }
+                    if (boneMeal != null) {
+                        if (boneMeal.amount <= 1) settlement.villageInventory.remove(boneMeal) else boneMeal.amount -= 1
+                        SettlementManager.saveSettlements(world.world)
+
+                        ageable.age = minOf(ageable.maximumAge, ageable.age + 2 + world.random.nextInt(3))
+                        cropBlock.blockData = ageable
+
+                        bukkitWorld.playSound(cropBlock.location, Sound.ITEM_BONE_MEAL_USE, 1.0f, 1.0f)
+                        bukkitWorld.spawnParticle(Particle.HAPPY_VILLAGER, cropBlock.location.add(0.5, 0.5, 0.5), 10, 0.3, 0.3, 0.3)
+                    }
+                    targetBoneMealPos = null
+                    villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+                }
+            } else {
+                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetBoneMealPos!!), speedModifier, 1))
+                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetBoneMealPos!!))
             }
         }
     }
@@ -279,5 +366,8 @@ class FarmerBehavior(
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
         targetCropPos = null
         targetPlantPos = null
+        targetTillPos = null
+        targetBoneMealPos = null
+        villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
     }
 }

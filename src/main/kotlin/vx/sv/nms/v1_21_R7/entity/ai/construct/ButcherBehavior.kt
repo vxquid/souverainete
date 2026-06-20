@@ -9,7 +9,6 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
-import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.craftbukkit.inventory.CraftItemStack
@@ -28,12 +27,16 @@ class ButcherBehavior(
 ) {
     private var lastSheepSearchTime = 0L
     private var cachedTargetSheep: Sheep? = null
+    private var noWorkUntil = 0L
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
         if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.BUTCHER || villager.settlement == null) {
             return false
         }
+        val gameTime = world.gameTime
+        if (gameTime < noWorkUntil) return false
+
         return world.world.time in 0..12000
     }
 
@@ -42,6 +45,9 @@ class ButcherBehavior(
         if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.BUTCHER || villager.settlement == null) {
             return false
         }
+        val gameTime = world.gameTime
+        if (gameTime < noWorkUntil) return false
+
         return world.world.time in 0..12000
     }
 
@@ -51,12 +57,10 @@ class ButcherBehavior(
         val npcLoc = villager.bukkitEntity.location
         val gameTime = world.gameTime
 
-        // Троттлинг поиска овец для забоя (каждые 40 тиков)
         if (cachedTargetSheep == null && gameTime - lastSheepSearchTime > 40L) {
             lastSheepSearchTime = gameTime
             val localSheep = npcLoc.getNearbyEntities(30.0, 15.0, 30.0).filterIsInstance<Sheep>()
 
-            // Если овец слишком много, находим цель
             if (localSheep.size > 8) {
                 cachedTargetSheep = localSheep.find { it.isAdult && ShepherdBehavior.isSheepFree(it, villager) }
             }
@@ -81,33 +85,13 @@ class ButcherBehavior(
                 villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
             }
-            return
-        } else {
-            cachedTargetSheep = null
-        }
-
-        // Если овец для забоя нет, идем к коптильне
-        val smokerPos = SettlementPlanner.getWorkstationFor(villager)
-        if (smokerPos != null) {
-            val distSq = npcLoc.distanceSquared(Location(bukkitWorld, smokerPos.x + 0.5, smokerPos.y + 0.5, smokerPos.z + 0.5))
-            val targetPos = BlockPos(smokerPos.x, smokerPos.y, smokerPos.z)
-            if (distSq <= 6.0) {
-                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
-                if (world.random.nextInt(60) == 0) {
-                    villager.swing(InteractionHand.MAIN_HAND)
-                    bukkitWorld.playSound(Location(bukkitWorld, smokerPos.x + 0.5, smokerPos.y + 0.5, smokerPos.z + 0.5), Sound.BLOCK_SMOKER_SMOKE, 1.0f, 1.0f)
-                }
-            } else {
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
-                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
-            }
         } else {
             ShepherdBehavior.releaseReservations(villager.uuid)
             villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
-            val center = settlement.data.center
-            val targetPos = BlockPos(center.blockX, center.blockY, center.blockZ)
-            villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 3))
+            cachedTargetSheep = null
+
+            // Если овец нет, уступаем приоритет строительству
+            noWorkUntil = gameTime + 200L
         }
     }
 
