@@ -26,7 +26,6 @@ import vx.sv.gameplay.humanoid.race.RaceManager.Race
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
 import vx.sv.nms.v1_21_R7.entity.ai.construct.VanillaBuildingType
 import vx.sv.persistent.LivingEntityExtend.settlement
@@ -53,7 +52,6 @@ class SettlementManager : Listener {
         val item = event.item
         val itemStack = item.itemStack
 
-        // 1. Исключаем оружие, броню и инструменты
         val name = itemStack.type.name
         val isEquipmentOrTool = name.contains("SWORD") ||
                 name.contains("AXE") ||
@@ -72,13 +70,11 @@ class SettlementManager : Listener {
 
         if (isEquipmentOrTool) return
 
-        // 2. Исключаем предметы-подарки из DialogueSession (если сессия ждет подарок)
         val hasActiveAwaitingSession = vx.sv.gameplay.dialogue.DialogueSession.activeDialogueSessions.any {
             it.entity == villager && it.giftAwaiting
         }
         if (hasActiveAwaitingSession) return
 
-        // Отправляем предмет в бесконечный виртуальный инвентарь поселения
         event.isCancelled = true
         item.remove()
 
@@ -86,7 +82,6 @@ class SettlementManager : Listener {
         val maxStack = itemStack.type.maxStackSize
         var remaining = itemStack.amount
 
-        // Сначала пытаемся заполнить уже существующие неполные стаки
         for (stored in virtualInv) {
             if (stored.isSimilar(itemStack)) {
                 val space = maxStack - stored.amount
@@ -99,7 +94,6 @@ class SettlementManager : Listener {
             }
         }
 
-        // Если что-то осталось, создаем новые стаки, не превышающие лимит
         while (remaining > 0) {
             val copy = itemStack.clone()
             val toAdd = minOf(maxStack, remaining)
@@ -237,67 +231,7 @@ class SettlementManager : Listener {
                         saveSettlements(world)
                     }
 
-                    val villagers = settlement.villagers.filter { it.isValid }
-                    val plannedBuildings = SettlementPlanner.buildings[settlement.data.id] ?: emptyList()
-                    val craftWorld = world as? org.bukkit.craftbukkit.CraftWorld
-                    val serverLevel = craftWorld?.handle
-
-                    if (serverLevel != null) {
-                        // 1. Шахтер
-                        val hasMine = plannedBuildings.any { it.type.startsWith("MINE") }
-                        if (hasMine) {
-                            val hasMiner = villagers.any { it.profession == Villager.Profession.TOOLSMITH }
-                            if (!hasMiner) {
-                                val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
-                                if (freeVillager != null) {
-                                    freeVillager.profession = Villager.Profession.TOOLSMITH
-                                    freeVillager.villagerLevel = 2
-                                    freeVillager.villagerExperience = 10
-
-                                    val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
-                                    nms?.refreshBrain(serverLevel)
-                                    plugin.logger.info("[Souverainete] Назначен новый принудительный Шахтёр в поселении ${settlement.data.settlementName}!")
-                                }
-                            }
-                        }
-
-                        // 2. Пастух
-                        val hasShepherdCot = plannedBuildings.any { it.type.startsWith("SHEPHERD") }
-                        if (hasShepherdCot) {
-                            val hasShepherd = villagers.any { it.profession == Villager.Profession.SHEPHERD }
-                            if (!hasShepherd) {
-                                val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
-                                if (freeVillager != null) {
-                                    freeVillager.profession = Villager.Profession.SHEPHERD
-                                    freeVillager.villagerLevel = 2
-                                    freeVillager.villagerExperience = 10
-
-                                    val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
-                                    nms?.refreshBrain(serverLevel)
-                                    plugin.logger.info("[Souverainete] Назначен новый принудительный Пастух в поселении ${settlement.data.settlementName}!")
-                                }
-                            }
-                        }
-
-                        // 3. Фермеры
-                        val farmCount = plannedBuildings.count { it.type.startsWith("FARM") }
-                        if (farmCount > 0) {
-                            val currentFarmers = villagers.count { it.profession == Villager.Profession.FARMER }
-                            val maxFarmers = farmCount.coerceAtMost(2)
-                            if (currentFarmers < maxFarmers) {
-                                val freeVillager = villagers.find { it.profession == Villager.Profession.NONE }
-                                if (freeVillager != null) {
-                                    freeVillager.profession = Villager.Profession.FARMER
-                                    freeVillager.villagerLevel = 2
-                                    freeVillager.villagerExperience = 10
-
-                                    val nms = (freeVillager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager
-                                    nms?.refreshBrain(serverLevel)
-                                    plugin.logger.info("[Souverainete] Назначен новый принудительный Фермер в поселении ${settlement.data.settlementName}!")
-                                }
-                            }
-                        }
-                    }
+                    // ИСПРАВЛЕНО: Полностью удален весь блок форсированной привязки профессий (пастухов, мясников, фермеров)
                 }
             }
 
@@ -556,7 +490,6 @@ class SettlementManager : Listener {
         fun saveSettlements(world: World) {
             val list = settlements[world] ?: return
 
-            // ПЕРЕД СЕРИАЛИЗАЦИЕЙ СИНХРОНИЗИРУЕМ РАНТАЙМ-ПРЕДМЕТЫ В BASE64 СТРОКИ
             list.forEach { it.syncToData() }
 
             val data = list.map { it.data }

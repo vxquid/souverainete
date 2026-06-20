@@ -47,11 +47,49 @@ object VanillaStructureLoader {
         val relativeBlocks = mutableListOf<RelativeBlock>()
         val palette = structure.palettes.firstOrNull() ?: return emptyList()
 
+        // 1. Строим карту твердых недеструктивных блоков в структуре для поиска смежного контекста
+        val solidBlocksMap = mutableMapOf<BlockPos, org.bukkit.block.data.BlockData>()
         palette.blocks.forEach { blockState ->
-            if (blockState.type == Material.AIR || blockState.type == Material.JIGSAW) return@forEach
+            val type = blockState.type
+            if (type != Material.AIR && type != Material.JIGSAW && type != Material.STRUCTURE_VOID) {
+                solidBlocksMap[BlockPos(blockState.x, blockState.y, blockState.z)] = blockState.blockData
+            }
+        }
+
+        // 2. Итерируем и собираем схему строительства
+        palette.blocks.forEach { blockState ->
+            if (blockState.type == Material.AIR || blockState.type == Material.STRUCTURE_VOID) return@forEach
 
             val relPos = BlockPos(blockState.x, blockState.y, blockState.z)
-            val blockData = blockState.blockData
+            var blockData = blockState.blockData
+
+            // ИСПРАВЛЕНО: Заменяем блок пазла (JIGSAW) ближайшим твердым соседним блоком из структуры
+            if (blockState.type == Material.JIGSAW) {
+                val neighborOffsets = listOf(
+                    BlockPos(0, -1, 0),  // Снизу (под ногами / закрывает дыры в полу)
+                    BlockPos(1, 0, 0),   // Сбоку (X+)
+                    BlockPos(-1, 0, 0),  // Сбоку (X-)
+                    BlockPos(0, 0, 1),   // Сбоку (Z+)
+                    BlockPos(0, 0, -1),  // Сбоку (Z-)
+                    BlockPos(0, 1, 0)    // Сверху (Y+)
+                )
+
+                var foundNeighbor = false
+                for (offset in neighborOffsets) {
+                    val neighborPos = BlockPos(relPos.x + offset.x, relPos.y + offset.y, relPos.z + offset.z)
+                    val neighborData = solidBlocksMap[neighborPos]
+                    if (neighborData != null) {
+                        blockData = neighborData
+                        foundNeighbor = true
+                        break
+                    }
+                }
+
+                // Если все соседи воздух, ставим дефолтный булыжник во избежание пустот
+                if (!foundNeighbor) {
+                    blockData = Material.COBBLESTONE.createBlockData()
+                }
+            }
 
             if (blockData is Ageable) {
                 val matName = blockData.material.name

@@ -164,28 +164,41 @@ object SettlementMenus : Listener {
 
     // --- WAREHOUSE MENU (PAGINATED) ---
     fun openInventoryMenu(player: Player, settlement: Settlement, page: Int = 0) {
-        // Агрегируем дубликаты предметов по их типу и метаданным (isSimilar)
+        // ИСПРАВЛЕНО: Безопасное аккумулирование бесконечного количества предметов без порчи хэш-ключей
         val aggregatedMap = mutableMapOf<ItemStack, Int>()
         for (item in settlement.villageInventory) {
             if (item.type == Material.AIR) continue
-            var found = false
-            for ((key, amount) in aggregatedMap) {
+            var existingKey: ItemStack? = null
+            for (key in aggregatedMap.keys) {
                 if (key.isSimilar(item)) {
-                    key.amount += item.amount
-                    found = true
+                    existingKey = key
                     break
                 }
             }
-            if (!found) {
-                aggregatedMap[item.clone()] = item.amount
+            if (existingKey != null) {
+                aggregatedMap[existingKey] = aggregatedMap[existingKey]!! + item.amount
+            } else {
+                val key = item.clone().apply { amount = 1 }
+                aggregatedMap[key] = item.amount
             }
         }
 
-        val itemsList = aggregatedMap.map { (item, amount) ->
-            item.apply { this.amount = amount }
-        }
+        // ИСПРАВЛЕНО: Группировка и сортировка по категориям: еда, оружие, броня, инструменты, стройматериалы
+        val sortedItemsList = aggregatedMap.toList().sortedWith(
+            compareBy<Pair<ItemStack, Int>> { pair ->
+                val type = pair.first.type
+                val name = type.name
+                when {
+                    type.isEdible -> 0 // Еда в самом начале
+                    name.contains("SWORD") || name.contains("BOW") || name.contains("TRIDENT") || name.contains("CROSSBOW") -> 1 // Оружие
+                    name.contains("HELMET") || name.contains("CHESTPLATE") || name.contains("LEGGINGS") || name.contains("BOOTS") || type == Material.SHIELD -> 2 // Броня
+                    name.contains("PICKAXE") || name.contains("AXE") || name.contains("SHOVEL") || name.contains("HOE") || type == Material.SHEARS || type == Material.LEAD -> 3 // Инструменты
+                    else -> 4 // Все остальное (блоки, стройматериалы)
+                }
+            }.thenBy { it.first.type.name }
+        )
 
-        val totalItems = itemsList.size
+        val totalItems = sortedItemsList.size
         val itemsPerPage = 45
         val maxPage = maxOf(0, (totalItems - 1) / itemsPerPage)
         val currentPage = page.coerceIn(0, maxPage)
@@ -202,9 +215,8 @@ object SettlementMenus : Listener {
 
         // Заполняем слоты инвентаря
         for (i in startIndex until endIndex) {
-            val aggregatedItem = itemsList[i]
-            val displayItem = aggregatedItem.clone()
-            val totalCount = aggregatedItem.amount
+            val (baseItem, totalCount) = sortedItemsList[i]
+            val displayItem = baseItem.clone()
             displayItem.amount = 1 // Визуально в слоте отображаем ровно 1 штуку
 
             val meta = displayItem.itemMeta
@@ -258,7 +270,7 @@ object SettlementMenus : Listener {
         playClickSound(player)
     }
 
-    // --- МЕТОД ПОЛУЧЕНИЯ ГОЛОВЫ (Твой фикс) ---
+    // --- МЕТОД ПОЛУЧЕНИЯ ГОЛОВЫ ---
     private fun getSkull(textures: String): ItemStack {
         val head = ItemStack(Material.PLAYER_HEAD)
         head.editMeta(SkullMeta::class.java) { skullMeta ->
@@ -277,7 +289,6 @@ object SettlementMenus : Listener {
         val center = settlement.data.center
         val radius = plugin.gameplayManager.config.settlement.detectionDistance.toInt()
 
-        // Считаем координаты чанков для поиска
         val centerCX = center.blockX shr 4
         val centerCZ = center.blockZ shr 4
         val cRadius = radius shr 4
@@ -286,7 +297,6 @@ object SettlementMenus : Listener {
             for (cz in (centerCZ - cRadius)..(centerCZ + cRadius)) {
                 if (!world.isChunkLoaded(cx, cz)) continue
 
-                // Проход по TileEntities чанка — это быстро
                 world.getChunkAt(cx, cz).tileEntities.forEach { tile ->
                     val block = tile.block
                     if (!block.type.name.endsWith("_BED")) return@forEach
@@ -296,7 +306,6 @@ object SettlementMenus : Listener {
 
                     if (block.location.distance(center) > radius) return@forEach
 
-                    // Условия комфорта
                     if (block.lightLevel < 5) return@forEach
                     if (world.getHighestBlockYAt(block.x, block.z) <= block.y) return@forEach
 

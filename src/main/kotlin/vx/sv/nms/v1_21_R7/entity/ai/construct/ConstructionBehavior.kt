@@ -622,8 +622,36 @@ class BuilderSafetyListener : Listener {
                 val settlement = nmsVillager.settlement
                 val safeLoc = if (settlement != null) {
                     val center = settlement.data.center
-                    val highestY = center.world.getHighestBlockYAt(center.blockX, center.blockZ)
-                    Location(center.world, center.x + 0.5, highestY + 1.0, center.z + 0.5)
+
+                    // ИСПРАВЛЕНО: Продвинутый поиск безопасного блока в радиусе 3 блоков, Y-высота которого гарантированно НЕ превышает высоту центра (колокола) поселения
+                    var targetY = center.blockY
+                    var targetX = center.blockX + 2
+                    var targetZ = center.blockZ + 2
+
+                    val world = center.world!!
+                    var foundSafeSpot = false
+                    for (ox in listOf(2, -2, 3, -3, 1, -1)) {
+                        for (oz in listOf(2, -2, 3, -3, 1, -1)) {
+                            val tx = center.blockX + ox
+                            val tz = center.blockZ + oz
+                            val gy = world.getHighestBlockYAt(tx, tz)
+
+                            // Строго ограничиваем высоту Y-координатой центра, чтобы житель не очутился на крыше meeting_point/town_hall
+                            if (gy <= center.blockY + 1) {
+                                val feetBlock = world.getBlockAt(tx, gy + 1, tz)
+                                val headBlock = world.getBlockAt(tx, gy + 2, tz)
+                                if (feetBlock.type.isAir && headBlock.type.isAir) {
+                                    targetX = tx
+                                    targetY = gy
+                                    targetZ = tz
+                                    foundSafeSpot = true
+                                    break
+                                }
+                            }
+                        }
+                        if (foundSafeSpot) break
+                    }
+                    Location(world, targetX + 0.5, targetY + 1.0, targetZ + 0.5)
                 } else {
                     val loc = villager.location
                     val highestY = loc.world.getHighestBlockYAt(loc.blockX, loc.blockZ)

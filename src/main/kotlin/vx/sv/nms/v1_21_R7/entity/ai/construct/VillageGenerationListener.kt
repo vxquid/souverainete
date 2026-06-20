@@ -9,6 +9,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.entity.EntityDamageEvent
+import org.bukkit.event.entity.EntityInteractEvent
 import org.bukkit.event.world.AsyncStructureSpawnEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
@@ -19,6 +20,17 @@ import java.util.*
 import org.bukkit.entity.Villager as BukkitVillager
 
 class VillageGenerationListener : Listener {
+
+    @EventHandler
+    fun onFarmlandTrample(event: EntityInteractEvent) {
+        val block = event.block
+        if (block.type == Material.FARMLAND) {
+            val entity = event.entity
+            if (entity is BukkitVillager) {
+                event.isCancelled = true
+            }
+        }
+    }
 
     private fun spawnVillageAnimals(center: Location) {
         val world = center.world ?: return
@@ -37,7 +49,6 @@ class VillageGenerationListener : Listener {
 
             world.spawn(spawnLoc, org.bukkit.entity.Sheep::class.java) { sheep ->
                 val name = sheepNames.getOrElse(i % sheepNames.size) { "Деревенская овца" }
-                // ИСПРАВЛЕНО: Убран цветовой код § из текста компонента для предотвращения LegacyFormattingDetected
                 sheep.customName(net.kyori.adventure.text.Component.text(name, net.kyori.adventure.text.format.NamedTextColor.GREEN))
                 sheep.isCustomNameVisible = true
 
@@ -60,7 +71,6 @@ class VillageGenerationListener : Listener {
 
             world.spawn(spawnLoc, org.bukkit.entity.Cat::class.java) { cat ->
                 val name = catNames.getOrElse(i % catNames.size) { "Деревенский кот" }
-                // ИСПРАВЛЕНО: Убран цветовой код § из текста компонента для предотвращения LegacyFormattingDetected
                 cat.customName(net.kyori.adventure.text.Component.text(name, net.kyori.adventure.text.format.NamedTextColor.YELLOW))
                 cat.isCustomNameVisible = true
 
@@ -109,7 +119,6 @@ class VillageGenerationListener : Listener {
                 blockBelow.type == Material.SOUL_CAMPFIRE) {
 
                 val worldSettlements = settlements[loc.world] ?: return
-                // ИСПРАВЛЕНО: Увеличен радиус защиты от горения у костра до 36 блоков, чтобы смещенный костер тоже защищал
                 val isNearCenter = worldSettlements.any { it.data.center.distanceSquared(loc) <= 36.0 }
                 if (isNearCenter) {
                     event.isCancelled = true
@@ -193,8 +202,6 @@ class VillageGenerationListener : Listener {
 
                 val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
 
-                // ИСПРАВЛЕНО: Костер теперь спавнится со смещением на 4 блока на Восток от центра
-                // Это предотвращает его автоматическое стирание (замену блоками) при последующей застройке Meeting Point (беседки)
                 val groundY = SettlementPlanner.getHighestGroundYAt(world, bestX + 4, bestZ)
                 val safeCampfireLoc = Location(world, bestX.toDouble() + 4.0, groundY.toDouble() + 1.0, bestZ.toDouble())
                 safeCampfireLoc.block.type = Material.CAMPFIRE
@@ -227,13 +234,17 @@ class VillageGenerationListener : Listener {
 
                 spawnVillageAnimals(centerLoc)
 
-                planner.planBuilding(VanillaBuildingType.FARM)
-                planner.planBuilding(VanillaBuildingType.FARM)
-                planner.planBuilding(VanillaBuildingType.MINE)
-                planner.planBuilding(VanillaBuildingType.SHEPHERD)
+                // ИСПРАВЛЕНО: Новый стартовый приоритет постройки структур
+                planner.planBuilding(VanillaBuildingType.FARM)         // еда
+                planner.planBuilding(VanillaBuildingType.WOOD_FARM)    // дерево
+                planner.planBuilding(VanillaBuildingType.MINE)         // шахта
+                planner.planBuilding(VanillaBuildingType.SHEPHERD)     // овчарня
+                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)  // первый маленький дом
+                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)  // второй маленький дом
+                planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)  // первый большой дом
+                planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)  // второй большой дом
 
                 planner.planBuilding(VanillaBuildingType.TOWN_HALL)
-
                 planner.planMeetingPointAtCenter()
 
                 repeat(10) {

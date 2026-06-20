@@ -21,6 +21,8 @@ enum class VanillaBuildingType(
     TEMPLE("TEMPLE", "village/plains/houses/plains_temple_4", 11, 11, 12, Material.BREWING_STAND, "Temple"),
     HOUSE_SMALL("HOUSE_SMALL", "village/plains/houses/plains_small_house_1", 7, 7, 5, Material.CRAFTING_TABLE, "Small House"),
     HOUSE_MEDIUM("HOUSE_MEDIUM", "village/plains/houses/plains_medium_house_1", 9, 9, 6, Material.CRAFTING_TABLE, "Medium House"),
+    HOUSE_LARGE("HOUSE_LARGE", "village/plains/houses/plains_big_house_1", 11, 11, 7, Material.CRAFTING_TABLE, "Large House"),
+    WOOD_FARM("WOOD_FARM", "village/plains/houses/plains_small_house_5", 9, 9, 5, Material.OAK_SAPLING, "Wood Farm"),
     STABLE("STABLE", "village/plains/houses/plains_stable_1", 7, 7, 5, Material.HAY_BLOCK, "Stables"),
     ANIMAL_PEN("ANIMAL_PEN", "village/plains/houses/plains_animal_pen_1", 9, 9, 4, Material.OAK_FENCE, "Animal Pen"),
     LAMP("LAMP", "village/plains/plains_lamp_1", 1, 1, 4, Material.OAK_FENCE, "Street Lamp"),

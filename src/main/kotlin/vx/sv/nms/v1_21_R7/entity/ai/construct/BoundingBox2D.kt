@@ -460,19 +460,30 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }.eachCount()
 
-        val totalResidentialBuilt = (existingCounts["HOUSE_SMALL"] ?: 0) + (existingCounts["HOUSE_MEDIUM"] ?: 0)
-        val maxResidentialAllowed = settlement.villagers.size
+        val existingSmall = existingCounts["HOUSE_SMALL"] ?: 0
+        val existingMedium = existingCounts["HOUSE_MEDIUM"] ?: 0
+        val existingLarge = existingCounts["HOUSE_LARGE"] ?: 0
+
+        val maxResidentialAllowed = maxOf(6, settlement.villagers.size)
+
+        // ИСПРАВЛЕНО: Лимиты домов разделяются поровну на 33% для каждого размера, убирая доминирование маленьких домиков
+        val allowedSmall = if (existingSmall < 2) 2 else if (existingLarge >= 2 && existingMedium >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
+        val allowedLarge = if (existingLarge < 2) 2 else if (existingSmall >= 2 && existingMedium >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
+        val allowedMedium = if (existingMedium < 2) 2 else if (existingSmall >= 2 && existingLarge >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
 
         val totalBuildingsBuilt = records.size
-        val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(4)
+        val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(6)
 
+        // ИСПРАВЛЕНО: Установлен строгий приоритет: еда (FARM) -> дерево (WOOD_FARM) -> шахта (MINE) -> овчарня (SHEPHERD) -> дома -> всё остальное
         val priorityList = listOf(
+            Pair(VanillaBuildingType.MEETING_POINT, 1),
             Pair(VanillaBuildingType.FARM, 2),
+            Pair(VanillaBuildingType.WOOD_FARM, 1),
             Pair(VanillaBuildingType.MINE, 1),
             Pair(VanillaBuildingType.SHEPHERD, 1),
-            Pair(VanillaBuildingType.HOUSE_SMALL, if (totalResidentialBuilt < maxResidentialAllowed) (existingCounts["HOUSE_SMALL"] ?: 0) + 1 else 0),
-            Pair(VanillaBuildingType.HOUSE_MEDIUM, 2),
-            Pair(VanillaBuildingType.MEETING_POINT, 1),
+            Pair(VanillaBuildingType.HOUSE_SMALL, allowedSmall),
+            Pair(VanillaBuildingType.HOUSE_LARGE, allowedLarge),
+            Pair(VanillaBuildingType.HOUSE_MEDIUM, allowedMedium),
             Pair(VanillaBuildingType.LAMP, maxLampsAllowed),
             Pair(VanillaBuildingType.ANIMAL_PEN, 1),
             Pair(VanillaBuildingType.STABLE, 1),
@@ -481,15 +492,47 @@ class SettlementPlanner(val settlement: Settlement) {
             Pair(VanillaBuildingType.LIBRARY, 1),
             Pair(VanillaBuildingType.ARMORY, 1),
             Pair(VanillaBuildingType.CARTOGRAPHER, 1),
-            Pair(VanillaBuildingType.TEMPLE, 1)
+            Pair(VanillaBuildingType.TEMPLE, 1),
+            Pair(VanillaBuildingType.LAMP, maxLampsAllowed / 2)
         )
 
-        for ((type, maxCount) in priorityList) {
-            val currentCount = existingCounts[type.typeName] ?: 0
-            if (currentCount < maxCount) {
-                val success = planBuilding(type)
-                if (success) {
-                    return true
+        // Разделяем наш приоритетный список на жилые дома и общественные/производственные здания
+        val houses = priorityList.filter { it.first.typeName.startsWith("HOUSE_") }
+        val nonHouses = priorityList.filter { !it.first.typeName.startsWith("HOUSE_") }
+
+        // Проверяем, было ли последнее запланированное здание домом
+        val lastPlanned = records.lastOrNull()
+        val lastWasHouse = lastPlanned != null && lastPlanned.type.startsWith("HOUSE_")
+
+        // ИСПРАВЛЕНО: Чередуем строительство жилых домов и прочих общественных построек во избежание спама домов подряд
+        if (lastWasHouse) {
+            for ((type, maxCount) in nonHouses) {
+                val currentCount = existingCounts[type.typeName] ?: 0
+                if (currentCount < maxCount) {
+                    val success = planBuilding(type)
+                    if (success) {
+                        return true
+                    }
+                }
+            }
+            // Если все доступные не-дома уже построены/запланированы, снимаем ограничение и строим дома
+            for ((type, maxCount) in houses) {
+                val currentCount = existingCounts[type.typeName] ?: 0
+                if (currentCount < maxCount) {
+                    val success = planBuilding(type)
+                    if (success) {
+                        return true
+                    }
+                }
+            }
+        } else {
+            for ((type, maxCount) in priorityList) {
+                val currentCount = existingCounts[type.typeName] ?: 0
+                if (currentCount < maxCount) {
+                    val success = planBuilding(type)
+                    if (success) {
+                        return true
+                    }
                 }
             }
         }
@@ -502,6 +545,7 @@ class SettlementPlanner(val settlement: Settlement) {
         val center = settlement.data.center
 
         val isCritical = type == VanillaBuildingType.FARM ||
+                type == VanillaBuildingType.WOOD_FARM ||
                 type == VanillaBuildingType.SHEPHERD ||
                 type == VanillaBuildingType.TOWN_HALL ||
                 type == VanillaBuildingType.TEMPLE ||
@@ -722,7 +766,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val jobsList = mutableListOf<SchematicBuildJob>()
         val center = settlement.data.center
 
-        // ИСПРАВЛЕНО: Динамически берем размеры без хардкода
         val structureSize = VanillaStructureLoader.getStructureSize(type.vanillaPath)
         val rawWidth = structureSize.blockX
         val rawLength = structureSize.blockZ
@@ -759,7 +802,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val sZ = if (currentZ < cz) 1 else -1
         var err = dX - dZ
 
-        // ИСПРАВЛЕНО: Гравийные дороги отменены по просьбе игрока. Всегда используем грунтовую тропинку (DIRT_PATH).
         val roadBlockData = Material.DIRT_PATH.createBlockData()
 
         val airData = Material.AIR.createBlockData()
@@ -812,9 +854,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
                     val isInsideAnyBuilding = records.any { record ->
                         val box = record.box
-                        // ИСПРАВЛЕНО: Для текущего строящегося здания (record.jobId == jobId) полностью убираем буфер,
-                        // позволяя дороге подойти вплотную к стенам и дверям. Для остальных зданий сохраняем
-                        // безопасный буфер в 1.5 блока, чтобы прокладываемая дорога случайно не разрушила чужие стены.
                         if (record.jobId == jobId) {
                             px >= box.minX && px < box.maxX && pz >= box.minZ && pz < box.maxZ
                         } else {

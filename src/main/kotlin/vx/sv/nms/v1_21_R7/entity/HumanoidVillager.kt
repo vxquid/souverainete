@@ -365,6 +365,10 @@ class HumanoidVillager(
             Pair.of(1, TacticalAttackBehavior(0.65f, 15) as BehaviorControl<Villager>),
 
             Pair.of(2, BuildBreakBehavior(0.6f) as BehaviorControl<Villager>),
+
+            // ИСПРАВЛЕНО: Регистрируем кастомное поведение сна в ядре AI
+            Pair.of(2, SleepBehavior(0.65f) as BehaviorControl<Villager>),
+
             Pair.of(2, ConstructionBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ShepherdBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ButcherBehavior(0.65f) as BehaviorControl<Villager>),
