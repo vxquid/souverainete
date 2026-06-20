@@ -1,5 +1,9 @@
 package vx.sv.nms.v1_21_R7.entity.ai
 
+import com.github.retrooper.packetevents.PacketEvents
+import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
 import net.minecraft.server.level.ServerLevel
@@ -13,12 +17,18 @@ import org.bukkit.Location
 import org.bukkit.Material
 import org.bukkit.Particle
 import org.bukkit.Sound
+import org.bukkit.block.BlockFace
+import org.bukkit.block.data.Ageable
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.inventory.ItemStack
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
+import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.abs
+import kotlin.math.max
 
 class FarmerBehavior(
     private val speedModifier: Float
@@ -39,6 +49,26 @@ class FarmerBehavior(
     private var targetPlantPos: BlockPos? = null
     private var targetTillPos: BlockPos? = null
     private var targetBoneMealPos: BlockPos? = null
+
+    // Разделены целевая точка воды и целевая сухая точка берега для рыбака
+    private var targetWaterPos: BlockPos? = null
+    private var targetShorePos: BlockPos? = null
+
+    companion object {
+        private val activeBobbers = ConcurrentHashMap<UUID, Int>()
+
+        // Карта зарезервированных водных спотов для предотвращения столпотворения рыбаков
+        private val reservedWaterSpots = ConcurrentHashMap<BlockPos, UUID>()
+
+        fun releaseWaterSpot(villagerUuid: UUID) {
+            val iterator = reservedWaterSpots.entries.iterator()
+            while (iterator.hasNext()) {
+                if (iterator.next().value == villagerUuid) {
+                    iterator.remove()
+                }
+            }
+        }
+    }
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
@@ -70,6 +100,7 @@ class FarmerBehavior(
         val npcLoc = villager.bukkitEntity.location
         val gameTime = world.gameTime
         val timeOfDay = bukkitWorld.time
+
         val isBoneMealTime = timeOfDay in 6000..8000
 
         val composterPos = SettlementPlanner.getWorkstationFor(villager)
@@ -80,41 +111,79 @@ class FarmerBehavior(
             return
         }
 
-        // АСИНХРОННЫЙ ПОИСК РАБОТЫ (Урожай, Вспашка, Посадка, Костная мука)
-        if (targetCropPos == null && targetPlantPos == null && targetTillPos == null && targetBoneMealPos == null && gameTime - lastCropSearchTime > 60L && !isScanningCrops) {
+        // Валидация целей перед тиком
+        if (targetCropPos != null) {
+            val cropBlock = bukkitWorld.getBlockAt(targetCropPos!!.x, targetCropPos!!.y, targetCropPos!!.z)
+            val ageable = cropBlock.blockData as? Ageable
+            if (cropBlock.type == Material.AIR || ageable == null || ageable.age != ageable.maximumAge) {
+                targetCropPos = null
+            }
+        }
+        if (targetPlantPos != null) {
+            val farmlandBlock = bukkitWorld.getBlockAt(targetPlantPos!!.x, targetPlantPos!!.y, targetPlantPos!!.z)
+            if (farmlandBlock.type != Material.FARMLAND || farmlandBlock.getRelative(BlockFace.UP).type != Material.AIR) {
+                targetPlantPos = null
+            }
+        }
+        if (targetTillPos != null) {
+            val dirtBlock = bukkitWorld.getBlockAt(targetTillPos!!.x, targetTillPos!!.y, targetTillPos!!.z)
+            if ((dirtBlock.type != Material.DIRT && dirtBlock.type != Material.GRASS_BLOCK) || dirtBlock.getRelative(BlockFace.UP).type != Material.AIR) {
+                targetTillPos = null
+            }
+        }
+        if (targetWaterPos != null) {
+            if (bukkitWorld.getBlockAt(targetWaterPos!!.x, targetWaterPos!!.y, targetWaterPos!!.z).type != Material.WATER) {
+                targetWaterPos = null
+                targetShorePos = null
+                releaseWaterSpot(villager.uuid)
+                val bobberId = activeBobbers.remove(villager.uuid)
+                if (bobberId != null) {
+                    val destroyPacket = WrapperPlayServerDestroyEntities(bobberId)
+                    bukkitWorld.players.forEach { p ->
+                        PacketEvents.getAPI().playerManager.getUser(p)?.sendPacket(destroyPacket)
+                    }
+                }
+            }
+        }
+
+        // АСИНХРОННЫЙ ПОИСК РАБОТЫ И РЫБАЛКИ
+        if (targetCropPos == null && targetPlantPos == null && targetTillPos == null && targetBoneMealPos == null && targetWaterPos == null && gameTime - lastCropSearchTime > 60L && !isScanningCrops) {
             lastCropSearchTime = gameTime
             isScanningCrops = true
 
             val farmBoxes = SettlementPlanner.buildings[settlement.data.id]?.filter { it.type.startsWith("FARM") }?.map { it.box } ?: emptyList()
-            if (farmBoxes.isEmpty()) {
-                noWorkUntil = gameTime + 200L
-                isScanningCrops = false
-                return
-            }
-
             val hasBoneMeal = settlement.villageInventory.any { it.type == Material.BONE_MEAL }
+
+            val r = 16
+            val minX = minOf(composterPos.x - 12, npcLoc.blockX - r)
+            val maxX = maxOf(composterPos.x + 12, npcLoc.blockX + r)
+            val minZ = minOf(composterPos.z - 12, npcLoc.blockZ - r)
+            val maxZ = maxOf(composterPos.z + 12, npcLoc.blockZ + r)
+
+            val minCX = minX shr 4
+            val maxCX = maxX shr 4
+            val minCZ = minZ shr 4
+            val maxCZ = maxZ shr 4
+
+            val snapshots = mutableMapOf<Pair<Int, Int>, org.bukkit.ChunkSnapshot>()
+            for (cx in minCX..maxCX) {
+                for (cz in minCZ..maxCZ) {
+                    if (bukkitWorld.isChunkLoaded(cx, cz)) {
+                        snapshots[Pair(cx, cz)] = bukkitWorld.getChunkAt(cx, cz).chunkSnapshot
+                    }
+                }
+            }
 
             plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
                 var foundCrop: BlockPos? = null
                 var foundPlant: BlockPos? = null
                 var foundTill: BlockPos? = null
                 var foundBoneMeal: BlockPos? = null
+                var foundWater: BlockPos? = null
+                var foundShore: BlockPos? = null
 
-                scan@ for (box in farmBoxes) {
-                    val minCX = box.minX.toInt() shr 4
-                    val maxCX = box.maxX.toInt() shr 4
-                    val minCZ = box.minZ.toInt() shr 4
-                    val maxCZ = box.maxZ.toInt() shr 4
-
-                    val snapshots = mutableMapOf<Pair<Int, Int>, org.bukkit.ChunkSnapshot>()
-                    for (cx in minCX..maxCX) {
-                        for (cz in minCZ..maxCZ) {
-                            if (bukkitWorld.isChunkLoaded(cx, cz)) {
-                                snapshots[Pair(cx, cz)] = bukkitWorld.getChunkAt(cx, cz).chunkSnapshot
-                            }
-                        }
-                    }
-
+                // 1. Поиск задач на полях
+                scanCrops@ for (box in farmBoxes) {
                     for (x in box.minX.toInt()..box.maxX.toInt()) {
                         for (z in box.minZ.toInt()..box.maxZ.toInt()) {
                             val cx = x shr 4
@@ -128,7 +197,7 @@ class FarmerBehavior(
                                 val typeAbove = snap.getBlockType(localX, y + 1, localZ)
 
                                 if (type == Material.WHEAT || type == Material.CARROTS || type == Material.POTATOES || type == Material.BEETROOTS) {
-                                    val data = snap.getBlockData(localX, y, localZ) as? org.bukkit.block.data.Ageable
+                                    val data = snap.getBlockData(localX, y, localZ) as? Ageable
                                     if (data != null) {
                                         if (data.age == data.maximumAge) {
                                             foundCrop = BlockPos(x, y, z)
@@ -143,14 +212,82 @@ class FarmerBehavior(
                                 }
 
                                 if ((type == Material.DIRT || type == Material.GRASS_BLOCK) && typeAbove == Material.AIR && foundTill == null) {
-                                    // Убеждаемся, что земля находится примерно на уровне компостера (внутри фермы)
                                     if (y <= composterPos.y && y >= composterPos.y - 2) {
                                         foundTill = BlockPos(x, y, z)
                                     }
                                 }
 
                                 if (foundCrop != null && foundPlant != null && foundTill != null && foundBoneMeal != null) {
-                                    break@scan
+                                    break@scanCrops
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 2. Если поле ухожено — ищем воду для рыбалки на расстоянии от берега
+                if (foundCrop == null && foundPlant == null && foundTill == null && foundBoneMeal == null) {
+                    waterScan@ for (wx in -r..r) {
+                        for (wz in -r..r) {
+                            if (wx == 0 && wz == 0) continue
+                            val px = npcLoc.blockX + wx
+                            val pz = npcLoc.blockZ + wz
+
+                            // Запрещаем рыбачить в поливочной воде на территории ферм
+                            val isFarmWater = farmBoxes.any { box ->
+                                px >= box.minX && px <= box.maxX && pz >= box.minZ && pz <= box.maxZ
+                            }
+                            if (isFarmWater) continue
+
+                            val snap = snapshots[Pair(px shr 4, pz shr 4)] ?: continue
+                            val localX = px and 15
+                            val localZ = pz and 15
+
+                            for (cy in -3..3) {
+                                val py = npcLoc.blockY + cy
+                                val type = snap.getBlockType(localX, py, localZ)
+
+                                if (type == Material.WATER && snap.getBlockType(localX, py + 1, localZ) == Material.AIR) {
+
+                                    // Проверяем, что это глубокая вода (нет берега ближе 5 блоков во всех 4 направлениях)
+                                    var isDeepWater = true
+                                    checkShore@ for (dx in -4..4) {
+                                        for (dz in -4..4) {
+                                            val sx = px + dx
+                                            val sz = pz + dz
+                                            val sSnap = snapshots[Pair(sx shr 4, sz shr 4)] ?: continue
+                                            if (sSnap.getBlockType(sx and 15, py, sz and 15) != Material.WATER) {
+                                                isDeepWater = false
+                                                break@checkShore
+                                            }
+                                        }
+                                    }
+                                    if (!isDeepWater) continue
+
+                                    // Ищем берег (сухой твердый блок) на расстоянии ровно 5-6 блоков от поплавка
+                                    shoreScan@ for (sx in -6..6) {
+                                        for (sz in -6..6) {
+                                            if (max(abs(sx), abs(sz)) in 5..6) {
+                                                val tx = px + sx
+                                                val tz = pz + sz
+                                                val snap = snapshots[Pair(px shr 4, pz shr 4)] ?: continue
+                                                val localX = px and 15
+                                                val localZ = pz and 15
+
+                                                for (cy in -2..2) {
+                                                    val py = composterPos.y + cy
+                                                    val type = snap.getBlockType(localX, py, localZ)
+                                                    if (type.isSolid && type != Material.WATER && type != Material.LAVA) {
+                                                        if (snap.getBlockType(localX, py + 1, localZ) == Material.AIR &&
+                                                            snap.getBlockType(localX, py + 2, localZ) == Material.AIR) {
+                                                            foundShore = BlockPos(sx, py, sz)
+                                                            break@shoreScan
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -162,9 +299,10 @@ class FarmerBehavior(
                     targetPlantPos = foundPlant
                     targetTillPos = foundTill
                     targetBoneMealPos = foundBoneMeal
+                    targetWaterPos = foundWater
 
-                    if (targetCropPos == null && targetPlantPos == null && targetTillPos == null && targetBoneMealPos == null) {
-                        noWorkUntil = gameTime + 200L // Даем возможность пойти строить дома
+                    if (targetCropPos == null && targetPlantPos == null && targetTillPos == null && targetBoneMealPos == null && targetWaterPos == null) {
+                        noWorkUntil = gameTime + 200L
                     }
                     isScanningCrops = false
                 })
@@ -173,9 +311,10 @@ class FarmerBehavior(
 
         if (isScanningCrops) return
 
+        // ВЫПОЛНЕНИЕ ДЕЙСТВИЙ (Приоритеты: Сбор > Посадка > Вспашка > Удобрение > Рыбалка)
         if (targetCropPos != null) {
             val cropBlock = bukkitWorld.getBlockAt(targetCropPos!!.x, targetCropPos!!.y, targetCropPos!!.z)
-            val ageable = cropBlock.blockData as? org.bukkit.block.data.Ageable
+            val ageable = cropBlock.blockData as? Ageable
             if (cropBlock.type == Material.AIR || ageable == null || ageable.age != ageable.maximumAge) {
                 targetCropPos = null
                 return
@@ -204,9 +343,9 @@ class FarmerBehavior(
                     val virtualInv = settlement.villageInventory
                     val amount = 1 + world.random.nextInt(3)
                     val copy = ItemStack(drop, amount)
-
                     var remaining = copy.amount
                     val maxStack = copy.type.maxStackSize
+
                     for (stored in virtualInv) {
                         if (stored.isSimilar(copy)) {
                             val space = maxStack - stored.amount
@@ -236,7 +375,7 @@ class FarmerBehavior(
 
         } else if (targetPlantPos != null) {
             val farmlandBlock = bukkitWorld.getBlockAt(targetPlantPos!!.x, targetPlantPos!!.y, targetPlantPos!!.z)
-            val blockAbove = farmlandBlock.getRelative(org.bukkit.block.BlockFace.UP)
+            val blockAbove = farmlandBlock.getRelative(BlockFace.UP)
 
             if (farmlandBlock.type != Material.FARMLAND || blockAbove.type != Material.AIR) {
                 targetPlantPos = null
@@ -358,6 +497,121 @@ class FarmerBehavior(
                 villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetBoneMealPos!!), speedModifier, 1))
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetBoneMealPos!!))
             }
+
+        } else if (targetWaterPos != null && targetShorePos != null) {
+            val shoreLoc = Location(bukkitWorld, targetShorePos!!.x + 0.5, targetShorePos!!.y + 1.0, targetShorePos!!.z + 0.5)
+            val distSq = npcLoc.distanceSquared(shoreLoc)
+
+            // ИСПРАВЛЕНО: Предотвращена ошибка неопределенной области видимости (scope) для waterLoc и villagerEye.
+            // Переменные теперь инициализируются в общем блоке, который охватывает как логику заброса, так и вылова.
+            if (distSq > 4.0) {
+                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetShorePos!!), speedModifier, 1))
+            } else {
+                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+                villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetWaterPos!!))
+
+                val fishingRod = CraftItemStack.asNMSCopy(ItemStack(Material.FISHING_ROD))
+                if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, fishingRod)) {
+                    villager.setItemInHand(InteractionHand.MAIN_HAND, fishingRod)
+                }
+
+                // ОБЪЕДИНЕННАЯ ОБЛАСТЬ ВИДИМОСТИ ПЕРЕМЕННЫХ
+                val waterLoc = Location(bukkitWorld, targetWaterPos!!.x + 0.5, targetWaterPos!!.y + 0.8, targetWaterPos!!.z + 0.5)
+                val villagerEye = (villager.bukkitEntity as org.bukkit.entity.Villager).eyeLocation
+
+                farmTicks++
+                if (farmTicks == 10) {
+                    villager.swing(InteractionHand.MAIN_HAND)
+
+                    val bobberId = 1_500_000 + world.random.nextInt(100_000)
+                    activeBobbers[villager.uuid] = bobberId
+
+                    val dir = waterLoc.toVector().subtract(villagerEye.toVector())
+                    val dist = dir.length()
+
+                    val velX = dir.x * 0.18
+                    val velY = 0.25 + (dist * 0.04) // Небольшой подъем вверх для баллистической дуги
+                    val velZ = dir.z * 0.18
+
+                    val velocity = com.github.retrooper.packetevents.util.Vector3d(velX, velY, velZ)
+
+                    val packetLoc = com.github.retrooper.packetevents.protocol.world.Location(
+                        villagerEye.x,
+                        villagerEye.y - 0.2, // Уровень руки
+                        villagerEye.z,
+                        villagerEye.yaw,
+                        villagerEye.pitch
+                    )
+
+                    // Спавним FISHING_BOBBER со скоростью запуска
+                    val spawnPacket = WrapperPlayServerSpawnEntity(
+                        bobberId,
+                        UUID.randomUUID(),
+                        EntityTypes.FISHING_BOBBER,
+                        packetLoc,
+                        villagerEye.yaw,
+                        villager.bukkitEntity.entityId, // ДАННЫЕ = SHOOTER ID
+                        velocity // Траектория полета
+                    )
+
+                    val nearbyPlayers = bukkitWorld.players.filter {
+                        it.world == bukkitWorld && it.location.distanceSquared(npcLoc) <= 2500.0
+                    }
+
+                    for (player in nearbyPlayers) {
+                        val user = com.github.retrooper.packetevents.PacketEvents.getAPI().playerManager.getUser(player)
+                        user?.sendPacket(spawnPacket)
+                    }
+                }
+
+                if (farmTicks >= 300) {
+                    farmTicks = 0
+                    villager.swing(InteractionHand.MAIN_HAND)
+
+                    val bobberId = activeBobbers.remove(villager.uuid)
+                    if (bobberId != null) {
+                        val destroyPacket = WrapperPlayServerDestroyEntities(bobberId)
+                        val nearbyPlayers = bukkitWorld.players.filter {
+                            it.world == bukkitWorld && it.location.distanceSquared(npcLoc) <= 2500.0
+                        }
+                        for (player in nearbyPlayers) {
+                            val user = com.github.retrooper.packetevents.PacketEvents.getAPI().playerManager.getUser(player)
+                            user?.sendPacket(destroyPacket)
+                        }
+                    }
+
+                    // ИСПРАВЛЕНО: Ошибки wtf is waterLoc устранены, переменные доступны из внешней области видимости
+                    bukkitWorld.playSound(waterLoc, Sound.ENTITY_FISHING_BOBBER_SPLASH, 1.0f, 1.0f)
+                    bukkitWorld.spawnParticle(Particle.BUBBLE, waterLoc.add(0.0, 0.5, 0.0), 15, 0.2, 0.2, 0.2, 0.1)
+
+                    val fish = when (world.random.nextInt(10)) {
+                        in 0..5 -> Material.COD
+                        in 6..8 -> Material.SALMON
+                        else -> Material.PUFFERFISH
+                    }
+
+                    val virtualInv = settlement.villageInventory
+                    val copy = ItemStack(fish, 1)
+                    val maxStack = copy.type.maxStackSize
+                    var remaining = copy.amount
+
+                    for (stored in virtualInv) {
+                        if (stored.isSimilar(copy)) {
+                            val space = maxStack - stored.amount
+                            if (space > 0) {
+                                val toAdd = minOf(space, remaining)
+                                stored.amount += toAdd
+                                remaining -= toAdd
+                                if (remaining <= 0) break
+                            }
+                        }
+                    }
+                    if (remaining > 0) {
+                        virtualInv.add(copy)
+                    }
+                    SettlementManager.saveSettlements(bukkitWorld)
+                }
+            }
         }
     }
 
@@ -368,6 +622,22 @@ class FarmerBehavior(
         targetPlantPos = null
         targetTillPos = null
         targetBoneMealPos = null
+        targetWaterPos = null
+        targetShorePos = null
         villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+
+        // Снимаем бронь со спота и удаляем поплавок
+        releaseWaterSpot(villager.uuid)
+        val bobberId = activeBobbers.remove(villager.uuid)
+        if (bobberId != null) {
+            val destroyPacket = WrapperPlayServerDestroyEntities(bobberId)
+            val nearbyPlayers = world.world.players.filter {
+                it.world == world.world && it.location.distanceSquared(villager.bukkitEntity.location) <= 2500.0
+            }
+            for (player in nearbyPlayers) {
+                val user = com.github.retrooper.packetevents.PacketEvents.getAPI().playerManager.getUser(player)
+                user?.sendPacket(destroyPacket)
+            }
+        }
     }
 }

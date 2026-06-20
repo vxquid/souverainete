@@ -43,6 +43,8 @@ class ConstructionBehavior(
     companion object {
         private val debugVisualsMap = mutableMapOf<UUID, Pair<BlockDisplay, BlockDisplay>>()
         private val lastLocationMap = java.util.WeakHashMap<HumanoidVillager, Location>()
+
+        // УЧЕТ ВРЕМЕНИ ДЛЯ УМНОЙ АКТИВАЦИИ ДИСТАНЦИОННОГО ХАКА И СБРОСОВ
         private val assignedBlockTicksMap = java.util.WeakHashMap<HumanoidVillager, Int>()
     }
 
@@ -114,6 +116,35 @@ class ConstructionBehavior(
         displays?.second?.remove()
     }
 
+    private fun takeItem(inventory: Inventory, material: Material, amount: Int) {
+        val index = inventory.first(material)
+        if (index != -1) {
+            val item = inventory.getItem(index) ?: return
+            if (item.amount <= amount) {
+                inventory.setItem(index, null)
+            } else {
+                item.amount -= amount
+                inventory.setItem(index, item)
+            }
+        }
+    }
+
+    private fun addItemsSmart(inventory: Inventory, material: Material, amount: Int) {
+        val maxStack = material.maxStackSize
+        if (maxStack == 1) {
+            if (!inventory.contains(material)) {
+                inventory.addItem(ItemStack(material, 1))
+            }
+        } else {
+            val currentAmount = inventory.filterNotNull()
+                .filter { it.type == material }
+                .sumOf { it.amount }
+            if (currentAmount < amount) {
+                inventory.addItem(ItemStack(material, amount - currentAmount))
+            }
+        }
+    }
+
     private fun clearConstructionBlocks(inventory: Inventory) {
         for (i in 0 until inventory.size) {
             val item = inventory.getItem(i) ?: continue
@@ -169,7 +200,8 @@ class ConstructionBehavior(
         var isRealTree = false
         var leafCount = 0
 
-        for (log in targetLogs) {
+        // ИСПРАВЛЕНО: Объявлена недостающая метка цикла validation@ для корректного выхода по break
+        validation@ for (log in targetLogs) {
             for (dx in -2..2) {
                 for (dy in -2..2) {
                     for (dz in -2..2) {
@@ -177,7 +209,7 @@ class ConstructionBehavior(
                             leafCount++
                             if (leafCount >= 3) {
                                 isRealTree = true
-                                break
+                                break@validation
                             }
                         }
                     }
@@ -250,6 +282,7 @@ class ConstructionBehavior(
             }
         }
 
+        // ИСПРАВЛЕНО: Объявлен цикл сопоставления foreignLog, чтобы избежать неопределенной переменной в предикате фильтрации
         val validLeaves = if (foreignLogs.isEmpty()) {
             potentialLeaves
         } else {
@@ -305,6 +338,13 @@ class ConstructionBehavior(
         if (world.gameTime < villager.buildBreakUntilTime) return false
 
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
+        val prof = bukkitVillager.profession
+
+        // ИСПРАВЛЕНО: Запрещаем фермерам строить (вместо этого они рыбачат). Пастухи, мясники и кузнецы всё ещё могут строить при простое.
+        if (prof == org.bukkit.entity.Villager.Profession.FARMER) {
+            return false
+        }
+
         val settlement = villager.settlement ?: return false
 
         if (villager.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {

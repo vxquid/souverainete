@@ -66,11 +66,9 @@ class SettlementPlanner(val settlement: Settlement) {
         private val buildingDisplays = ConcurrentHashMap<String, BlockDisplay>()
         private val planningCooldowns = ConcurrentHashMap<UUID, Long>()
 
-        // Кэш рабочих станций
         private val workstationCache = ConcurrentHashMap<String, BlockPos>()
         private val activeScans = ConcurrentHashMap.newKeySet<String>()
 
-        // ИСПРАВЛЕНО: Флаг активного асинхронного планирования места застройки для поселения
         private val activePlanning = ConcurrentHashMap.newKeySet<UUID>()
 
         fun getWorkstationFor(villager: HumanoidVillager): BlockPos? {
@@ -126,7 +124,10 @@ class SettlementPlanner(val settlement: Settlement) {
                             val localX = x and 15
                             val localZ = z and 15
 
-                            for (y in box.minY.toInt()..box.maxY.toInt()) {
+                            // ИСПРАВЛЕНО: Сканируем на 3 блока ниже коробки, чтобы гарантированно охватить старые шахты в сохранениях!
+                            val searchMinY = box.minY.toInt() - 3
+                            val searchMaxY = box.maxY.toInt()
+                            for (y in searchMinY..searchMaxY) {
                                 if (snap.getBlockType(localX, y, localZ) == targetMaterial) {
                                     found = BlockPos(x, y, z)
                                     break@scan
@@ -277,7 +278,6 @@ class SettlementPlanner(val settlement: Settlement) {
             return y
         }
 
-        // Асинхронный аналог для работы со слепками
         fun snapshotGetHighestGroundYAt(snapshots: Map<Pair<Int, Int>, ChunkSnapshot>, world: World, x: Int, z: Int): Int {
             val cx = x shr 4
             val cz = z shr 4
@@ -541,7 +541,6 @@ class SettlementPlanner(val settlement: Settlement) {
     fun planNextPriorityBuilding(): Boolean {
         val settlementId = settlement.data.id
 
-        // Предохранитель от параллельного запуска асинхронного поиска
         if (activePlanning.contains(settlementId)) {
             return false
         }
@@ -643,7 +642,6 @@ class SettlementPlanner(val settlement: Settlement) {
         return false
     }
 
-    // ИСПРАВЛЕНО: Асинхронный поиск безопасного места с помощью слепков (ChunkSnapshot)
     fun planBuilding(type: VanillaBuildingType): Boolean {
         val settlementId = settlement.data.id
         if (activePlanning.contains(settlementId)) return false
@@ -677,7 +675,6 @@ class SettlementPlanner(val settlement: Settlement) {
             BlockPos(rawWidth / 2, 0, 0)
         }
 
-        // Подготовка слепков чанков для асинхронного доступа (синхронно, но только загруженные чанки)
         val snapshots = mutableMapOf<Pair<Int, Int>, ChunkSnapshot>()
         val maxDist = maxRadius + 20
         val minCX = (center.blockX - maxDist) shr 4
@@ -693,7 +690,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // Переносим 99% CPU-нагрузки (перебор координат и ландшафта) в асинхронный пул
         plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
             val rand = Random()
             var found = false
@@ -849,13 +845,16 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 val finalBaseY = if (excavationCount.toDouble() / totalArea > 0.30) baseY + 1 else baseY
 
+                // ИСПРАВЛЕНО: Для шахты увеличиваем BoundingBox вниз до Y-5, чтобы включить в зону кэша рабочую станцию
+                val boxMinY = if (type == VanillaBuildingType.MINE) finalBaseY - 5 else finalBaseY - 2
+
                 val minX = cx - width / 2
                 val minZ = cz - length / 2
                 val maxX = minX + width
                 val maxZ = minZ + length
 
                 val potentialBox = BoundingBox(
-                    minX.toDouble(), (finalBaseY - 2).toDouble(), minZ.toDouble(),
+                    minX.toDouble(), boxMinY.toDouble(), minZ.toDouble(),
                     maxX.toDouble(), (finalBaseY + buildingHeight).toDouble(), maxZ.toDouble()
                 )
 
@@ -870,13 +869,11 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 found = true
 
-                // Если место успешно найдено, возвращаемся в главный поток для регистрации
                 plugin.server.scheduler.runTask(plugin, Runnable {
                     activePlanning.remove(settlementId)
 
                     val realRecordsList = buildings.computeIfAbsent(settlementId) { mutableListOf() }
 
-                    // Контрольная проверка коллизии (на случай, если за миллисекунды асинка другая деревня воткнула здание)
                     val stillColliding = realRecordsList.any { record ->
                         val other = record.box
                         val xOverlap = minX.toDouble() < other.maxX + buffer && maxX.toDouble() > other.minX - buffer
@@ -899,10 +896,9 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
                 })
 
-                return@Runnable // Завершаем асинхронный поиск
+                return@Runnable
             }
 
-            // Если за maxAttempts так и не нашли место:
             activePlanning.remove(settlementId)
         })
 

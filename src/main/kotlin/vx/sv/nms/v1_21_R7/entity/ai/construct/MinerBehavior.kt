@@ -15,6 +15,7 @@ import org.bukkit.Sound
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import kotlin.math.atan2
 import kotlin.math.sqrt
@@ -61,9 +62,35 @@ class MinerBehavior(
             return
         }
 
-        val stonePos = BlockPos(tablePos.x, tablePos.y, tablePos.z + 1)
-        val stoneBlock = bukkitWorld.getBlockAt(stonePos.x, stonePos.y, stonePos.z)
+        // ИСПРАВЛЕНО: Умный поиск камня (с учетом того, что шахта могла быть повернута при спавне)
+        var stonePos: BlockPos? = null
+        val adjacentOffsets = listOf(BlockPos(1, 0, 0), BlockPos(-1, 0, 0), BlockPos(0, 0, 1), BlockPos(0, 0, -1))
 
+        for (offset in adjacentOffsets) {
+            val bp = BlockPos(tablePos.x + offset.x, tablePos.y, tablePos.z + offset.z)
+            if (bukkitWorld.getBlockAt(bp.x, bp.y, bp.z).type == Material.STONE) {
+                stonePos = bp
+                break
+            }
+        }
+
+        // Если камня нет (например, только что сломали), ищем блок воздуха рядом со столом
+        if (stonePos == null) {
+            for (offset in adjacentOffsets) {
+                val bp = BlockPos(tablePos.x + offset.x, tablePos.y, tablePos.z + offset.z)
+                if (bukkitWorld.getBlockAt(bp.x, bp.y, bp.z).type == Material.AIR) {
+                    stonePos = bp
+                    break
+                }
+            }
+        }
+
+        // Страховочный фоллбек
+        if (stonePos == null) {
+            stonePos = BlockPos(tablePos.x, tablePos.y, tablePos.z + 1)
+        }
+
+        val stoneBlock = bukkitWorld.getBlockAt(stonePos.x, stonePos.y, stonePos.z)
         if (stoneBlock.type == Material.AIR) {
             stoneBlock.type = Material.STONE
         }
@@ -83,7 +110,10 @@ class MinerBehavior(
             villager.yBodyRot = villager.yRot
             villager.xRot = (-Math.toDegrees(atan2(dY, distance))).toFloat()
 
-            villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.IRON_PICKAXE)))
+            val pickaxe = CraftItemStack.asNMSCopy(ItemStack(Material.IRON_PICKAXE))
+            if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, pickaxe)) {
+                villager.setItemInHand(InteractionHand.MAIN_HAND, pickaxe)
+            }
 
             if (mineBlockTicks % 4 == 0) {
                 villager.swing(InteractionHand.MAIN_HAND)
@@ -114,14 +144,41 @@ class MinerBehavior(
                     else -> 1 + world.random.nextInt(3)
                 }
 
-                bukkitWorld.dropItemNaturally(stoneBlock.location.add(0.5, 0.5, 0.5), ItemStack(dropMaterial, amount))
+                // ИСПРАВЛЕНО: Прямое сложение в склад деревни (экономия TPS на физических предметах)
+                val virtualInv = settlement.villageInventory
+                val copy = ItemStack(dropMaterial, amount)
+                var remaining = copy.amount
+                val maxStack = copy.type.maxStackSize
+
+                for (stored in virtualInv) {
+                    if (stored.isSimilar(copy)) {
+                        val space = maxStack - stored.amount
+                        if (space > 0) {
+                            val toAdd = minOf(space, remaining)
+                            stored.amount += toAdd
+                            remaining -= toAdd
+                            if (remaining <= 0) break
+                        }
+                    }
+                }
+                while (remaining > 0) {
+                    val newCopy = copy.clone()
+                    val toAdd = minOf(maxStack, remaining)
+                    newCopy.amount = toAdd
+                    virtualInv.add(newCopy)
+                    remaining -= toAdd
+                }
+                SettlementManager.saveSettlements(bukkitWorld)
             }
         } else {
             val targetPos = BlockPos(stonePos.x, stonePos.y, stonePos.z)
             villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
             villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
 
-            villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.IRON_PICKAXE)))
+            val pickaxe = CraftItemStack.asNMSCopy(ItemStack(Material.IRON_PICKAXE))
+            if (!net.minecraft.world.item.ItemStack.matches(villager.mainHandItem, pickaxe)) {
+                villager.setItemInHand(InteractionHand.MAIN_HAND, pickaxe)
+            }
         }
     }
 

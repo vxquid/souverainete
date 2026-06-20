@@ -1,5 +1,6 @@
 package vx.sv.gameplay.humanoid
 
+import org.bukkit.Material
 import org.bukkit.Material.*
 import org.bukkit.Sound
 import org.bukkit.enchantments.Enchantment
@@ -15,6 +16,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.Damageable
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
+import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 
@@ -43,10 +45,6 @@ class EquipmentManager : Listener {
         }
     }
 
-    /**
-     * MAIN THREAD: Собираем NPC по мирам и закидываем в очередь.
-     * Запускается редко (раз в 5 секунд).
-     */
     private fun startQueueFiller() {
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
             plugin.gameplayManager.allowedWorlds.forEach { world ->
@@ -60,9 +58,6 @@ class EquipmentManager : Listener {
         }, SWEEP_INTERVAL_TICKS, SWEEP_INTERVAL_TICKS)
     }
 
-    /**
-     * ASYNC THREAD: Воркер, который "откусывает" от очереди по BATCH_SIZE штук каждый тик.
-     */
     private fun startQueueProcessor() {
         plugin.server.scheduler.runTaskTimerAsynchronously(plugin, Runnable {
             if (evaluationQueue.isEmpty()) return@Runnable
@@ -128,6 +123,24 @@ class EquipmentManager : Listener {
         }
     }
 
+    // ИСПРАВЛЕНО: Безопасный пропуск экипировки оружия в главную руку, если житель работает/рыбачит
+    private fun shouldSkipWeaponEquip(villager: Villager): Boolean {
+        val nms = (villager as? org.bukkit.craftbukkit.entity.CraftVillager)?.handle as? HumanoidVillager ?: return false
+
+        if (nms.activeBuildJob != null || nms.assignedBlock != null) return true
+
+        val mainHand = villager.equipment?.itemInMainHand?.type ?: Material.AIR
+        val name = mainHand.name
+        return mainHand == Material.FISHING_ROD ||
+                name.contains("HOE") ||
+                name.contains("PICKAXE") ||
+                name.contains("SHOVEL") ||
+                mainHand == Material.SHEARS ||
+                mainHand == Material.LEAD ||
+                mainHand == Material.BONE_MEAL ||
+                name.contains("BUCKET")
+    }
+
     fun equipBestEquipmentFor(villager: Villager) {
         val availableItems = villager.inventory.filterNotNull()
         if (availableItems.isEmpty()) return
@@ -135,8 +148,14 @@ class EquipmentManager : Listener {
         val bestItems = mutableMapOf<EquipmentSlot, ItemStack>()
         val bestScores = mutableMapOf<EquipmentSlot, Double>()
 
+        val skipWeapon = shouldSkipWeaponEquip(villager)
+
         for (item in availableItems) {
             val slot = getSlotForItem(item) ?: continue
+
+            // Пропускаем подбор нового оружия, если житель сейчас занят делом
+            if (slot == EquipmentSlot.HAND && skipWeapon) continue
+
             val score = evaluateItem(item, slot)
 
             val currentBestScore = bestScores.getOrDefault(slot, -1.0)

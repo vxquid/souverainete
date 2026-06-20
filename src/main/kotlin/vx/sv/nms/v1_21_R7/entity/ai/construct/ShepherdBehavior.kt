@@ -191,7 +191,7 @@ class ShepherdBehavior(
             villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
             cachedTargetSheep = null
 
-            // Если овец нет, уступаем приоритет строительству
+            // ИСПРАВЛЕНО: Если овец нет — ИИ засыпает на 10 секунд и даёт жителю пойти поработать строителем
             noWorkUntil = gameTime + 200L
         }
     }

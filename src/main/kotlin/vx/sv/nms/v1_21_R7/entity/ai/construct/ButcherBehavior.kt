@@ -85,12 +85,13 @@ class ButcherBehavior(
                 villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
             }
+            return
         } else {
             ShepherdBehavior.releaseReservations(villager.uuid)
             villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
             cachedTargetSheep = null
 
-            // Если овец нет, уступаем приоритет строительству
+            // ИСПРАВЛЕНО: Если овец для забоя нет — ИИ засыпает на 10 секунд и дает жителю пойти строить дома
             noWorkUntil = gameTime + 200L
         }
     }
