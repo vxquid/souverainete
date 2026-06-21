@@ -43,8 +43,6 @@ class ConstructionBehavior(
     companion object {
         private val debugVisualsMap = mutableMapOf<UUID, Pair<BlockDisplay, BlockDisplay>>()
         private val lastLocationMap = java.util.WeakHashMap<HumanoidVillager, Location>()
-
-        // УЧЕТ ВРЕМЕНИ ДЛЯ УМНОЙ АКТИВАЦИИ ДИСТАНЦИОННОГО ХАКА И СБРОСОВ
         private val assignedBlockTicksMap = java.util.WeakHashMap<HumanoidVillager, Int>()
     }
 
@@ -151,6 +149,7 @@ class ConstructionBehavior(
             val type = item.type
             val isToolOrWeapon = type.name.contains("SWORD") ||
                     type.name.contains("BOW") ||
+                    type.name.contains("CROSSBOW") ||
                     type.name.contains("AXE") ||
                     type.name.contains("SHOVEL") ||
                     type.name.contains("PICKAXE") ||
@@ -200,7 +199,6 @@ class ConstructionBehavior(
         var isRealTree = false
         var leafCount = 0
 
-        // ИСПРАВЛЕНО: Объявлена недостающая метка цикла validation@ для корректного выхода по break
         validation@ for (log in targetLogs) {
             for (dx in -2..2) {
                 for (dy in -2..2) {
@@ -282,7 +280,6 @@ class ConstructionBehavior(
             }
         }
 
-        // ИСПРАВЛЕНО: Объявлен цикл сопоставления foreignLog, чтобы избежать неопределенной переменной в предикате фильтрации
         val validLeaves = if (foreignLogs.isEmpty()) {
             potentialLeaves
         } else {
@@ -340,7 +337,6 @@ class ConstructionBehavior(
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
         val prof = bukkitVillager.profession
 
-        // ИСПРАВЛЕНО: Запрещаем фермерам строить (вместо этого они рыбачат). Пастухи, мясники и кузнецы всё ещё могут строить при простое.
         if (prof == org.bukkit.entity.Villager.Profession.FARMER) {
             return false
         }
@@ -365,10 +361,10 @@ class ConstructionBehavior(
         }
 
         val job = villager.activeBuildJob ?: SettlementPlanner.getActiveOrNextJob(settlement) ?: return false
-        villager.activeBuildJob = job
-
         val pdc = bukkitVillager.persistentDataContainer
         val jobUuidKey = NamespacedKey(plugin, "active_build_job_uuid")
+
+        villager.activeBuildJob = job
         if (pdc.get(jobUuidKey, PersistentDataType.STRING) != job.jobId.toString()) {
             pdc.set(jobUuidKey, PersistentDataType.STRING, job.jobId.toString())
             villager.savedJobId = job.jobId
@@ -702,66 +698,78 @@ class BuilderSafetyListener : Listener {
         val villager = event.entity as? BukkitVillager ?: return
         val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager ?: return
 
-        if (nmsVillager.activeBuildJob != null) {
-            if (event.cause == EntityDamageEvent.DamageCause.SUFFOCATION) {
-                event.isCancelled = true
+        val cause = event.cause
+        val isSuffocation = cause == EntityDamageEvent.DamageCause.SUFFOCATION
+        val isDrowning = cause == EntityDamageEvent.DamageCause.DROWNING
 
-                val settlement = nmsVillager.settlement
-                val safeLoc = if (settlement != null) {
-                    val center = settlement.data.center
+        if (isSuffocation || isDrowning) {
+            event.isCancelled = true
 
-                    var targetY = center.blockY
-                    var targetX = center.blockX + 2
-                    var targetZ = center.blockZ + 2
+            // Instantly restore air capacity if stuck underwater
+            if (isDrowning) {
+                villager.remainingAir = villager.maximumAir
+            }
 
-                    val world = center.world!!
-                    var foundSafeSpot = false
-                    for (ox in listOf(2, -2, 3, -3, 1, -1)) {
-                        for (oz in listOf(2, -2, 3, -3, 1, -1)) {
-                            val tx = center.blockX + ox
-                            val tz = center.blockZ + oz
-                            val gy = world.getHighestBlockYAt(tx, tz)
+            val settlement = nmsVillager.settlement
+            val safeLoc = if (settlement != null) {
+                val center = settlement.data.center
 
-                            if (gy <= center.blockY + 1) {
-                                val feetBlock = world.getBlockAt(tx, gy + 1, tz)
-                                val headBlock = world.getBlockAt(tx, gy + 2, tz)
-                                if (feetBlock.type.isAir && headBlock.type.isAir) {
-                                    targetX = tx
-                                    targetY = gy
-                                    targetZ = tz
-                                    foundSafeSpot = true
-                                    break
-                                }
+                var targetY = center.blockY
+                var targetX = center.blockX + 2
+                var targetZ = center.blockZ + 2
+
+                val world = center.world!!
+                var foundSafeSpot = false
+                for (ox in listOf(2, -2, 3, -3, 1, -1)) {
+                    for (oz in listOf(2, -2, 3, -3, 1, -1)) {
+                        val tx = center.blockX + ox
+                        val tz = center.blockZ + oz
+                        val gy = world.getHighestBlockYAt(tx, tz)
+
+                        if (gy <= center.blockY + 1) {
+                            val feetBlock = world.getBlockAt(tx, gy + 1, tz)
+                            val headBlock = world.getBlockAt(tx, gy + 2, tz)
+                            if (feetBlock.type.isAir && headBlock.type.isAir) {
+                                targetX = tx
+                                targetY = gy
+                                targetZ = tz
+                                foundSafeSpot = true
+                                break
                             }
                         }
-                        if (foundSafeSpot) break
                     }
-                    Location(world, targetX + 0.5, targetY + 1.0, targetZ + 0.5)
-                } else {
-                    val loc = villager.location
-                    val highestY = loc.world.getHighestBlockYAt(loc.blockX, loc.blockZ)
-                    Location(loc.world, loc.x, highestY + 1.0, loc.z, loc.yaw, loc.pitch)
+                    if (foundSafeSpot) break
                 }
-
-                val job = nmsVillager.activeBuildJob
-                val assigned = nmsVillager.assignedBlock
-                if (assigned != null && job != null) {
-                    job.unclaimBlock(assigned)
-                }
-
-                nmsVillager.assignedBlock = null
-                nmsVillager.digTicks = 0
-                nmsVillager.buildTicks = 0
-                nmsVillager.isBuildDistanceHackActive = false
-                nmsVillager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-
-                villager.teleport(safeLoc)
-
-                villager.world.playSound(safeLoc, Sound.ENTITY_VILLAGER_HURT, 1.0f, 1.0f)
-                villager.world.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
+                Location(world, targetX + 0.5, targetY + 1.0, targetZ + 0.5)
+            } else {
+                val loc = villager.location
+                val highestY = loc.world.getHighestBlockYAt(loc.blockX, loc.blockZ)
+                Location(loc.world, loc.x, highestY + 1.0, loc.z, loc.yaw, loc.pitch)
             }
-            else if (event.cause == EntityDamageEvent.DamageCause.ENTITY_ATTACK ||
-                event.cause == EntityDamageEvent.DamageCause.PROJECTILE) {
+
+            val job = nmsVillager.activeBuildJob
+            val assigned = nmsVillager.assignedBlock
+            if (assigned != null && job != null) {
+                job.unclaimBlock(assigned)
+            }
+
+            nmsVillager.assignedBlock = null
+            nmsVillager.digTicks = 0
+            nmsVillager.buildTicks = 0
+            nmsVillager.isBuildDistanceHackActive = false
+            nmsVillager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+            nmsVillager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+
+            villager.teleport(safeLoc)
+
+            villager.world.playSound(safeLoc, Sound.ENTITY_VILLAGER_HURT, 1.0f, 1.0f)
+            villager.world.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
+            return
+        }
+
+        if (nmsVillager.activeBuildJob != null) {
+            if (cause == EntityDamageEvent.DamageCause.ENTITY_ATTACK ||
+                cause == EntityDamageEvent.DamageCause.PROJECTILE) {
 
                 val job = nmsVillager.activeBuildJob
                 val assigned = nmsVillager.assignedBlock

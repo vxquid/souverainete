@@ -7,10 +7,12 @@ import org.bukkit.NamespacedKey
 import org.bukkit.block.BlockFace
 import org.bukkit.block.data.Ageable
 import org.bukkit.block.data.type.Stairs
+import org.bukkit.craftbukkit.block.CraftBlockEntityState
+import org.bukkit.craftbukkit.block.CraftJigsaw
 import org.bukkit.util.BlockVector
 import vx.sv.util.RelativeBlock
 
-// Модель кандидата входа для расчета вектора разворота
+// Model of entrance candidate for rotation vector calculations
 data class EntranceCandidate(val pos: BlockPos, val facing: BlockFace?, val weight: Double)
 
 object VanillaStructureLoader {
@@ -42,14 +44,6 @@ object VanillaStructureLoader {
         val relativeBlocks = mutableListOf<RelativeBlock>()
         val palette = structure.palettes.firstOrNull() ?: return emptyList()
 
-        val solidBlocksMap = mutableMapOf<BlockPos, org.bukkit.block.data.BlockData>()
-        palette.blocks.forEach { blockState ->
-            val type = blockState.type
-            if (type != Material.AIR && type != Material.JIGSAW && type != Material.STRUCTURE_VOID) {
-                solidBlocksMap[BlockPos(blockState.x, blockState.y, blockState.z)] = blockState.blockData
-            }
-        }
-
         palette.blocks.forEach { blockState ->
             if (blockState.type == Material.AIR || blockState.type == Material.STRUCTURE_VOID) return@forEach
 
@@ -57,32 +51,47 @@ object VanillaStructureLoader {
             var blockData = blockState.blockData
 
             if (blockState.type == Material.JIGSAW) {
-                val neighborOffsets = listOf(
-                    BlockPos(0, -1, 0),
-                    BlockPos(1, 0, 0),
-                    BlockPos(-1, 0, 0),
-                    BlockPos(0, 0, 1),
-                    BlockPos(0, 0, -1),
-                    BlockPos(0, 1, 0)
-                )
+                try {
+                    val craftJigsaw = blockState as CraftJigsaw
+                    var finalStateStr: String? = null
 
-                var foundNeighbor = false
-                for (offset in neighborOffsets) {
-                    val neighborPos = BlockPos(relPos.x + offset.x, relPos.y + offset.y, relPos.z + offset.z)
-                    val neighborData = solidBlocksMap[neighborPos]
-                    if (neighborData != null) {
-                        blockData = neighborData
-                        foundNeighbor = true
-                        break
+                    // Fallback 1: Extract directly from the raw snapshot NBT compound (highly stable, bypasses null tileEntity)
+                    try {
+                        val nbt = craftJigsaw.snapshotNBT
+                        if (nbt != null && nbt.contains("final_state")) {
+                            finalStateStr = nbt.getString("final_state").get()
+                        }
+                    } catch (_: Exception) {}
+
+                    // Fallback 2: Fallback to reading from the unplaced tile entity 'snapshot' field
+                    if (finalStateStr.isNullOrEmpty()) {
+                        try {
+                            val snapshotField = CraftBlockEntityState::class.java.getDeclaredField("snapshot").apply { isAccessible = true }
+                            val nmsJigsaw = snapshotField.get(craftJigsaw) as net.minecraft.world.level.block.entity.JigsawBlockEntity
+                            finalStateStr = nmsJigsaw.finalState
+                        } catch (_: Exception) {}
                     }
-                }
 
-                if (!foundNeighbor) {
-                    blockData = Material.COBBLESTONE.createBlockData()
+                    // Fallback 3: Final fallback to reading from 'tileEntity' field
+                    if (finalStateStr.isNullOrEmpty()) {
+                        try {
+                            val tileEntityField = CraftBlockEntityState::class.java.getDeclaredField("tileEntity").apply { isAccessible = true }
+                            val nmsJigsaw = tileEntityField.get(craftJigsaw) as net.minecraft.world.level.block.entity.JigsawBlockEntity
+                            finalStateStr = nmsJigsaw.finalState
+                        } catch (_: Exception) {}
+                    }
+
+                    blockData = if (finalStateStr.isNullOrEmpty() || finalStateStr == "minecraft:air" || finalStateStr == "air") {
+                        Material.AIR.createBlockData()
+                    } else {
+                        Bukkit.createBlockData(finalStateStr)
+                    }
+                } catch (e: Exception) {
+                    blockData = Material.AIR.createBlockData()
                 }
             }
 
-            // ИСПРАВЛЕНО: Превращаем готовую пашню в обычную землю, чтобы фермеры сами её вспахали
+            // FIXED: Turning ready-made farmland into regular dirt so that farmers till it themselves
             if (blockData.material == Material.FARMLAND) {
                 blockData = Material.DIRT.createBlockData()
             }

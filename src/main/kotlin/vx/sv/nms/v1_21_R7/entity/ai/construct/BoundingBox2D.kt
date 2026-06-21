@@ -66,6 +66,7 @@ class SettlementPlanner(val settlement: Settlement) {
 
         private val workstationCache = ConcurrentHashMap<String, BlockPos>()
         private val activeScans = ConcurrentHashMap.newKeySet<String>()
+        private val scanCooldowns = ConcurrentHashMap<String, Long>()
 
         private val activePlanning = ConcurrentHashMap.newKeySet<UUID>()
 
@@ -83,6 +84,11 @@ class SettlementPlanner(val settlement: Settlement) {
             }
 
             val key = "${s.data.id}_${buildingTypeName}"
+
+            // Prevent main-thread chunkSnapshot copying spam if previous scan failed recently
+            val cooldown = scanCooldowns[key] ?: 0L
+            if (s.world.gameTime < cooldown) return null
+
             val cached = workstationCache[key]
 
             if (cached != null) {
@@ -136,6 +142,9 @@ class SettlementPlanner(val settlement: Settlement) {
 
                     if (found != null) {
                         workstationCache[key] = found
+                    } else {
+                        // Apply 30 seconds scan cooldown on failure to protect TPS
+                        scanCooldowns[key] = s.world.gameTime + 600L
                     }
                     activeScans.remove(key)
                 })
@@ -709,7 +718,6 @@ class SettlementPlanner(val settlement: Settlement) {
                         val surfaceBlockType = snap.getBlockType(localX, highestY, localZ)
 
                         if (surfaceBlockType == Material.WATER ||
-                            surfaceBlockType == Material.LAVA ||
                             surfaceBlockType.name.contains("WATER") ||
                             surfaceBlockType.name.contains("ICE") ||
                             surfaceBlockType.name.contains("LAVA")) {
@@ -879,6 +887,8 @@ class SettlementPlanner(val settlement: Settlement) {
         val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
         val records = buildings[settlementId] ?: emptyList()
 
+        // 1. Trace the 2D path coordinates first using Bresenham's line algorithm
+        val pathPoints = mutableListOf<BlockPos>()
         var currentX = center.blockX
         var currentZ = center.blockZ
 
@@ -902,39 +912,96 @@ class SettlementPlanner(val settlement: Settlement) {
         val sZ = if (currentZ < cz) 1 else -1
         var err = dX - dZ
 
-        val roadBlockData = Material.DIRT_PATH.createBlockData()
+        while (true) {
+            pathPoints.add(BlockPos(currentX, 0, currentZ)) // Y is a placeholder initially
 
+            if (currentX == cx && currentZ == cz) break
+            val e2 = 2 * err
+            if (e2 > -dZ) {
+                err -= dZ
+                currentX += sX
+            }
+            if (e2 < dX) {
+                err += dX
+                currentZ += sZ
+            }
+        }
+
+        // 2. Pre-cache and batch the heavy world/NMS block lookups to protect main-thread TPS [O(N)]
+        val isWaterArray = BooleanArray(pathPoints.size)
+        val naturalYArray = DoubleArray(pathPoints.size)
+        val surfaceYArray = DoubleArray(pathPoints.size)
+
+        for (i in 0 until pathPoints.size) {
+            val px = pathPoints[i].x
+            val pz = pathPoints[i].z
+            val natY = getHighestGroundYAt(world, px, pz).toDouble()
+            val surfY = world.getHighestBlockYAt(px, pz).toDouble()
+            val surfBlock = world.getBlockAt(px, surfY.toInt(), pz)
+
+            isWaterArray[i] = surfBlock.type == Material.WATER || surfBlock.isLiquid
+            naturalYArray[i] = natY
+            surfaceYArray[i] = surfY
+        }
+
+        val heights = DoubleArray(pathPoints.size)
+        heights[0] = if (isWaterArray[0]) surfaceYArray[0] else naturalYArray[0]
+        heights[pathPoints.size - 1] = baseY.toDouble()
+        for (i in 1 until pathPoints.size - 1) {
+            heights[i] = if (isWaterArray[i]) surfaceYArray[i] else naturalYArray[i]
+        }
+
+        // 3. Apply relaxation passes (moving average) over the heights array to eliminate jagged micro-relief bumps [No GC or NMS overhead]
+        repeat(5) {
+            val nextHeights = heights.clone()
+            for (i in 1 until heights.size - 1) {
+                nextHeights[i] = (heights[i - 1] + heights[i] + heights[i + 1]) / 3.0
+            }
+            // Protect against floating or deep tunneling road sections by clamping to natural height boundaries.
+            // For water columns, we enforce that the bridge must never sink below the water surface level.
+            for (i in 1 until heights.size - 1) {
+                val isWater = isWaterArray[i]
+                val surfaceY = surfaceYArray[i]
+                val naturalY = naturalYArray[i]
+
+                val minAllowedY = if (isWater) surfaceY else naturalY - 2.0
+                val maxAllowedY = if (isWater) surfaceY + 3.0 else naturalY + 2.0
+
+                heights[i] = nextHeights[i].coerceIn(minAllowedY, maxAllowedY)
+            }
+        }
+
+        // 4. Convert relaxed heights back to integers
+        val finalHeights = IntArray(pathPoints.size) { i ->
+            Math.round(heights[i]).toInt()
+        }
+
+        // 5. Force slope gradients to a maximum step of 1 to guarantee step-free path walking
+        for (i in 1 until finalHeights.size) {
+            val diff = finalHeights[i] - finalHeights[i - 1]
+            if (abs(diff) > 1) {
+                finalHeights[i] = finalHeights[i - 1] + diff.coerceIn(-1, 1)
+            }
+        }
+
+        val roadBlockData = Material.DIRT_PATH.createBlockData()
         val airData = Material.AIR.createBlockData()
         val cobbleData = Material.COBBLESTONE.createBlockData()
 
         val halfW = width / 2 + 1
         val halfL = length / 2 + 1
 
-        var prevCenterRoadY: Int? = null
-
         var currentRoadJob = SchematicBuildJob(world)
         var stepsInSegment = 0
         val maxStepsPerSegment = 8
 
-        while (true) {
-            val naturalCenterY = getHighestGroundYAt(world, currentX, currentZ)
-
-            val surfaceY = world.getHighestBlockYAt(currentX, currentZ)
-            val surfaceBlock = world.getBlockAt(currentX, surfaceY, currentZ)
-
-            val isWaterAtCenter = surfaceBlock.type == Material.WATER || surfaceBlock.isLiquid
-
-            val centerRoadY = if (isWaterAtCenter) {
-                surfaceY
-            } else {
-                if (prevCenterRoadY == null) {
-                    naturalCenterY
-                } else {
-                    val diff = naturalCenterY - prevCenterRoadY
-                    prevCenterRoadY + diff.coerceIn(-1, 1)
-                }
-            }
-            prevCenterRoadY = centerRoadY
+        // 6. Iterate and build the smoothed road segments
+        for (i in pathPoints.indices) {
+            val pt = pathPoints[i]
+            val pathX = pt.x
+            val pathZ = pt.z
+            val centerRoadY = finalHeights[i]
+            val isWaterAtCenter = isWaterArray[i]
 
             val isMovingX = abs(dX) > abs(dZ)
 
@@ -945,11 +1012,10 @@ class SettlementPlanner(val settlement: Settlement) {
 
             for (wx in xMin..xMax) {
                 for (wz in zMin..zMax) {
-                    val px = currentX + wx
-                    val pz = currentZ + wz
+                    val px = pathX + wx
+                    val pz = pathZ + wz
 
                     if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
-
                     if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
 
                     val isInsideAnyBuilding = records.any { record ->
@@ -1008,17 +1074,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 }
                 stepsInSegment = 0
             }
-
-            if (currentX == cx && currentZ == cz) break
-            val e2 = 2 * err
-            if (e2 > -dZ) {
-                err -= dZ
-                currentX += sX
-            }
-            if (e2 < dX) {
-                err += dX
-                currentZ += sZ
-            }
         }
 
         if (currentRoadJob.getBlocks().isNotEmpty()) {
@@ -1048,28 +1103,66 @@ class SettlementPlanner(val settlement: Settlement) {
             Pair(rotPos, rotData)
         }
 
-        // 2D Scanline Bounding footprint coordinates
-        val minYMap = mutableMapOf<Pair<Int, Int>, Int>()
-        val maxYMap = mutableMapOf<Pair<Int, Int>, Int>()
+        // 2D Scanline Bounding footprint coordinates [Optimized to flat array primitive lookups to eliminate GC pressure]
+        val minXArray = IntArray(length) { Int.MAX_VALUE }
+        val maxXArray = IntArray(length) { Int.MIN_VALUE }
+        val minZArray = IntArray(width) { Int.MAX_VALUE }
+        val maxZArray = IntArray(width) { Int.MIN_VALUE }
+
+        val minYArray = IntArray(width * length) { Int.MAX_VALUE }
+        val maxYArray = IntArray(width * length) { Int.MIN_VALUE }
 
         rotatedBlocks.forEach { (pos, _) ->
-            val col = Pair(pos.x, pos.z)
-            val y = pos.y
+            val x = pos.x
+            val z = pos.z
 
-            minYMap[col] = minOf(minYMap[col] ?: Int.MAX_VALUE, y)
-            maxYMap[col] = maxOf(maxYMap[col] ?: Int.MIN_VALUE, y)
+            if (z in 0 until length) {
+                minXArray[z] = minOf(minXArray[z], x)
+                maxXArray[z] = maxOf(maxXArray[z], x)
+            }
+            if (x in 0 until width) {
+                minZArray[x] = minOf(minZArray[x], z)
+                maxZArray[x] = maxOf(maxZArray[x], z)
+            }
+
+            val idx = x * length + z
+            if (idx in 0 until width * length) {
+                minYArray[idx] = minOf(minYArray[idx], pos.y)
+                maxYArray[idx] = maxOf(maxYArray[idx], pos.y)
+            }
         }
 
-        val occupiedColumns = minYMap.keys
+        val insideFootprint = BooleanArray(width * length)
+        for (x in 0 until width) {
+            for (z in 0 until length) {
+                val minX = minXArray[z]
+                val maxX = maxXArray[z]
+                val minZ = minZArray[x]
+                val maxZ = maxZArray[x]
+
+                insideFootprint[x * length + z] = minX != Int.MAX_VALUE && maxX != Int.MIN_VALUE &&
+                        minZ != Int.MAX_VALUE && maxZ != Int.MIN_VALUE &&
+                        x in minX..maxX && z in minZ..maxZ
+            }
+        }
+
+        // Flat high-speed cache map for vertical terrain scanner
+        val highestYMap = HashMap<Pair<Int, Int>, Int>()
+        fun getCachedHighest(absX: Int, absZ: Int, x: Int, z: Int): Int {
+            return highestYMap.getOrPut(Pair(x, z)) {
+                getHighestGroundYAt(world, absX, absZ)
+            }
+        }
 
         val materialCounts = mutableMapOf<Material, Int>()
         for (x in 0 until width) {
             for (z in 0 until length) {
-                if (Pair(x, z) !in occupiedColumns) continue
+                val idx = x * length + z
+                if (!insideFootprint[idx]) continue
 
                 val absX = cx - width / 2 + x
                 val absZ = cz - length / 2 + z
-                val highest = getHighestGroundYAt(world, absX, absZ)
+                val highest = getCachedHighest(absX, absZ, x, z)
                 val blockType = world.getBlockAt(absX, highest, absZ).type
 
                 if (blockType.isSolid &&
@@ -1089,15 +1182,15 @@ class SettlementPlanner(val settlement: Settlement) {
 
         for (x in 0 until width) {
             for (z in 0 until length) {
-                val colKey = Pair(x, z)
-                if (colKey !in occupiedColumns) continue
+                val idx = x * length + z
+                if (!insideFootprint[idx]) continue
 
                 val absX = cx - width / 2 + x
                 val absZ = cz - length / 2 + z
 
-                val highest = getHighestGroundYAt(world, absX, absZ)
-                val minY = minYMap[colKey] ?: 0
-                val maxY = maxYMap[colKey] ?: 0
+                val highest = getCachedHighest(absX, absZ, x, z)
+                val minY = if (minYArray[idx] == Int.MAX_VALUE) 0 else minYArray[idx]
+                val maxY = if (maxYArray[idx] == Int.MIN_VALUE) height else maxYArray[idx]
 
                 // Excavate only the exact vertical span occupied by structure blocks in this specific column.
                 // This preserves natural terrain under roof eaves, balconies, and outer decorations.
