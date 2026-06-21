@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai
+package vx.sv.nms.v1_21_R7.entity.ai.fight
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -12,6 +12,7 @@ import net.minecraft.world.entity.ai.memory.WalkTarget
 import net.minecraft.world.entity.projectile.ProjectileUtil
 import net.minecraft.world.item.CrossbowItem
 import net.minecraft.world.item.Items
+import org.bukkit.entity.Villager
 import vx.sv.gameplay.party.PartyManager
 import vx.sv.gameplay.party.PartyManager.Companion.combatTactic
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
@@ -33,7 +34,7 @@ class CrossbowAttackBehavior(
 
     override fun checkExtraStartConditions(level: ServerLevel, villager: HumanoidVillager): Boolean {
         // Получаем Bukkit сущность для проверки PDC
-        val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
+        val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
 
         val tactic = bukkitVillager.combatTactic
         if (tactic == PartyManager.CombatTactic.MELEE) {

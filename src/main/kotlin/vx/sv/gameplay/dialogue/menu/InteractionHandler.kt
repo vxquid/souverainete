@@ -364,13 +364,13 @@ class InteractionHandler : Listener {
         }
 
         // === [DEBUG] КНОПКА ОТКРЫТИЯ ИНВЕНТАРЯ ЖИТЕЛЯ ===
-        if (player.isOp) {
-            builder.button("§c[DEBUG] Проверить инвентарь") { menu ->
-                player.openInventory(villager.inventory)
-                player.playSound(player.location, Sound.BLOCK_CHEST_OPEN, 1.0f, 1.0f)
-                menu.destroy()
-            }
-        }
+//        if (player.isOp) {
+//            builder.button("§c[DEBUG] Проверить инвентарь") { menu ->
+//                player.openInventory(villager.inventory)
+//                player.playSound(player.location, Sound.BLOCK_CHEST_OPEN, 1.0f, 1.0f)
+//                menu.destroy()
+//            }
+//        }
 
         builder.button(plugin.language.getString("interaction-menu.close-button") ?: "Close") { menu ->
             menu.destroy()

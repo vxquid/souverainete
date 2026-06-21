@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai
+package vx.sv.nms.v1_21_R7.entity.ai.fight
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.server.level.ServerLevel
@@ -8,6 +8,7 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.monster.Monster
 import org.bukkit.Bukkit
+import org.bukkit.entity.Villager
 import vx.sv.event.VillagerStartFightEvent
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 
@@ -40,7 +41,7 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
 
         if (target != null) {
             // --- ВЫЗОВ ИВЕНТА ---
-            val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager
+            val bukkitVillager = villager.bukkitEntity as? Villager
             val bukkitTarget = target.bukkitEntity as? org.bukkit.entity.LivingEntity
 
             if (bukkitVillager != null && bukkitTarget != null) {

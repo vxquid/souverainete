@@ -54,6 +54,10 @@ import vx.sv.nms.EntityProvider.Humanoid
 import vx.sv.nms.v1_21_R7.VersionSpecificHumanoidEntityProvider.Companion.plugin
 import vx.sv.nms.v1_21_R7.entity.ai.*
 import vx.sv.nms.v1_21_R7.entity.ai.construct.*
+import vx.sv.nms.v1_21_R7.entity.ai.fight.BowAttackBehavior
+import vx.sv.nms.v1_21_R7.entity.ai.fight.CrossbowAttackBehavior
+import vx.sv.nms.v1_21_R7.entity.ai.fight.FindEnemyBehavior
+import vx.sv.nms.v1_21_R7.entity.ai.fight.TacticalAttackBehavior
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.util.InventorySerializer
 import vx.sv.util.VillagerBridge

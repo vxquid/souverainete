@@ -1,6 +1,7 @@
-package vx.sv.nms.v1_21_R7.entity.ai
+package vx.sv.nms.v1_21_R7.entity.ai.fight
 
 import com.google.common.collect.ImmutableMap
+import net.minecraft.core.BlockPos
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.entity.LivingEntity
@@ -132,7 +133,7 @@ class TacticalAttackBehavior(
 
         villager.brain.setMemory(
             MemoryModuleType.WALK_TARGET,
-            WalkTarget(BlockPosTracker(net.minecraft.core.BlockPos.containing(fleePos)), speedModifier * 1.15f, 0)
+            WalkTarget(BlockPosTracker(BlockPos.containing(fleePos)), speedModifier * 1.15f, 0)
         )
     }
 
@@ -158,7 +159,7 @@ class TacticalAttackBehavior(
             // Быстрый отход назад (не работает, если поднят щит, см. currentSpeed выше)
             val retreatDir = villager.position().subtract(target.position()).normalize()
             val retreatPos = villager.position().add(retreatDir.scale(4.0))
-            villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(net.minecraft.core.BlockPos.containing(retreatPos)), speed * 1.2f, 0))
+            villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(BlockPos.containing(retreatPos)), speed * 1.2f, 0))
             return
         }
 
@@ -180,12 +181,12 @@ class TacticalAttackBehavior(
         }
     }
 
-    private fun getStrafePosition(attacker: HumanoidVillager, target: LivingEntity): net.minecraft.core.BlockPos {
+    private fun getStrafePosition(attacker: HumanoidVillager, target: LivingEntity): BlockPos {
         val forward = target.position().subtract(attacker.position()).normalize()
         val side = Vec3(-forward.z, 0.0, forward.x)
         val direction = if (strafeClockwise) side else side.reverse()
         val targetVec = target.position().add(direction.scale(3.0)).add(forward.scale(-1.0))
-        return net.minecraft.core.BlockPos.containing(targetVec)
+        return BlockPos.containing(targetVec)
     }
 
     private fun getAttackTarget(villager: HumanoidVillager): LivingEntity? = villager.brain.getMemory(MemoryModuleType.ATTACK_TARGET).orElse(null)

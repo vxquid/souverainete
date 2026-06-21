@@ -1,6 +1,7 @@
-package vx.sv.nms.v1_21_R7.entity.ai
+package vx.sv.nms.v1_21_R7.entity.ai.fight
 
 import com.google.common.collect.ImmutableMap
+import net.minecraft.core.BlockPos
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.entity.ai.behavior.Behavior
@@ -78,7 +79,7 @@ class BowAttackBehavior(
             // Если мы натягиваем лук, мы медленные. Пытаемся бежать быстрее (speed * 1.3), чтобы компенсировать
             villager.brain.setMemory(
                 MemoryModuleType.WALK_TARGET,
-                WalkTarget(BlockPosTracker(net.minecraft.core.BlockPos.containing(fleePos)), speedModifier * 1.15f, 0)
+                WalkTarget(BlockPosTracker(BlockPos.containing(fleePos)), speedModifier * 1.15f, 0)
             )
         } else if (distSqr <= optimalDistanceSqr && canSee) {
             // Мы в идеальной позиции. Стираем цель ходьбы, чтобы включился стрейф (MoveControl)
