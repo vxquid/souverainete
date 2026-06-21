@@ -769,6 +769,11 @@ class HumanoidVillager(
     // =======================================================================================
     class VillagerSwimMoveControl(private val villager: HumanoidVillager) : net.minecraft.world.entity.ai.control.MoveControl(villager) {
         override fun tick() {
+            // Если житель в воде и уткнулся в препятствие — всегда прыгаем, помогая ему вылезти
+            if (this.villager.isInWater && this.villager.horizontalCollision) {
+                this.villager.jumpControl.jump()
+            }
+
             if (this.villager.wantsToSwim() && this.villager.isInWater) {
 
                 val isBelowSurface = this.villager.isUnderWater()
@@ -793,18 +798,13 @@ class HumanoidVillager(
                     this.villager.deltaMovement = this.villager.deltaMovement.add(0.0, 0.05, 0.0)
                 } else if (this.wantedY > this.villager.y) {
                     // Обычное следование по высоте за целью пути
-                    this.villager.deltaMovement = this.villager.deltaMovement.add(0.0, 0.002, 0.0)
+                    this.villager.deltaMovement = this.villager.deltaMovement.add(0.0, 0.012, 0.0) // ИСПРАВЛЕНО: Увеличена сила всплытия с 0.002 до 0.012 для плавности
                 } else if (isBelowSurface && (isIdle || isLowOnAir)) {
                     // Если бездействует или мало воздуха — всплываем на поверхность
                     this.villager.deltaMovement = this.villager.deltaMovement.add(0.0, 0.03, 0.0)
                 }
 
-                // 3. Страховка выхода на сушу: если заплыли на отмель и уперлись в берег, пытаемся выпрыгнуть
-                if (this.villager.horizontalCollision) {
-                    this.villager.jumpControl.jump()
-                }
-
-                // 4. Вычисление направления к цели пути
+                // 3. Вычисление направления к цели пути
                 if (this.operation != Operation.MOVE_TO || this.villager.navigation.isDone()) {
                     this.villager.speed = 0.0F
                     return
@@ -833,9 +833,9 @@ class HumanoidVillager(
 
                     // Применяем реалистичные векторы движения к дельте
                     this.villager.deltaMovement = this.villager.deltaMovement.add(
-                        nx * newSpeed * 0.025, // Комфортное горизонтальное ускорение
-                        ny * newSpeed * 0.035, // Сбалансированный вертикальный импульс для ныряния и всплытия
-                        nz * newSpeed * 0.025
+                        nx * newSpeed * 0.045, // ИСПРАВЛЕНО: Увеличено с 0.025 до 0.045 для более бодрого плавания
+                        ny * newSpeed * 0.055, // ИСПРАВЛЕНО: Увеличено с 0.035 до 0.055 для лучшего выныривания
+                        nz * newSpeed * 0.045
                     )
                 }
             } else {
