@@ -337,7 +337,9 @@ class ConstructionBehavior(
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
         val prof = bukkitVillager.profession
 
-        if (prof == org.bukkit.entity.Villager.Profession.FARMER) {
+        // FIXED: Forbidden miners (TOOLSMITH) and farmers (FARMER) from participating in building tasks
+        if (prof == org.bukkit.entity.Villager.Profession.FARMER ||
+            prof == org.bukkit.entity.Villager.Profession.TOOLSMITH) {
             return false
         }
 

@@ -9,7 +9,9 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType
 import com.github.retrooper.packetevents.wrapper.play.client.WrapperPlayClientChatMessage
 import net.md_5.bungee.api.ChatMessageType
 import net.md_5.bungee.api.chat.TextComponent
+import org.bukkit.NamespacedKey
 import org.bukkit.Sound
+import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
@@ -20,6 +22,7 @@ import org.bukkit.event.player.PlayerDropItemEvent
 import org.bukkit.inventory.EquipmentSlot
 import org.bukkit.inventory.Inventory
 import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataType
 import org.bukkit.scheduler.BukkitTask
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.sendFormattedMessage
@@ -31,6 +34,7 @@ import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
+import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
 import vx.sv.persistent.LivingEntityExtend.professionLevelName
@@ -180,7 +184,15 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         val activeEffects  = villager.activePotionEffects.map { it.type.toString() }.toString()
 
         val currentSeason  = VivaldiHook.getCurrentSeasonName() ?: "Unknown"
-        val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
+
+        // Map Toolsmith to Miner or Builder if active task is assigned
+        val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager
+        val isBuilding = nmsVillager?.activeBuildJob != null && nmsVillager.assignedBlock != null
+        val baseProf = villager.profession.key.key.lowercase()
+        val isMiner = villager.persistentDataContainer.has(NamespacedKey(plugin, "is_miner"), PersistentDataType.BYTE)
+
+        val customProfession = if (isBuilding) "builder" else if (baseProf == "toolsmith" && isMiner) "miner" else baseProf
+        val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else customProfession
 
         val placeholders = mapOf(
             "playerName"         to player.name,
@@ -244,7 +256,14 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
 
         val currentSeason  = VivaldiHook.getCurrentSeasonName() ?: "Unknown"
 
-        val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else villager.profession.key.key
+        // Map Toolsmith to Miner or Builder if active task is assigned
+        val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager
+        val isBuilding = nmsVillager?.activeBuildJob != null && nmsVillager.assignedBlock != null
+        val baseProf = villager.profession.key.key.lowercase()
+        val isMiner = villager.persistentDataContainer.has(NamespacedKey(plugin, "is_miner"), PersistentDataType.BYTE)
+
+        val customProfession = if (isBuilding) "builder" else if (baseProf == "toolsmith" && isMiner) "miner" else baseProf
+        val actualProfession = if (villager.isSettlementLeader()) villager.race.leaderTitle else customProfession
 
         val placeholders = mapOf(
             "playerName"         to player.name,
@@ -286,14 +305,6 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
             }
         }
 
-    }
-
-    private enum class Impression(val score: Int) {
-        DISASTROUS(-100), TERRIBLE(-25), BAD(-10), POOR(-5), MEDIOCRE(-1), NEUTRAL(0), GOOD(5), GREAT(10), EXCELLENT(25), AMAZING(50), PERFECT(100);
-    }
-
-    private enum class Directive {
-        NONE, OPEN_TRADE_MENU, INTERRUPT_CONVERSATION, PUNCH, KILL
     }
 
     private fun handleGiftReaction(player: Player, entity: Villager, gift: ItemStack, reaction: NPCGiftReaction) {
@@ -419,6 +430,14 @@ class DialogueSession(val player: Player, val entity: Villager) : Listener, Pack
         plugin.server.scheduler.runTaskLater(plugin, { _ ->
             readyToSend = true
         }, 200L)
+    }
+
+    private enum class Impression(val score: Int) {
+        DISASTROUS(-100), TERRIBLE(-25), BAD(-10), POOR(-5), MEDIOCRE(-1), NEUTRAL(0), GOOD(5), GREAT(10), EXCELLENT(25), AMAZING(50), PERFECT(100);
+    }
+
+    private enum class Directive {
+        NONE, OPEN_TRADE_MENU, INTERRUPT_CONVERSATION, PUNCH, KILL
     }
 
     companion object {

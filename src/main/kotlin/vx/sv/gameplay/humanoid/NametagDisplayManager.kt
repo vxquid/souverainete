@@ -162,6 +162,7 @@ class NametagDisplayManager : Listener {
 
     companion object {
         val RAIDER_KEY = NamespacedKey(plugin, "is_raider")
+        val MINER_KEY = NamespacedKey(plugin, "is_miner")
     }
 
     @EventHandler
@@ -234,11 +235,13 @@ class NametagDisplayManager : Listener {
                             val isRaider = npc.persistentDataContainer.has(RAIDER_KEY, PersistentDataType.BYTE)
                             val settlementData = npc.settlement?.data
 
-                            // УЛУЧШЕНИЕ: Заменяем профессию на "Builder" только если у жителя есть задача И он физически выполняет её (работает с блоком)
                             val nmsVillager = (npc as? CraftVillager)?.handle as? HumanoidVillager
                             val isBuilding = nmsVillager?.activeBuildJob != null && nmsVillager.assignedBlock != null
 
-                            val profName = if (isBuilding) "builder" else npc.profession.key.key.lowercase()
+                            // FIXED: Map 'toolsmith' to 'miner' ONLY if the villager has the 'is_miner' PDC tag (works at the mine)
+                            val baseProf = npc.profession.key.key.lowercase()
+                            val isMiner = npc.persistentDataContainer.has(MINER_KEY, PersistentDataType.BYTE)
+                            val profName = if (isBuilding) "builder" else if (baseProf == "toolsmith" && isMiner) "miner" else baseProf
                             val customProf = if (npc.isSettlementLeader()) npc.race.leaderTitle else null
 
                             NpcSnapshot(
@@ -252,7 +255,7 @@ class NametagDisplayManager : Listener {
                                 isRaider = isRaider,
                                 settlementName = settlementData?.settlementName,
                                 health = npc.health,
-                                maxHealth = npc.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0, // Заменено на нативный Bukkit API
+                                maxHealth = npc.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0,
                                 hungerValue = npc.hunger.toInt(),
                                 partyLeaderUuid = plugin.gameplayManager.partyManager.getLeaderUUID(npc),
                                 randomYOffset = (npc.uniqueId.hashCode() % 16) / 100f, // Adds slight variance to prevent z-fighting
@@ -509,12 +512,13 @@ class NametagDisplayManager : Listener {
             else -> {
                 when (snap.professionName) {
                     "armorer", "weaponsmith", "toolsmith", "guard" -> Color.fromARGB(targetAlpha, 80, 85, 95)
+                    "miner" -> Color.fromARGB(targetAlpha, 70, 70, 70) // Slate gray/charcoal background for active miners
                     "cleric", "librarian", "mage" -> Color.fromARGB(targetAlpha, 100, 40, 140)
                     "farmer", "shepherd", "fisherman", "fletcher" -> Color.fromARGB(targetAlpha, 80, 120, 40)
                     "butcher", "leatherworker" -> Color.fromARGB(targetAlpha, 130, 60, 40)
                     "cartographer" -> Color.fromARGB(targetAlpha, 180, 140, 70)
                     "mason" -> Color.fromARGB(targetAlpha, 90, 100, 110)
-                    "builder" -> Color.fromARGB(targetAlpha, 210, 105, 30) // Уникальный цвет фона для Builder
+                    "builder" -> Color.fromARGB(targetAlpha, 210, 105, 30)
                     "nitwit", "none" -> Color.fromARGB(targetAlpha, 100, 130, 80)
                     else -> Color.fromARGB(targetAlpha, configColor[1], configColor[2], configColor[3])
                 }

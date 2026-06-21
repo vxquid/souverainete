@@ -12,6 +12,7 @@ import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.world.WorldLoadEvent
+import org.bukkit.event.world.WorldSaveEvent
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
@@ -21,10 +22,14 @@ import vx.sv.config.lib.ConfigurationManager
 import vx.sv.config.lib.GameplayConfiguration
 import vx.sv.config.lib.TranslationManager
 import vx.sv.gameplay.GameplayManager
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
 import vx.sv.gameplay.trade.ScoreCalculator
-import vx.sv.nms.v1_21_R7.entity.ai.construct.*
+import vx.sv.nms.v1_21_R7.entity.ai.construct.BuilderSafetyListener
+import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
+import vx.sv.nms.v1_21_R7.entity.ai.construct.VillageGenerationListener
+import vx.sv.nms.v1_21_R7.entity.ai.construct.WoodFarmManager
 import vx.sv.serialization.ItemStackSerializer
 import vx.sv.serialization.LocationSerializer
 import vx.sv.serialization.UUIDSerializer
@@ -178,12 +183,21 @@ class Souverainete : JavaPlugin(), Listener {
             // Register GUI listener
             server.pluginManager.registerEvents(SettingsGUIListener(), this)
 
-            // build test
-            server.pluginManager.registerEvents(BuildTestListener(), this)
-            server.pluginManager.registerEvents(BuildSaveListener(), this)
+            // build save and listeners
             server.pluginManager.registerEvents(WoodFarmManager(), this)
             server.pluginManager.registerEvents(BuilderSafetyListener(), this)
         }
+    }
+
+    @EventHandler
+    fun onWorldSave(event: WorldSaveEvent) {
+        val world = event.world
+
+        // 1. Сохраняем все 3D-данные планировщика (разметку зданий, очереди задач и активные сессии)
+        SettlementPlanner.saveBuildingsToWorld(world)
+
+        // 2. Сохраняем основные данные поселений (жителей, репутацию, дипломатию)
+        SettlementManager.saveSettlements(world)
     }
 
     @EventHandler

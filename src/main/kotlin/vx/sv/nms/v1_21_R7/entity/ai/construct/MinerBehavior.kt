@@ -10,11 +10,14 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
 import org.bukkit.Material
+import org.bukkit.NamespacedKey
 import org.bukkit.Particle
 import org.bukkit.Sound
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
+import org.bukkit.persistence.PersistentDataType
+import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import kotlin.math.atan2
@@ -57,9 +60,23 @@ class MinerBehavior(
         val tablePos = SettlementPlanner.getWorkstationFor(villager)
 
         if (tablePos == null) {
+            // Remove the miner PDC tag if the villager has lost their workstation or structure
+            val bukkitVillager = villager.bukkitEntity as? Villager
+            if (bukkitVillager != null) {
+                bukkitVillager.persistentDataContainer.remove(NamespacedKey(plugin, "is_miner"))
+            }
             val targetPos = BlockPos(center.blockX, center.blockY, center.blockZ)
             villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 3))
             return
+        }
+
+        // Dynamically assign the miner PDC tag if they are active at the mine workstation
+        val bukkitVillager = villager.bukkitEntity as? Villager
+        if (bukkitVillager != null) {
+            val minerKey = NamespacedKey(plugin, "is_miner")
+            if (!bukkitVillager.persistentDataContainer.has(minerKey, PersistentDataType.BYTE)) {
+                bukkitVillager.persistentDataContainer.set(minerKey, PersistentDataType.BYTE, 1.toByte())
+            }
         }
 
         // ИСПРАВЛЕНО: Умный поиск камня (с учетом того, что шахта могла быть повернута при спавне)
@@ -144,7 +161,6 @@ class MinerBehavior(
                     else -> 1 + world.random.nextInt(3)
                 }
 
-                // ИСПРАВЛЕНО: Прямое сложение в склад деревни (экономия TPS на физических предметах)
                 val virtualInv = settlement.villageInventory
                 val copy = ItemStack(dropMaterial, amount)
                 var remaining = copy.amount

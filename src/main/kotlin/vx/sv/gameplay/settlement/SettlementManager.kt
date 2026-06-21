@@ -1,9 +1,6 @@
 package vx.sv.gameplay.settlement
 
 import com.google.gson.reflect.TypeToken
-import net.kyori.adventure.bossbar.BossBar
-import net.kyori.adventure.text.Component
-import net.kyori.adventure.text.format.NamedTextColor
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.*
 import org.bukkit.block.Bell
@@ -27,18 +24,14 @@ import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
 import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
-import vx.sv.nms.v1_21_R7.entity.ai.construct.VanillaBuildingType
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ConcurrentHashMap
 
 class SettlementManager : Listener {
 
     private val config = plugin.gameplayManager.config.settlement
     private val repConfig = plugin.gameplayManager.config.reputation
-
-    private val buildingBossBars = ConcurrentHashMap<UUID, BossBar>()
 
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
@@ -102,7 +95,6 @@ class SettlementManager : Listener {
             remaining -= toAdd
         }
 
-        villager.world.playSound(villager.location, Sound.ENTITY_ITEM_PICKUP, 1.0f, 1.0f)
         saveSettlements(settlement.world)
     }
 
@@ -150,28 +142,7 @@ class SettlementManager : Listener {
             }
 
             sendReputationActionBar(player, activeSettlement)
-
-            val buildings = SettlementPlanner.buildings[activeSettlement.data.id] ?: emptyList()
-            val currentBuilding = buildings.find { it.box.contains(playerLocationVector) }
-
-            if (currentBuilding != null) {
-                val bar = buildingBossBars.getOrPut(player.uniqueId) {
-                    val newBar = BossBar.bossBar(Component.empty(), 1.0f, BossBar.Color.BLUE, BossBar.Overlay.PROGRESS)
-                    player.showBossBar(newBar)
-                    newBar
-                }
-
-                val buildingEnum = VanillaBuildingType.byTypeName(currentBuilding.type)
-                val displayName = buildingEnum?.displayName ?: currentBuilding.type.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
-
-                bar.name(Component.text("🏛 $displayName", NamedTextColor.AQUA))
-            } else {
-                buildingBossBars.remove(player.uniqueId)?.let { player.hideBossBar(it) }
-            }
-
         } else {
-            buildingBossBars.remove(player.uniqueId)?.let { player.hideBossBar(it) }
-
             if (lastSettlementName != null) {
                 val leavingName = currentWorldSettlements.find { it.data.settlementName == lastSettlementName }?.data?.settlementName
                     ?: lastSettlementName
@@ -227,11 +198,9 @@ class SettlementManager : Listener {
                     val planner = SettlementPlanner(settlement)
                     val success = planner.planNextPriorityBuilding()
                     if (success) {
-                        plugin.logger.info("[Souverainete] Поселение ${settlement.data.settlementName} расширилось и запланировало новое здание!")
+                        plugin.logger.info("Settlement ${settlement.data.settlementName} expanded and planned a new building!")
                         saveSettlements(world)
                     }
-
-                    // ИСПРАВЛЕНО: Полностью удален весь блок форсированной привязки профессий (пастухов, мясников, фермеров)
                 }
             }
 
