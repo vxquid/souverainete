@@ -5,7 +5,6 @@ import net.minecraft.core.BlockPos
 import org.bukkit.*
 import org.bukkit.block.structure.StructureRotation
 import org.bukkit.craftbukkit.entity.CraftVillager
-import org.bukkit.entity.BlockDisplay
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.gson
@@ -63,7 +62,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val settlementRoads = ConcurrentHashMap<UUID, MutableSet<BlockPos>>()
 
         private val worldBuildingsKey = NamespacedKey(plugin, "settlement_buildings_data")
-        private val buildingDisplays = ConcurrentHashMap<String, BlockDisplay>()
         private val planningCooldowns = ConcurrentHashMap<UUID, Long>()
 
         private val workstationCache = ConcurrentHashMap<String, BlockPos>()
@@ -124,7 +122,7 @@ class SettlementPlanner(val settlement: Settlement) {
                             val localX = x and 15
                             val localZ = z and 15
 
-                            // ИСПРАВЛЕНО: Сканируем на 3 блока ниже коробки, чтобы гарантированно охватить старые шахты в сохранениях!
+                            // FIXED: Scan 3 blocks below the box to guarantee coverage of old mines in saves!
                             val searchMinY = box.minY.toInt() - 3
                             val searchMaxY = box.maxY.toInt()
                             for (y in searchMinY..searchMaxY) {
@@ -143,67 +141,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 })
             }
             return null
-        }
-
-        init {
-            Bukkit.getScheduler().runTaskTimer(plugin, Runnable {
-                val spyglassPlayers = Bukkit.getOnlinePlayers().filter {
-                    it.inventory.itemInMainHand.type == Material.SPYGLASS ||
-                            it.inventory.itemInOffHand.type == Material.SPYGLASS
-                }
-
-                if (spyglassPlayers.isEmpty()) {
-                    buildingDisplays.values.forEach { it.remove() }
-                    buildingDisplays.clear()
-                    return@Runnable
-                }
-
-                val handledKeys = mutableSetOf<String>()
-
-                spyglassPlayers.forEach { player ->
-                    val playerLoc = player.location
-                    val worldSettlements = SettlementManager.settlements[player.world] ?: return@forEach
-
-                    buildings.forEach { (settlementId, records) ->
-                        val currentSettlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
-
-                        if (currentSettlement.world == player.world && currentSettlement.data.center.distanceSquared(playerLoc) <= 10000.0) {
-                            records.forEach { record ->
-                                val key = "${settlementId}_${record.jobId}"
-                                handledKeys.add(key)
-
-                                val activeList = activeJobs[settlementId] ?: emptyList()
-                                val isActive = activeList.any { it.jobId == record.jobId }
-                                val targetMaterial = if (isActive) Material.LIME_STAINED_GLASS else Material.LIGHT_GRAY_STAINED_GLASS
-
-                                var display = buildingDisplays[key]
-                                if (display == null || display.isDead) {
-                                    display = player.world.spawn(Location(player.world, record.box.minX, record.box.minY, record.box.minZ), BlockDisplay::class.java) {
-                                        it.brightness = org.bukkit.entity.Display.Brightness(15, 15)
-                                        it.block = Bukkit.createBlockData(targetMaterial)
-                                        try { it.teleportDuration = 1 } catch (_: Exception) {}
-                                    }
-                                    buildingDisplays[key] = display
-                                } else if (display.block.material != targetMaterial) {
-                                    display.block = Bukkit.createBlockData(targetMaterial)
-                                }
-
-                                val transform = display.transformation
-                                val w = (record.box.maxX - record.box.minX).toFloat()
-                                val h = (record.box.maxY - record.box.minY).toFloat()
-                                val l = (record.box.maxZ - record.box.minZ).toFloat()
-
-                                transform.scale.set(w, h, l)
-                                display.transformation = transform
-                                display.teleport(Location(player.world, record.box.minX, record.box.minY, record.box.minZ))
-                            }
-                        }
-                    }
-                }
-
-                val keysToRemove = buildingDisplays.keys - handledKeys
-                keysToRemove.forEach { buildingDisplays.remove(it)?.remove() }
-            }, 0L, 10L)
         }
 
         fun getActiveOrNextJob(settlement: Settlement): SchematicBuildJob? {
@@ -432,9 +369,9 @@ class SettlementPlanner(val settlement: Settlement) {
                         queue.offer(deserializeJob(world, jobSave))
                     }
                 }
-                plugin.logger.info("[SettlementPlanner] Успешно загружено зданий из PDC мира: ${buildings.values.sumOf { it.size }}")
+                plugin.logger.info("[SettlementPlanner] Successfully loaded buildings from world PDC: ${buildings.values.sumOf { it.size }}")
             } catch (e: Exception) {
-                plugin.logger.severe("[SettlementPlanner] Ошибка при загрузке зданий из PDC:")
+                plugin.logger.severe("[SettlementPlanner] Error loading buildings from PDC:")
                 e.printStackTrace()
             }
         }
@@ -548,7 +485,8 @@ class SettlementPlanner(val settlement: Settlement) {
         val gameTime = world.gameTime
         val lastFailed = planningCooldowns[settlementId] ?: 0L
 
-        if (gameTime - lastFailed < 6000L) {
+        // FIXED: Planning cooldown reduced from 5 minutes (6000L) to 1 minute (1200L) for a faster layout tick
+        if (gameTime - lastFailed < 1200L) {
             return false
         }
 
@@ -827,6 +765,11 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 if (!pathValid) continue
 
+                val rotJigsaw = rotateCoords(entrancePos, bestRotation, rawWidth, rawLength)
+                val absEntranceX = cx - width / 2 + rotJigsaw.x
+                val absEntranceZ = cz - length / 2 + rotJigsaw.z
+                val entranceGroundY = snapshotGetHighestGroundYAt(snapshots, world, absEntranceX, absEntranceZ)
+
                 val averageY = if (countY > 0) Math.round(sumY.toDouble() / countY).toInt() else center.blockY
                 val baseY = averageY
 
@@ -843,9 +786,18 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
                 }
 
-                val finalBaseY = if (excavationCount.toDouble() / totalArea > 0.30) baseY + 1 else baseY
+                val tempBaseY = if (excavationCount.toDouble() / totalArea > 0.30) baseY + 1 else baseY
 
-                // ИСПРАВЛЕНО: Для шахты увеличиваем BoundingBox вниз до Y-5, чтобы включить в зону кэша рабочую станцию
+                // FIXED: Adjust the structure's base height so that the entrance jigsaw/door block
+                // sits either exactly on ground level (entranceGroundY) or +1 above (entranceGroundY + 1).
+                val currentEntranceY = tempBaseY + rotJigsaw.y
+                val finalBaseY = when {
+                    currentEntranceY > entranceGroundY + 1 -> entranceGroundY + 1 - rotJigsaw.y
+                    currentEntranceY < entranceGroundY -> entranceGroundY - rotJigsaw.y
+                    else -> tempBaseY
+                }
+
+                // FIXED: For the mine, expand the BoundingBox downward to Y-5 to include the workstation in the cache zone
                 val boxMinY = if (type == VanillaBuildingType.MINE) finalBaseY - 5 else finalBaseY - 2
 
                 val minX = cx - width / 2
@@ -1159,6 +1111,6 @@ fun Settlement.expandTerritory(amount: Double) {
         val newRadius = (territory.maxX - center.x) + amount
         territory = BoundingBox.of(center, newRadius, 128.0, newRadius)
     } catch (e: Exception) {
-        plugin.logger.warning("Не удалось расширить границу поселения: ${e.message}")
+        plugin.logger.warning("Failed to expand settlement boundary: ${e.message}")
     }
 }
