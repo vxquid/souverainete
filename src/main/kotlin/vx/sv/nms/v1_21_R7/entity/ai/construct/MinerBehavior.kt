@@ -18,7 +18,6 @@ import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import kotlin.math.atan2
 import kotlin.math.sqrt
@@ -56,7 +55,7 @@ class MinerBehavior(
         val bukkitWorld = world.world
         val npcLoc = villager.bukkitEntity.location
 
-        // Мгновенное чтение рабочего стола из кэша
+        // Instant workstation cache read
         val tablePos = SettlementPlanner.getWorkstationFor(villager)
 
         if (tablePos == null) {
@@ -79,7 +78,7 @@ class MinerBehavior(
             }
         }
 
-        // ИСПРАВЛЕНО: Умный поиск камня (с учетом того, что шахта могла быть повернута при спавне)
+        // FIXED: Smart search for stone (taking into account that the mine could be rotated upon spawning)
         var stonePos: BlockPos? = null
         val adjacentOffsets = listOf(BlockPos(1, 0, 0), BlockPos(-1, 0, 0), BlockPos(0, 0, 1), BlockPos(0, 0, -1))
 
@@ -91,7 +90,7 @@ class MinerBehavior(
             }
         }
 
-        // Если камня нет (например, только что сломали), ищем блок воздуха рядом со столом
+        // If there is no stone (e.g. just broken), look for an air block next to the table
         if (stonePos == null) {
             for (offset in adjacentOffsets) {
                 val bp = BlockPos(tablePos.x + offset.x, tablePos.y, tablePos.z + offset.z)
@@ -102,7 +101,7 @@ class MinerBehavior(
             }
         }
 
-        // Страховочный фоллбек
+        // Safety fallback
         if (stonePos == null) {
             stonePos = BlockPos(tablePos.x, tablePos.y, tablePos.z + 1)
         }
@@ -161,6 +160,7 @@ class MinerBehavior(
                     else -> 1 + world.random.nextInt(3)
                 }
 
+                // FIXED: Direct adding to the village inventory (saving TPS on physical items)
                 val virtualInv = settlement.villageInventory
                 val copy = ItemStack(dropMaterial, amount)
                 var remaining = copy.amount
@@ -184,7 +184,8 @@ class MinerBehavior(
                     virtualInv.add(newCopy)
                     remaining -= toAdd
                 }
-                SettlementManager.saveSettlements(bukkitWorld)
+                // FIXED: saveSettlements(bukkitWorld) call removed.
+                // Inventory mutations remain in RAM and are autosaved securely.
             }
         } else {
             val targetPos = BlockPos(stonePos.x, stonePos.y, stonePos.z)

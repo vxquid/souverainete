@@ -47,6 +47,7 @@ import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.event.VillagerKillTargetEvent
+import vx.sv.gameplay.humanoid.FarmerBehavior
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.nms.EntityProvider.Humanoid
@@ -255,32 +256,35 @@ class HumanoidVillager(
         }
 
         // === AUTOMATIC ITEM PICKUP FROM THE GROUND ===
-        val bukkitNpc = this.bukkitEntity as? org.bukkit.entity.Villager ?: return
-        if (this.settlement == null) return // Pull items only if the villager is part of a settlement
+        // TPS OPTIMIZATION: Throttling to run once every 10 ticks (0.5s) instead of every tick,
+        // and replacing the extremely heavy world-wide getEntitiesByClass scan with a highly optimized local getNearbyEntities spatial query.
+        if (this.tickCount % 10 == 0) {
+            val bukkitNpc = this.bukkitEntity as? org.bukkit.entity.Villager
+            if (bukkitNpc != null && this.settlement != null) {
+                val currentLoc = bukkitNpc.location
+                val nearbyItems = bukkitNpc.getNearbyEntities(4.0, 4.0, 4.0)
+                    .filterIsInstance<org.bukkit.entity.Item>()
+                    .filter { it.isValid && !it.isDead }
 
-        val currentLoc = bukkitNpc.location
-        val bukkitWorld = bukkitNpc.world
-
-        val nearbyItems = bukkitWorld.getEntitiesByClass(org.bukkit.entity.Item::class.java).filter { item ->
-            item.isValid && !item.isDead && item.location.distanceSquared(currentLoc) <= 16.0 // within 4 blocks
-        }
-        for (item in nearbyItems) {
-            val itemLoc = item.location
-            val distanceSq = itemLoc.distanceSquared(currentLoc)
-            if (distanceSq <= 2.25) { // 1.5 blocks — critical proximity
-                val pickupEvent = org.bukkit.event.entity.EntityPickupItemEvent(
-                    bukkitNpc,
-                    item,
-                    0
-                )
-                Bukkit.getPluginManager().callEvent(pickupEvent)
-                if (pickupEvent.isCancelled) {
-                    bukkitNpc.playPickupItemAnimation(item, 1)
+                for (item in nearbyItems) {
+                    val itemLoc = item.location
+                    val distanceSq = itemLoc.distanceSquared(currentLoc)
+                    if (distanceSq <= 2.25) { // 1.5 blocks — critical proximity
+                        val pickupEvent = org.bukkit.event.entity.EntityPickupItemEvent(
+                            bukkitNpc,
+                            item,
+                            0
+                        )
+                        Bukkit.getPluginManager().callEvent(pickupEvent)
+                        if (pickupEvent.isCancelled) {
+                            bukkitNpc.playPickupItemAnimation(item, 1)
+                        }
+                    } else {
+                        // Pull the item towards the villager with a gentle velocity vector
+                        val vector = currentLoc.toVector().subtract(itemLoc.toVector()).normalize().multiply(0.2)
+                        item.velocity = vector
+                    }
                 }
-            } else {
-                // Pull the item towards the villager with a slight acceleration in the air
-                val vector = currentLoc.toVector().subtract(itemLoc.toVector()).normalize().multiply(0.2)
-                item.velocity = vector
             }
         }
     }
@@ -289,7 +293,7 @@ class HumanoidVillager(
         val startPos = this.blockPosition()
         val level = this.level()
 
-        // 8 directional vectors
+        // 8-directional search
         val directions = listOf(
             0 to 1, 0 to -1, 1 to 0, -1 to 0,
             1 to 1, 1 to -1, -1 to 1, -1 to -1

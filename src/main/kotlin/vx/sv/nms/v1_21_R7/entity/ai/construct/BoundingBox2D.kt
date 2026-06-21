@@ -631,7 +631,7 @@ class SettlementPlanner(val settlement: Settlement) {
                     var bestRotation = StructureRotation.NONE
                     var minJigsawDistSq = Double.MAX_VALUE
 
-                    for (rot in StructureRotation.entries) {
+                    for (rot in StructureRotation.values()) {
                         val rotJigsaw = rotateCoords(entrancePos, rot, rawWidth, rawLength)
                         val rotWidth = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
                         val rotLength = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
@@ -948,11 +948,10 @@ class SettlementPlanner(val settlement: Settlement) {
         val halfW = width / 2 + 1
         val halfL = length / 2 + 1
 
-        var currentRoadJob = SchematicBuildJob(world)
-        var stepsInSegment = 0
-        val maxStepsPerSegment = 8
+        // 6. Build the 2D footprint of the road to determine edges accurately
+        val footprint2D = mutableMapOf<Pair<Int, Int>, Int>()
+        val isWaterMap = mutableMapOf<Pair<Int, Int>, Boolean>()
 
-        // 6. Iterate and build the smoothed road segments
         for (i in pathPoints.indices) {
             val pt = pathPoints[i]
             val pathX = pt.x
@@ -971,65 +970,91 @@ class SettlementPlanner(val settlement: Settlement) {
                 for (wz in zMin..zMax) {
                     val px = pathX + wx
                     val pz = pathZ + wz
+                    val key = Pair(px, pz)
 
-                    if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
-                    if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
-
-                    val isInsideAnyBuilding = records.any { record ->
-                        val box = record.box
-                        if (record.jobId == jobId) {
-                            px >= box.minX && px < box.maxX && pz >= box.minZ && pz < box.maxZ
-                        } else {
-                            px >= (box.minX - 1.5) && px <= (box.maxX + 1.5) &&
-                                    pz >= (box.minZ - 1.5) && pz <= (box.maxZ + 1.5)
-                        }
+                    // Water path overwrites dirt path if they overlap at the shore,
+                    // to ensure the bridge extends fully to the land.
+                    if (isWaterAtCenter || !isWaterMap.getOrDefault(key, false)) {
+                        footprint2D[key] = centerRoadY
+                        isWaterMap[key] = isWaterAtCenter
                     }
-                    if (isInsideAnyBuilding) continue
+                }
+            }
+        }
 
-                    val naturalBlockY = getHighestGroundYAt(world, px, pz)
-                    val currentBlock = world.getBlockAt(px, centerRoadY, pz)
+        var currentRoadJob = SchematicBuildJob(world)
+        var blocksInJob = 0
+        val maxBlocksPerJob = 64
 
-                    val clearStart = centerRoadY + 1
-                    val clearEnd = maxOf(naturalBlockY, centerRoadY + 3)
-                    for (y in clearStart..clearEnd) {
-                        currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
+        // 7. Iterate and build the smoothed road segments using the footprint
+        for ((key, py) in footprint2D) {
+            val px = key.first
+            val pz = key.second
+            val isWaterAtCenter = isWaterMap[key] ?: false
+
+            if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
+            if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
+
+            val isInsideAnyBuilding = records.any { record ->
+                val box = record.box
+                if (record.jobId == jobId) {
+                    px >= box.minX && px < box.maxX && pz >= box.minZ && pz < box.maxZ
+                } else {
+                    px >= (box.minX - 1.5) && px <= (box.maxX + 1.5) &&
+                            pz >= (box.minZ - 1.5) && pz <= (box.maxZ + 1.5)
+                }
+            }
+            if (isInsideAnyBuilding) continue
+
+            val naturalBlockY = getHighestGroundYAt(world, px, pz)
+            val currentBlock = world.getBlockAt(px, py, pz)
+
+            val clearStart = py + 1
+            val clearEnd = maxOf(naturalBlockY, py + 3)
+            for (y in clearStart..clearEnd) {
+                currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
+            }
+
+            if (isWaterAtCenter) {
+                var isEdge = false
+                val neighbors = arrayOf(Pair(px + 1, pz), Pair(px - 1, pz), Pair(px, pz + 1), Pair(px, pz - 1))
+                for (n in neighbors) {
+                    if (!footprint2D.containsKey(n)) {
+                        isEdge = true
+                        break
                     }
+                }
 
-                    if (isWaterAtCenter) {
-                        val isEdge = if (isMovingX) abs(wz) == 2 else abs(wx) == 2
+                if (isEdge) {
+                    currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_LOG.createBlockData(), isRoad = true)
+                    currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                } else {
+                    currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
+                    val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
+                    slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
+                    currentRoadJob.addBlock(BlockPos(px, py - 1, pz), slabData, isRoad = true)
+                }
+            } else {
+                for (y in naturalBlockY until py) {
+                    currentRoadJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
+                }
 
-                        if (isEdge) {
-                            currentRoadJob.addBlock(BlockPos(px, centerRoadY, pz), Material.OAK_LOG.createBlockData(), isRoad = true)
-                            currentRoadJob.addBlock(BlockPos(px, centerRoadY + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
-                        } else {
-                            currentRoadJob.addBlock(BlockPos(px, centerRoadY, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
-                            val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
-                            slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
-                            currentRoadJob.addBlock(BlockPos(px, centerRoadY - 1, pz), slabData, isRoad = true)
-                        }
-                    } else {
-                        for (y in naturalBlockY until centerRoadY) {
-                            currentRoadJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
-                        }
-
-                        if (currentBlock.isLiquid) {
-                            currentRoadJob.addBlock(BlockPos(px, centerRoadY, pz), cobbleData, isRoad = true)
-                        } else {
-                            currentRoadJob.addBlock(BlockPos(px, centerRoadY, pz), roadBlockData, isRoad = true)
-                        }
-                    }
-
-                    roads.add(BlockPos(px, centerRoadY, pz))
+                if (currentBlock.isLiquid) {
+                    currentRoadJob.addBlock(BlockPos(px, py, pz), cobbleData, isRoad = true)
+                } else {
+                    currentRoadJob.addBlock(BlockPos(px, py, pz), roadBlockData, isRoad = true)
                 }
             }
 
-            stepsInSegment++
-            if (stepsInSegment >= maxStepsPerSegment) {
+            roads.add(BlockPos(px, py, pz))
+
+            blocksInJob++
+            if (blocksInJob >= maxBlocksPerJob) {
                 if (currentRoadJob.getBlocks().isNotEmpty()) {
                     jobsList.add(currentRoadJob)
                     currentRoadJob = SchematicBuildJob(world)
                 }
-                stepsInSegment = 0
+                blocksInJob = 0
             }
         }
 

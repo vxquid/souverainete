@@ -95,7 +95,8 @@ class SettlementManager : Listener {
             remaining -= toAdd
         }
 
-        saveSettlements(settlement.world)
+        // FIXED: saveSettlements(settlement.world) call removed.
+        // Data is mutated directly in RAM, saving massive I/O overhead.
     }
 
     fun handleWorldLoad(world: World) {
