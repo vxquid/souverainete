@@ -44,39 +44,63 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
         }
     }
 
-    private fun claimFromList(list: List<BlockToPlace>, npc: HumanoidVillager, npcPos: BlockPos): BlockToPlace? {
-        val obstacles = list.filter {
-            if (it.isPlaced || it.claimedBy != null) return@filter false
-            val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
+    private fun claimFromListOptimized(list: List<BlockToPlace>, npc: HumanoidVillager, npcPos: BlockPos): BlockToPlace? {
+        if (list.isEmpty()) return null
+
+        // ОПТИМИЗАЦИЯ TPS: Мы сканируем только самый нижний незаконченный Y-слой,
+        // вместо тысяч блоков по всей высоте здания.
+        val minY = list.minOf { it.pos.y }
+        val activeLayer = list.filter { it.pos.y == minY }
+
+        val obstacles = mutableListOf<BlockToPlace>()
+        val candidates = mutableListOf<BlockToPlace>()
+
+        for (block in activeLayer) {
+            val currentBlock = world.getBlockAt(block.pos.x, block.pos.y, block.pos.z)
             val currentType = currentBlock.type
 
-            if (currentBlock.isIgnorableObstacle()) return@filter false
-            if (currentType == it.blockData.material) return@filter false
-            if (currentType.isShovelable() && it.blockData.material == Material.DIRT_PATH) return@filter false
+            val isAirCorrect = currentType.isAir && block.blockData.material.isAir
+            val isBlockCorrect = currentBlock.blockData == block.blockData
 
-            if (currentBlock.isLiquid) it.blockData.material.isAir else true
+            // ЛЕНИВОЕ ЗАВЕРШЕНИЕ: Если игрок сам поставил блок, мы мгновенно помечаем его готовым
+            if (isAirCorrect || isBlockCorrect) {
+                block.isPlaced = true
+                continue
+            }
+
+            if (currentBlock.isIgnorableObstacle()) {
+                candidates.add(block)
+                continue
+            }
+            if (currentType.isShovelable() && block.blockData.material == Material.DIRT_PATH) {
+                candidates.add(block)
+                continue
+            }
+            if (currentBlock.isLiquid && block.blockData.material.isAir) {
+                candidates.add(block)
+                continue
+            }
+
+            obstacles.add(block)
         }
 
         if (obstacles.isNotEmpty()) {
-            val maxY = obstacles.maxOf { it.pos.y }
-            val highestObstacles = obstacles.filter { it.pos.y == maxY }
-            val closest = highestObstacles.minByOrNull { it.pos.distSqr(npcPos) }
+            val closest = obstacles.minByOrNull { it.pos.distSqr(npcPos) }
             closest?.claimedBy = npc
             return closest
         }
 
-        val buildCandidates = list.filter { !it.isPlaced && it.claimedBy == null }
-        if (buildCandidates.isEmpty()) return null
+        if (candidates.isNotEmpty()) {
+            val minPriority = candidates.minOf { getPlacementPriority(it.blockData.material) }
+            val priorityBlocks = candidates.filter { getPlacementPriority(it.blockData.material) == minPriority }
+            val closest = priorityBlocks.minByOrNull { it.pos.distSqr(npcPos) }
+            closest?.claimedBy = npc
+            return closest
+        }
 
-        val minY = buildCandidates.minOf { it.pos.y }
-        val lowestYBlocks = buildCandidates.filter { it.pos.y == minY }
-
-        val minPriority = lowestYBlocks.minOf { getPlacementPriority(it.blockData.material) }
-        val priorityBlocks = lowestYBlocks.filter { getPlacementPriority(it.blockData.material) == minPriority }
-
-        val closest = priorityBlocks.minByOrNull { it.pos.distSqr(npcPos) }
-        closest?.claimedBy = npc
-        return closest
+        // Если весь Y-слой уже был построен (игроками или сгенерен), возвращаем null.
+        // В следующем тике ИИ автоматически возьмет в обработку следующий Y-слой выше.
+        return null
     }
 
     fun claimNextBlock(npc: HumanoidVillager): BlockToPlace? {
@@ -84,6 +108,7 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
             val npcPos = npc.blockPosition()
             val blocksList = getBlocks()
 
+            // Сбрасываем зависшие брони от убитых/переназначенных рабочих
             blocksList.forEach { block ->
                 val claimer = block.claimedBy
                 if (claimer != null) {
@@ -93,34 +118,20 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
                 }
             }
 
-            blocksList.filter { !it.isPlaced }.forEach {
-                val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
-                if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
-                    it.isPlaced = true
+            val available = blocksList.filter { !it.isPlaced && it.claimedBy == null }
+            if (available.isEmpty()) return null
 
-                    // ИСПРАВЛЕНО: Сброс зарезервированного блока, если он завершился нативно
-                    val claimer = it.claimedBy
-                    if (claimer != null && claimer.assignedBlock == it) {
-                        claimer.assignedBlock = null
-                        claimer.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-                        claimer.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
-                    }
-                    it.claimedBy = null
-                }
-            }
-
-            val buildingBlocks = blocksList.filter { !it.isRoad }
-            val buildingClaim = claimFromList(buildingBlocks, npc, npcPos)
+            val buildingBlocks = available.filter { !it.isRoad }
+            val buildingClaim = claimFromListOptimized(buildingBlocks, npc, npcPos)
             if (buildingClaim != null) return buildingClaim
 
-            val roadBlocks = blocksList.filter { it.isRoad }
-            return claimFromList(roadBlocks, npc, npcPos)
+            val roadBlocks = available.filter { it.isRoad }
+            return claimFromListOptimized(roadBlocks, npc, npcPos)
         }
     }
 
     fun unclaimBlock(block: BlockToPlace) {
         synchronized(lock) {
-            // ИСПРАВЛЕНО: Отправляем коллбэк претенденту на блок при отмене
             val claimer = block.claimedBy
             if (claimer != null && claimer.assignedBlock == block) {
                 claimer.assignedBlock = null
@@ -134,8 +145,6 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
     fun completeBlock(block: BlockToPlace) {
         synchronized(lock) {
             block.isPlaced = true
-
-            // ИСПРАВЛЕНО: Отправляем коллбэк претенденту на блок при успешном завершении
             val claimer = block.claimedBy
             if (claimer != null && claimer.assignedBlock == block) {
                 claimer.assignedBlock = null
@@ -148,25 +157,9 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
 
     fun isFinished(): Boolean {
         synchronized(lock) {
-            val blocksList = getBlocks()
-
-            blocksList.filter { !it.isPlaced }.forEach {
-                val currentBlock = world.getBlockAt(it.pos.x, it.pos.y, it.pos.z)
-                if ((currentBlock.type.isAir && it.blockData.material.isAir) || currentBlock.blockData == it.blockData) {
-                    it.isPlaced = true
-
-                    // ИСПРАВЛЕНО: Сброс зарезервированного блока при нативном завершении
-                    val claimer = it.claimedBy
-                    if (claimer != null && claimer.assignedBlock == it) {
-                        claimer.assignedBlock = null
-                        claimer.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-                        claimer.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
-                    }
-                    it.claimedBy = null
-                }
-            }
-
-            return blocksList.all { it.isPlaced }
+            // ОПТИМИЗАЦИЯ TPS: Никаких вызовов world.getBlockAt() в этом методе больше нет.
+            // ИИ доверяет кэшированным флагам isPlaced.
+            return getBlocks().all { it.isPlaced }
         }
     }
 }
