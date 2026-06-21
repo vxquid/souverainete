@@ -1025,9 +1025,48 @@ class SettlementPlanner(val settlement: Settlement) {
             jobsList.add(currentRoadJob)
         }
 
+        // Process and rotate structure blocks first to obtain exact footprint coordinates
+        val rawRelativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
+        val isBirchOverride = java.util.Random().nextDouble() < 0.30
+
+        val rotatedBlocks = rawRelativeBlocks.map { relBlock ->
+            val rotPos = rotateCoords(relBlock.relativePos, rotation, rawWidth, rawLength)
+
+            var rotData = relBlock.blockData.clone()
+            rotData.rotate(rotation)
+            rotData = applyStoneVariability(rotData)
+
+            if (isBirchOverride) {
+                val dataStr = rotData.asString
+                if (dataStr.contains("oak") && !dataStr.contains("dark_oak")) {
+                    val birchDataStr = dataStr.replace("oak", "birch")
+                    try {
+                        rotData = Bukkit.createBlockData(birchDataStr)
+                    } catch (_: Exception) {}
+                }
+            }
+            Pair(rotPos, rotData)
+        }
+
+        // 2D Scanline Bounding footprint coordinates
+        val minYMap = mutableMapOf<Pair<Int, Int>, Int>()
+        val maxYMap = mutableMapOf<Pair<Int, Int>, Int>()
+
+        rotatedBlocks.forEach { (pos, _) ->
+            val col = Pair(pos.x, pos.z)
+            val y = pos.y
+
+            minYMap[col] = minOf(minYMap[col] ?: Int.MAX_VALUE, y)
+            maxYMap[col] = maxOf(maxYMap[col] ?: Int.MIN_VALUE, y)
+        }
+
+        val occupiedColumns = minYMap.keys
+
         val materialCounts = mutableMapOf<Material, Int>()
         for (x in 0 until width) {
             for (z in 0 until length) {
+                if (Pair(x, z) !in occupiedColumns) continue
+
                 val absX = cx - width / 2 + x
                 val absZ = cz - length / 2 + z
                 val highest = getHighestGroundYAt(world, absX, absZ)
@@ -1050,47 +1089,39 @@ class SettlementPlanner(val settlement: Settlement) {
 
         for (x in 0 until width) {
             for (z in 0 until length) {
+                val colKey = Pair(x, z)
+                if (colKey !in occupiedColumns) continue
+
                 val absX = cx - width / 2 + x
                 val absZ = cz - length / 2 + z
 
                 val highest = getHighestGroundYAt(world, absX, absZ)
+                val minY = minYMap[colKey] ?: 0
+                val maxY = maxYMap[colKey] ?: 0
 
-                for (y in baseY..baseY + height) {
+                // Excavate only the exact vertical span occupied by structure blocks in this specific column.
+                // This preserves natural terrain under roof eaves, balconies, and outer decorations.
+                val startClearY = baseY + minY
+                val endClearY = baseY + maxY
+                for (y in startClearY..endClearY) {
                     if (y <= highest) {
                         buildJob.addBlock(BlockPos(absX, y, absZ), airData, isRoad = false)
                     }
                 }
 
-                for (y in highest + 1 until baseY) {
-                    val singleFoundationData = applyStoneVariability(foundationBlockData)
-                    buildJob.addBlock(BlockPos(absX, y, absZ), singleFoundationData, isRoad = false)
+                // Place foundation below the structure down to the ground ONLY if the column blocks actually
+                // start at the floor/ground level (minY <= 1). This keeps overhangs and roofs floating naturally.
+                if (minY <= 1) {
+                    for (y in highest + 1 until baseY) {
+                        val singleFoundationData = applyStoneVariability(foundationBlockData)
+                        buildJob.addBlock(BlockPos(absX, y, absZ), singleFoundationData, isRoad = false)
+                    }
                 }
             }
         }
 
-        val rawRelativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
-
-        val isBirchOverride = java.util.Random().nextDouble() < 0.30
-
-        if (rawRelativeBlocks.isNotEmpty()) {
-            rawRelativeBlocks.forEach { relBlock ->
-                val rotPos = rotateCoords(relBlock.relativePos, rotation, rawWidth, rawLength)
-
-                var rotData = relBlock.blockData.clone()
-                rotData.rotate(rotation)
-
-                rotData = applyStoneVariability(rotData)
-
-                if (isBirchOverride) {
-                    val dataStr = rotData.asString
-                    if (dataStr.contains("oak") && !dataStr.contains("dark_oak")) {
-                        val birchDataStr = dataStr.replace("oak", "birch")
-                        try {
-                            rotData = Bukkit.createBlockData(birchDataStr)
-                        } catch (_: Exception) {}
-                    }
-                }
-
+        if (rotatedBlocks.isNotEmpty()) {
+            rotatedBlocks.forEach { (rotPos, rotData) ->
                 val absoluteX = cx - width / 2 + rotPos.x
                 val absoluteY = baseY + rotPos.y
                 val absoluteZ = cz - length / 2 + rotPos.z

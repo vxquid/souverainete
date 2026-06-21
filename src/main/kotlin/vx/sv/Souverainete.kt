@@ -17,6 +17,8 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import vx.sv.ai.ProviderManager
 import vx.sv.command.*
+import vx.sv.config.lib.ConfigurationManager
+import vx.sv.config.lib.GameplayConfiguration
 import vx.sv.config.lib.TranslationManager
 import vx.sv.gameplay.GameplayManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
@@ -37,6 +39,7 @@ class Souverainete : JavaPlugin(), Listener {
 
     lateinit var providerManager: ProviderManager
     lateinit var gameplayManager: GameplayManager
+    lateinit var gameplayConfig:  GameplayConfiguration
     lateinit var commandManager:  PaperCommandManager
     lateinit var translationManager: TranslationManager
 
@@ -76,8 +79,10 @@ class Souverainete : JavaPlugin(), Listener {
         ScoreCalculator.init()
         RainbowColorTicker.init()
         this.providerManager = ProviderManager()
+        this.gameplayConfig = ConfigurationManager.load(this, GameplayConfiguration::class.java)
         this.translationManager = TranslationManager(this, providerManager.client, providerManager.config.language)
         this.server.pluginManager.registerEvents(this, this)
+        this.server.pluginManager.registerEvents(VillageGenerationListener(), this)
 
         // Translate language.yml using cache. Must be async.
         this.server.scheduler.runTaskAsynchronously(this) { _ ->
@@ -85,50 +90,50 @@ class Souverainete : JavaPlugin(), Listener {
             language = translationManager.getTranslated(languageFile)
         }
 
-        // --- УСТАНОВКА МЕТРИК BSTATS ---
+        // --- BSTATS METRICS ---
         val metrics = Metrics(this, 27976)
 
-        // 1. Наиболее используемый ИИ провайдер
+        // 1. AI Provider
         metrics.addCustomChart(Metrics.SimplePie("ai_provider") {
             providerManager.config.providerType.name
         })
 
-        // 2. Используемый язык генерации контента
+        // 2. AI Language
         metrics.addCustomChart(Metrics.SimplePie("ai_language") {
             providerManager.config.language
         })
 
-        // 3. Формат диалогов
+        // 3. Dialogue Format
         metrics.addCustomChart(Metrics.SimplePie("dialogue_format") {
             if (::gameplayManager.isInitialized) gameplayManager.config.dialogue.dialogueFormat.name else "Unknown"
         })
 
-        // 4. Стратегия смерти компаньонов
+        // 4. Party Death Strategy
         metrics.addCustomChart(Metrics.SimplePie("death_strategy") {
             if (::gameplayManager.isInitialized) gameplayManager.config.party.deathHandleStrategy else "Unknown"
         })
 
-        // 5. Статус кастомных скинов
+        // 5. Custom Skin Status
         metrics.addCustomChart(Metrics.SimplePie("humanoid_npcs") {
             if (::gameplayManager.isInitialized) {
                 if (gameplayManager.config.humanoid.humanoidVillagers) "Enabled" else "Disabled"
             } else "Unknown"
         })
 
-        // 6. Статус ванильной торговли
+        // 6. Vanilla Trading Status
         metrics.addCustomChart(Metrics.SimplePie("vanilla_trading") {
             if (::gameplayManager.isInitialized) {
                 if (gameplayManager.config.general.vanillaTrading) "Enabled" else "Disabled"
             } else "Unknown"
         })
 
-        // 7. Общее количество поселений на сервере
+        // 7. Total Settlements Count
         metrics.addCustomChart(Metrics.SingleLineChart("total_settlements") {
             if (::gameplayManager.isInitialized) {
                 settlements.values.sumOf { it.size }
             } else 0
         })
-        // --- КОНЕЦ БЛОКА МЕТРИК ---
+        // --- END OF METRICS ---
 
         // Update checking.
         UpdateChecker(121059).getVersion { remoteVersion ->
@@ -148,8 +153,6 @@ class Souverainete : JavaPlugin(), Listener {
     override fun onDisable() {
         gameplayManager.allowedWorlds.forEach { world ->
             world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.STRING, gson.toJson(settlements[world]?.map { it.data }))
-
-            // ИСПРАВЛЕНО: Безопасно сохраняем всю разметку, очереди и активные сессии планировщика для каждого мира
             SettlementPlanner.saveBuildingsToWorld(world)
         }
         Bukkit.getWorlds().getOrNull(0)?.persistentDataContainer?.set(
@@ -178,7 +181,6 @@ class Souverainete : JavaPlugin(), Listener {
             // build test
             server.pluginManager.registerEvents(BuildTestListener(), this)
             server.pluginManager.registerEvents(BuildSaveListener(), this)
-            server.pluginManager.registerEvents(VillageGenerationListener(), this)
             server.pluginManager.registerEvents(WoodFarmManager(), this)
             server.pluginManager.registerEvents(BuilderSafetyListener(), this)
         }
@@ -195,7 +197,7 @@ class Souverainete : JavaPlugin(), Listener {
             }
         }
 
-        // --- NEW: Settings Welcome Hint ---
+        // --- Settings Welcome Hint ---
         val welcomeMsg = language.getString(
             "info-messages.welcome-settings",
             "§8[Souverainete] §7Server is running Souverainete. Customize your experience using §e/s settings§7."
@@ -214,7 +216,6 @@ class Souverainete : JavaPlugin(), Listener {
     }
 
     companion object {
-
         val premium: Boolean = BuildConfig.IS_PREMIUM
         lateinit var plugin: Souverainete
         lateinit var gson: Gson
@@ -223,5 +224,4 @@ class Souverainete : JavaPlugin(), Listener {
             this.sendMessage(plugin.gameplayManager.config.general.messagePrefix + " " + message)
         }
     }
-
 }

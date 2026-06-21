@@ -7,7 +7,6 @@ import org.bukkit.event.Listener
 import org.bukkit.event.world.WorldLoadEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.config.lib.ConfigurationManager
 import vx.sv.config.lib.GameplayConfiguration
 import vx.sv.gameplay.death.DeathManager
 import vx.sv.gameplay.dialogue.DialogueManager
@@ -30,7 +29,7 @@ import vx.sv.nms.VersionBridge
 
 class GameplayManager(val firstWorld: World) : Listener {
 
-    val config: GameplayConfiguration    = ConfigurationManager.load(plugin, GameplayConfiguration::class.java)
+    val config: GameplayConfiguration    = plugin.gameplayConfig
     val allowedWorlds: MutableSet<World> = mutableSetOf()
 
     val actualQuests = firstWorld.persistentDataContainer.get(NamespacedKey(plugin, "ActualQuests"), PersistentDataType.LONG_ARRAY)?.toMutableList() ?: mutableListOf<Long>().toLongArray().also {
@@ -40,7 +39,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     init {
         plugin.gameplayManager = this
         plugin.server.pluginManager.registerEvents(this, plugin)
-        if (plugin.gameplayManager.config.worlds.allowedWorlds.contains(firstWorld.name)) {
+        if (plugin.gameplayConfig.worlds.allowedWorlds.contains(firstWorld.name)) {
             this.allowedWorlds.add(firstWorld) // Add the first world only if it is allowed in cfg.
         }
     }
@@ -58,7 +57,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     val politicsManager    = PoliticsManager()
     val raidManager        = RaidManager()
     val hungerManager      = HungerManager.also { it.startTicker() }
-    val partyManager       = PartyManager(plugin, plugin.gameplayManager.config)
+    val partyManager       = PartyManager(plugin, plugin.gameplayConfig)
     val partChatManager    = PartyChatManager()
     val deathManager       = DeathManager()
     val versionBridge      = VersionBridge(plugin)
@@ -73,5 +72,4 @@ class GameplayManager(val firstWorld: World) : Listener {
             }
         }
     }
-
 }

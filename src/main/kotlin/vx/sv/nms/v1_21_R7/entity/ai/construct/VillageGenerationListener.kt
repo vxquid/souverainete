@@ -130,12 +130,18 @@ class VillageGenerationListener : Listener {
 
     @EventHandler
     fun onVanillaVillageSpawn(event: AsyncStructureSpawnEvent) {
+        val world = event.world
+
+        // Check if the world is allowed in early config before cancelling generation
+        if (!plugin.gameplayConfig.worlds.allowedWorlds.contains(world.name)) {
+            return
+        }
+
         val structure = event.structure
 
         if (structure.key.key.lowercase().contains("village")) {
             event.isCancelled = true
 
-            val world = event.world
             val boundingBox = event.boundingBox
 
             val centerX = (boundingBox.minX + boundingBox.maxX) / 2
@@ -196,7 +202,7 @@ class VillageGenerationListener : Listener {
                 }
 
                 if (!foundDryLand) {
-                    plugin.logger.info("[Souverainete] Спавн поселения отменен: в зоне генерации пригодная суша отсутствует.")
+                    plugin.logger.info("[Souverainete] Spawn of the settlement is cancelled: suitable land is absent in the generation area.")
                     return@Runnable
                 }
 
@@ -234,15 +240,14 @@ class VillageGenerationListener : Listener {
 
                 spawnVillageAnimals(centerLoc)
 
-                // ИСПРАВЛЕНО: Новый стартовый приоритет постройки структур
-                planner.planBuilding(VanillaBuildingType.FARM)         // еда
-                planner.planBuilding(VanillaBuildingType.WOOD_FARM)    // дерево
-                planner.planBuilding(VanillaBuildingType.MINE)         // шахта
-                planner.planBuilding(VanillaBuildingType.SHEPHERD)     // овчарня
-                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)  // первый маленький дом
-                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)  // второй маленький дом
-                planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)  // первый большой дом
-                planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)  // второй большой дом
+                planner.planBuilding(VanillaBuildingType.FARM)
+                planner.planBuilding(VanillaBuildingType.WOOD_FARM)
+                planner.planBuilding(VanillaBuildingType.MINE)
+                planner.planBuilding(VanillaBuildingType.SHEPHERD)
+                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)
+                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)
+                planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)
+                planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)
 
                 planner.planBuilding(VanillaBuildingType.TOWN_HALL)
                 planner.planMeetingPointAtCenter()
