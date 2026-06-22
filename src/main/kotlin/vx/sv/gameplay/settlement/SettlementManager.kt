@@ -95,8 +95,6 @@ class SettlementManager : Listener {
             remaining -= toAdd
         }
 
-        // FIXED: saveSettlements(settlement.world) call removed.
-        // Data is mutated directly in RAM, saving massive I/O overhead.
     }
 
     fun handleWorldLoad(world: World) {
@@ -199,7 +197,6 @@ class SettlementManager : Listener {
                     val planner = SettlementPlanner(settlement)
                     val success = planner.planNextPriorityBuilding()
                     if (success) {
-                        plugin.logger.info("Settlement ${settlement.data.settlementName} expanded and planned a new building!")
                         saveSettlements(world)
                     }
                 }
