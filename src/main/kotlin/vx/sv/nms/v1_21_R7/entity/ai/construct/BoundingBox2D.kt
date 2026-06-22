@@ -459,6 +459,7 @@ class SettlementPlanner(val settlement: Settlement) {
         val gameTime = world.gameTime
         val lastFailed = planningCooldowns[settlementId] ?: 0L
 
+        // FIXED: Planning cooldown reduced from 5 minutes (6000L) to 1 minute (1200L) for a faster layout tick
         if (gameTime - lastFailed < 1200L) {
             return false
         }
@@ -908,6 +909,17 @@ class SettlementPlanner(val settlement: Settlement) {
             heights[i] = if (isWaterArray[i]) surfaceYArray[i] else naturalYArray[i]
         }
 
+        val isSuspendedArray = BooleanArray(pathPoints.size)
+
+        // Detect canyon/gorge gaps where the natural ground is more than 1.5 blocks below the smoothed path
+        for (i in 0 until pathPoints.size) {
+            val isWater = isWaterArray[i]
+            val isTrench = !isWater && (surfaceYArray[i] < heights[i] - 1.5)
+            if (isTrench) {
+                isSuspendedArray[i] = true
+            }
+        }
+
         // 3. Apply relaxation passes (moving average) over the heights array to eliminate jagged micro-relief bumps [No GC or NMS overhead]
         repeat(5) {
             val nextHeights = heights.clone()
@@ -918,17 +930,55 @@ class SettlementPlanner(val settlement: Settlement) {
             // For water columns, we enforce that the bridge must never sink below the water surface level.
             for (i in 1 until heights.size - 1) {
                 val isWater = isWaterArray[i]
+                val isBridge = isSuspendedArray[i]
                 val surfaceY = surfaceYArray[i]
                 val naturalY = naturalYArray[i]
 
-                val minAllowedY = if (isWater) surfaceY else naturalY - 2.0
-                val maxAllowedY = if (isWater) surfaceY + 3.0 else naturalY + 2.0
+                val minAllowedY = when {
+                    isWater -> surfaceY
+                    isBridge -> heights[i] - 0.2 // Tight clamp to preserve the parabolic curve
+                    else -> naturalY - 2.0
+                }
+                val maxAllowedY = when {
+                    isWater -> surfaceY + 3.0
+                    isBridge -> heights[i] + 0.2
+                    else -> naturalY + 2.0
+                }
 
                 heights[i] = nextHeights[i].coerceIn(minAllowedY, maxAllowedY)
             }
         }
 
-        // 4. Convert relaxed heights back to integers
+        // Group continuous canyon points and apply suspension bridge sag curve to them
+        var inGap = false
+        var gapStart = -1
+        for (i in 0 until pathPoints.size) {
+            val overCanyon = isSuspendedArray[i]
+            if (overCanyon && !inGap) {
+                inGap = true
+                gapStart = i
+            } else if (!overCanyon && inGap) {
+                inGap = false
+                val gapEnd = i - 1
+                val gapLength = gapEnd - gapStart + 1
+                if (gapLength >= 3) {
+                    applySuspensionBridgeSag(gapStart, gapEnd, heights)
+                } else {
+                    for (k in gapStart..gapEnd) isSuspendedArray[k] = false
+                }
+            }
+        }
+        if (inGap) {
+            val gapEnd = pathPoints.size - 2
+            val gapLength = gapEnd - gapStart + 1
+            if (gapLength >= 3) {
+                applySuspensionBridgeSag(gapStart, gapEnd, heights)
+            } else {
+                for (k in gapStart..gapEnd) isSuspendedArray[k] = false
+            }
+        }
+
+        // Re-verify slope gradient restrictions
         val finalHeights = IntArray(pathPoints.size) { i ->
             Math.round(heights[i]).toInt()
         }
@@ -951,6 +1001,7 @@ class SettlementPlanner(val settlement: Settlement) {
         // 6. Build the 2D footprint of the road to determine edges accurately
         val footprint2D = mutableMapOf<Pair<Int, Int>, Int>()
         val isWaterMap = mutableMapOf<Pair<Int, Int>, Boolean>()
+        val isSuspendedMap = mutableMapOf<Pair<Int, Int>, Boolean>()
 
         for (i in pathPoints.indices) {
             val pt = pathPoints[i]
@@ -977,6 +1028,7 @@ class SettlementPlanner(val settlement: Settlement) {
                     if (isWaterAtCenter || !isWaterMap.getOrDefault(key, false)) {
                         footprint2D[key] = centerRoadY
                         isWaterMap[key] = isWaterAtCenter
+                        isSuspendedMap[key] = isSuspendedArray[i]
                     }
                 }
             }
@@ -991,6 +1043,7 @@ class SettlementPlanner(val settlement: Settlement) {
             val px = key.first
             val pz = key.second
             val isWaterAtCenter = isWaterMap[key] ?: false
+            val isSuspended = isSuspendedMap[key] ?: false
 
             if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
             if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
@@ -1010,7 +1063,7 @@ class SettlementPlanner(val settlement: Settlement) {
             val currentBlock = world.getBlockAt(px, py, pz)
 
             val clearStart = py + 1
-            val clearEnd = maxOf(naturalBlockY, py + 3)
+            val clearEnd = py + 3 // For bridge structures, clear only local headroom space
             for (y in clearStart..clearEnd) {
                 currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
             }
@@ -1033,6 +1086,23 @@ class SettlementPlanner(val settlement: Settlement) {
                     val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
                     slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
                     currentRoadJob.addBlock(BlockPos(px, py - 1, pz), slabData, isRoad = true)
+                }
+            } else if (isSuspended) {
+                // Determine if this is a side block on the suspension bridge (fences are on a width of 3)
+                val isMovingX = abs(dX) > abs(dZ)
+                val isEdge = if (isMovingX) {
+                    !footprint2D.containsKey(Pair(px, pz + 1)) || !footprint2D.containsKey(Pair(px, pz - 1))
+                } else {
+                    !footprint2D.containsKey(Pair(px + 1, pz)) || !footprint2D.containsKey(Pair(px - 1, pz))
+                }
+
+                if (isEdge) {
+                    currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
+                    currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                } else {
+                    val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
+                    slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
+                    currentRoadJob.addBlock(BlockPos(px, py, pz), slabData, isRoad = true)
                 }
             } else {
                 for (y in naturalBlockY until py) {
@@ -1208,6 +1278,23 @@ class SettlementPlanner(val settlement: Settlement) {
 
         jobsList.add(buildJob)
         return jobsList
+    }
+
+    private fun applySuspensionBridgeSag(gapStart: Int, gapEnd: Int, heights: DoubleArray) {
+        val hStart = heights[gapStart - 1]
+        val hEnd = heights[gapEnd + 1]
+        val len = gapEnd - gapStart + 2
+
+        for (j in 1 until len) {
+            val ratio = j.toDouble() / len
+            val interpY = hStart + ratio * (hEnd - hStart)
+
+            // Parabolic dip (sag). Max 1 block dip for short bridges, 2 blocks for longer spans.
+            val maxSag = if (len <= 8) 1.0 else 2.0
+            val sagOffset = 4.0 * maxSag * ratio * (1.0 - ratio)
+
+            heights[gapStart - 1 + j] = interpY - sagOffset
+        }
     }
 }
 

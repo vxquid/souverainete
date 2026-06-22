@@ -21,6 +21,7 @@ import org.bukkit.block.BlockFace
 import org.bukkit.block.data.Ageable
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.inventory.ItemStack
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
 import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
 import java.util.*
@@ -58,7 +59,11 @@ class FarmerBehavior(
         private val activeBobbers = ConcurrentHashMap<UUID, Int>()
         private val reservedWaterSpots = ConcurrentHashMap<BlockPos, UUID>()
 
+        // Thread-safe registry mapping Villager UUID -> Active Shore Standing Position
+        private val activeFishermenPositions = ConcurrentHashMap<UUID, BlockPos>()
+
         fun releaseWaterSpot(villagerUuid: UUID) {
+            activeFishermenPositions.remove(villagerUuid)
             val iterator = reservedWaterSpots.entries.iterator()
             while (iterator.hasNext()) {
                 if (iterator.next().value == villagerUuid) {
@@ -278,6 +283,23 @@ class FarmerBehavior(
 
                                             if (!bukkitWorld.isChunkLoaded(tx shr 4, tz shr 4)) continue
 
+                                            // Check if the proposed shore is within 10 blocks of any other active fisherman
+                                            var isTooCloseToAnotherFisher = false
+                                            val proposedShore = BlockPos(tx, 0, tz) // Y is omitted during distance check for stability
+
+                                            for ((otherUuid, otherShore) in activeFishermenPositions) {
+                                                if (otherUuid != villager.uuid) {
+                                                    val dx = proposedShore.x - otherShore.x
+                                                    val dz = proposedShore.z - otherShore.z
+                                                    val distSq = dx * dx + dz * dz // 2D distance squared (X, Z plane) is much safer for shorelines
+                                                    if (distSq <= 100) { // 10 blocks squared = 100
+                                                        isTooCloseToAnotherFisher = true
+                                                        break
+                                                    }
+                                                }
+                                            }
+                                            if (isTooCloseToAnotherFisher) continue@shoreScan
+
                                             val sY = bukkitWorld.getHighestBlockYAt(tx, tz)
                                             val sBlock = bukkitWorld.getBlockAt(tx, sY, tz)
                                             val sType = sBlock.type
@@ -363,8 +385,7 @@ class FarmerBehavior(
                         newCopy.amount = remaining
                         virtualInv.add(newCopy)
                     }
-                    // FIXED: saveSettlements(world.world) call removed.
-                    // Inventory mutations remain in RAM and are autosaved securely.
+                    SettlementManager.saveSettlements(world.world)
 
                     cropBlock.type = Material.AIR
                     bukkitWorld.playSound(cropBlock.location, Sound.BLOCK_CROP_BREAK, 1.0f, 1.0f)
@@ -408,8 +429,7 @@ class FarmerBehavior(
 
                     if (seeds != null) {
                         if (seeds.amount <= 1) settlement.villageInventory.remove(seeds) else seeds.amount -= 1
-                        // FIXED: saveSettlements(world.world) call removed.
-                        // Inventory mutations remain in RAM and are autosaved securely.
+                        SettlementManager.saveSettlements(world.world)
                     }
 
                     blockAbove.type = cropType
@@ -485,8 +505,7 @@ class FarmerBehavior(
                     val boneMeal = settlement.villageInventory.find { it.type == Material.BONE_MEAL }
                     if (boneMeal != null) {
                         if (boneMeal.amount <= 1) settlement.villageInventory.remove(boneMeal) else boneMeal.amount -= 1
-                        // FIXED: saveSettlements(world.world) call removed.
-                        // Inventory mutations remain in RAM and are autosaved securely.
+                        SettlementManager.saveSettlements(world.world)
 
                         ageable.age = minOf(ageable.maximumAge, ageable.age + 2 + world.random.nextInt(3))
                         cropBlock.blockData = ageable
@@ -606,8 +625,7 @@ class FarmerBehavior(
                     if (remaining > 0) {
                         virtualInv.add(copy)
                     }
-                    // FIXED: saveSettlements(world.world) call removed.
-                    // Inventory mutations remain in RAM and are autosaved securely.
+                    SettlementManager.saveSettlements(bukkitWorld)
                 }
             }
         }

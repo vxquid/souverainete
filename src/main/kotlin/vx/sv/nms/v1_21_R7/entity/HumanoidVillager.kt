@@ -26,6 +26,7 @@ import net.minecraft.world.entity.ai.behavior.BehaviorControl
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.navigation.AmphibiousPathNavigation
+import net.minecraft.world.entity.ai.navigation.GroundPathNavigation
 import net.minecraft.world.entity.ai.navigation.PathNavigation
 import net.minecraft.world.entity.monster.CrossbowAttackMob
 import net.minecraft.world.entity.monster.RangedAttackMob
@@ -89,6 +90,10 @@ class HumanoidVillager(
     var lastPosition: Vec3? = null
     var stuckTicks: Int = 0
 
+    // Dual-Navigation storage to prevent AmphibiousNodeEvaluator lag on land
+    private lateinit var landNavigation: PathNavigation
+    private lateinit var waterNavigation: PathNavigation
+
     init {
         this.registerAttribute(this, Attributes.ATTACK_DAMAGE, 2.0)
         this.registerAttribute(this, Attributes.ATTACK_SPEED, 4.0)
@@ -102,7 +107,7 @@ class HumanoidVillager(
         // FIXED: Prevent sleeping by Spigot Entity Activation Range (EAR)
         this.activatedTick = java.lang.Long.MAX_VALUE
 
-        // Setup swimming and water navigation
+        // Setup swimming move control
         this.moveControl = VillagerSwimMoveControl(this)
 
         // FIXED: Return water malus (8.0) so the villager tries to get out of the water
@@ -145,7 +150,11 @@ class HumanoidVillager(
     }
 
     override fun createNavigation(level: Level): PathNavigation {
-        return AmphibiousPathNavigation(this, level)
+        // This is called by Mob constructor before our own subclass init block runs.
+        // We initialize both land and water navigators here to ensure safe lifecycle transitions.
+        this.landNavigation = GroundPathNavigation(this, level)
+        this.waterNavigation = AmphibiousPathNavigation(this, level)
+        return this.landNavigation
     }
 
     fun wantsToSwim(): Boolean {
@@ -185,6 +194,24 @@ class HumanoidVillager(
     }
 
     override fun aiStep() {
+        // Dynamic navigation swapping based on water state to protect main-thread TPS.
+        // When on land, we use GroundPathNavigation (uses WalkNodeEvaluator which is extremely light).
+        // When in water, we swap to AmphibiousPathNavigation (uses AmphibiousNodeEvaluator which handles water pathing).
+        val needsWaterNav = this.isInWater && this.wantsToSwim()
+        val currentNav = this.navigation
+
+        if (needsWaterNav) {
+            if (currentNav != this.waterNavigation) {
+                currentNav.stop()
+                this.navigation = this.waterNavigation
+            }
+        } else {
+            if (currentNav != this.landNavigation) {
+                currentNav.stop()
+                this.navigation = this.landNavigation
+            }
+        }
+
         super.aiStep()
 
         // === PREVENT SOCIALIZATION WHILE SWIMMING ===
@@ -385,22 +412,39 @@ class HumanoidVillager(
 
     private fun expandInventory(size: Int) {
         try {
-            val inventoryField = AbstractVillager::class.java.declaredFields.firstOrNull {
-                it.type == SimpleContainer::class.java
-            } ?: return
+            val inventoryField = AbstractVillager::class.java.getDeclaredField("SimpleContainer")
+            if (inventoryField == null) {
+                // Try fallback field mapping if needed
+            } else {
+                inventoryField.isAccessible = true
+                val currentInv = inventoryField.get(this) as? SimpleContainer ?: return
 
-            inventoryField.isAccessible = true
-            val currentInv = inventoryField.get(this) as? SimpleContainer ?: return
-
-            if (currentInv.containerSize != size) {
-                val newInventory = SimpleContainer(size)
-                for (i in 0 until minOf(currentInv.containerSize, size)) {
-                    newInventory.setItem(i, currentInv.getItem(i))
+                if (currentInv.containerSize != size) {
+                    val newInventory = SimpleContainer(size)
+                    for (i in 0 until minOf(currentInv.containerSize, size)) {
+                        newInventory.setItem(i, currentInv.getItem(i))
+                    }
+                    inventoryField.set(this, newInventory)
                 }
-                inventoryField.set(this, newInventory)
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            // Fallback for simple container expansion
+            try {
+                val inventoryField = AbstractVillager::class.java.getDeclaredFields().firstOrNull {
+                    it.type == SimpleContainer::class.java
+                }
+                if (inventoryField != null) {
+                    inventoryField.isAccessible = true
+                    val currentInv = inventoryField.get(this) as? SimpleContainer ?: return
+                    if (currentInv.containerSize != size) {
+                        val newInventory = SimpleContainer(size)
+                        for (i in 0 until minOf(currentInv.containerSize, size)) {
+                            newInventory.setItem(i, currentInv.getItem(i))
+                        }
+                        inventoryField.set(this, newInventory)
+                    }
+                }
+            } catch (_: Exception) {}
         }
     }
 
