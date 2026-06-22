@@ -29,7 +29,7 @@ import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.humanoid.event.HumanoidInitializationEvent
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.settlement.isSettlementLeader
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import vx.sv.persistent.LivingEntityExtend.hunger
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.NametagMode

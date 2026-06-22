@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.fight
+package vx.sv.nms.entity.ai.fight
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -17,7 +17,7 @@ import net.minecraft.world.item.ShieldItem
 import net.minecraft.world.phys.Vec3
 import vx.sv.gameplay.party.PartyManager
 import vx.sv.gameplay.party.PartyManager.Companion.combatTactic
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import kotlin.random.Random
 
 class TacticalAttackBehavior(

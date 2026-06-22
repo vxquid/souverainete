@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.construct
+package vx.sv.nms.entity.ai.construct
 
 import net.minecraft.core.BlockPos
 import org.bukkit.Location
@@ -12,7 +12,7 @@ import org.bukkit.inventory.ItemStack
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import org.bukkit.entity.Villager as BukkitVillager
 
 class WoodFarmManager : Listener {

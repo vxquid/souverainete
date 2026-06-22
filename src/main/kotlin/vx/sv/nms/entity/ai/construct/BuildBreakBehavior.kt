@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.construct
+package vx.sv.nms.entity.ai.construct
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -8,7 +8,7 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 
 class BuildBreakBehavior(
     private val speedModifier: Float

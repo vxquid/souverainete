@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai
+package vx.sv.nms.entity.ai
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -10,7 +10,7 @@ import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
 import org.bukkit.Location
 import org.bukkit.block.data.type.Bed
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 

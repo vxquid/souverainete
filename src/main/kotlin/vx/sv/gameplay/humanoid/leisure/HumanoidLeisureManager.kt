@@ -20,7 +20,7 @@ import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.dialogue.DialogueSession
 import vx.sv.gameplay.dialogue.menu.InteractionHandler
 import vx.sv.gameplay.party.PartyManager.Companion.partyLeaderUUID
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.random.Random

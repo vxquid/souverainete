@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.fight
+package vx.sv.nms.entity.ai.fight
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.server.level.ServerLevel
@@ -13,7 +13,7 @@ import net.minecraft.world.entity.monster.spider.Spider
 import org.bukkit.Bukkit
 import org.bukkit.entity.Villager
 import vx.sv.event.VillagerStartFightEvent
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 
 class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
     Behavior<HumanoidVillager>(

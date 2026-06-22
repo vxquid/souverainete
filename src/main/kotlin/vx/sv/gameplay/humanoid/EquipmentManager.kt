@@ -16,7 +16,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.inventory.meta.Damageable
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.nms.VersionBridge.Companion.asHumanoid
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.random.Random
 

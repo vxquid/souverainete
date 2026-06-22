@@ -22,8 +22,8 @@ import org.bukkit.block.data.Ageable
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.inventory.ItemStack
 import vx.sv.gameplay.settlement.SettlementManager
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
-import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
+import vx.sv.nms.entity.HumanoidVillager
+import vx.sv.nms.entity.ai.construct.SettlementPlanner
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs

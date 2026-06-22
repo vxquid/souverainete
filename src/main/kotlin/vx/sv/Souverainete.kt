@@ -26,10 +26,10 @@ import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
 import vx.sv.gameplay.trade.ScoreCalculator
-import vx.sv.nms.v1_21_R7.entity.ai.construct.BuilderSafetyListener
-import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
-import vx.sv.nms.v1_21_R7.entity.ai.construct.VillageGenerationListener
-import vx.sv.nms.v1_21_R7.entity.ai.construct.WoodFarmManager
+import vx.sv.nms.entity.ai.construct.BuilderSafetyListener
+import vx.sv.nms.entity.ai.construct.SettlementPlanner
+import vx.sv.nms.entity.ai.construct.VillageGenerationListener
+import vx.sv.nms.entity.ai.construct.WoodFarmManager
 import vx.sv.serialization.ItemStackSerializer
 import vx.sv.serialization.LocationSerializer
 import vx.sv.serialization.UUIDSerializer

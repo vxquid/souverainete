@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity
+package vx.sv.nms.entity
 
 import com.google.common.collect.ImmutableList
 import com.google.common.collect.ImmutableSet
@@ -51,14 +51,17 @@ import vx.sv.event.VillagerKillTargetEvent
 import vx.sv.gameplay.humanoid.FarmerBehavior
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.settlement.Settlement
-import vx.sv.nms.EntityProvider.Humanoid
-import vx.sv.nms.v1_21_R7.VersionSpecificHumanoidEntityProvider.Companion.plugin
-import vx.sv.nms.v1_21_R7.entity.ai.*
-import vx.sv.nms.v1_21_R7.entity.ai.construct.*
-import vx.sv.nms.v1_21_R7.entity.ai.fight.BowAttackBehavior
-import vx.sv.nms.v1_21_R7.entity.ai.fight.CrossbowAttackBehavior
-import vx.sv.nms.v1_21_R7.entity.ai.fight.FindEnemyBehavior
-import vx.sv.nms.v1_21_R7.entity.ai.fight.TacticalAttackBehavior
+import vx.sv.nms.VersionSpecificHumanoidEntityProvider.Companion.plugin
+import vx.sv.nms.entity.EntityProvider.Humanoid
+import vx.sv.nms.entity.ai.*
+import vx.sv.nms.entity.ai.construct.*
+import vx.sv.nms.entity.ai.fight.BowAttackBehavior
+import vx.sv.nms.entity.ai.fight.CrossbowAttackBehavior
+import vx.sv.nms.entity.ai.fight.FindEnemyBehavior
+import vx.sv.nms.entity.ai.fight.TacticalAttackBehavior
+import vx.sv.nms.entity.ai.profession.ButcherBehavior
+import vx.sv.nms.entity.ai.profession.MinerBehavior
+import vx.sv.nms.entity.ai.profession.ShepherdBehavior
 import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.util.InventorySerializer
 import vx.sv.util.VillagerBridge

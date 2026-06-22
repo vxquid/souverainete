@@ -34,7 +34,7 @@ import vx.sv.gameplay.personality.PersonalityManager.Companion.gender
 import vx.sv.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
 import vx.sv.persistent.LivingEntityExtend.professionLevelName

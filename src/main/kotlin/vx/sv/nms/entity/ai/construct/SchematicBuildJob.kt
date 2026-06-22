@@ -1,11 +1,11 @@
-package vx.sv.nms.v1_21_R7.entity.ai.construct
+package vx.sv.nms.entity.ai.construct
 
 import net.minecraft.core.BlockPos
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import org.bukkit.Material
 import org.bukkit.World
 import org.bukkit.block.data.BlockData
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import java.util.*
 
 class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {

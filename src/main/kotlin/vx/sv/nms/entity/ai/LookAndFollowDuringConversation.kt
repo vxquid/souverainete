@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai
+package vx.sv.nms.entity.ai
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.server.level.ServerLevel
@@ -8,7 +8,7 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
 import org.bukkit.craftbukkit.entity.CraftPlayer
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 
 class LookAndFollowDuringConversation(private val speedModifier: Float) :
     net.minecraft.world.entity.ai.behavior.Behavior<HumanoidVillager>(

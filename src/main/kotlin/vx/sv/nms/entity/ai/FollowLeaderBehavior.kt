@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai
+package vx.sv.nms.entity.ai
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -14,7 +14,7 @@ import org.bukkit.craftbukkit.entity.CraftPlayer
 import vx.sv.gameplay.party.PartyManager
 import vx.sv.gameplay.party.PartyManager.Companion.partyLeaderUUID
 import vx.sv.gameplay.party.PartyManager.Companion.partyState
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 
 class FollowLeaderBehavior(
     private val speedModifier: Float,

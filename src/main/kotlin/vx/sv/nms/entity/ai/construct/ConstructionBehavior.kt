@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.construct
+package vx.sv.nms.entity.ai.construct
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -23,7 +23,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 import java.util.*
 import kotlin.math.abs
 import kotlin.math.max

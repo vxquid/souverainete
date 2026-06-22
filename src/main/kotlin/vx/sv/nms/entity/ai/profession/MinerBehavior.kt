@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.construct
+package vx.sv.nms.entity.ai.profession
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -18,7 +18,8 @@ import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
+import vx.sv.nms.entity.ai.construct.SettlementPlanner
 import kotlin.math.atan2
 import kotlin.math.sqrt
 
@@ -56,7 +57,7 @@ class MinerBehavior(
         val npcLoc = villager.bukkitEntity.location
 
         // Instant workstation cache read
-        val tablePos = SettlementPlanner.getWorkstationFor(villager)
+        val tablePos = SettlementPlanner.Companion.getWorkstationFor(villager)
 
         if (tablePos == null) {
             // Remove the miner PDC tag if the villager has lost their workstation or structure
@@ -184,8 +185,6 @@ class MinerBehavior(
                     virtualInv.add(newCopy)
                     remaining -= toAdd
                 }
-                // FIXED: saveSettlements(bukkitWorld) call removed.
-                // Inventory mutations remain in RAM and are autosaved securely.
             }
         } else {
             val targetPos = BlockPos(stonePos.x, stonePos.y, stonePos.z)

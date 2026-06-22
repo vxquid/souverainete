@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.construct
+package vx.sv.nms.entity.ai.construct
 
 import net.minecraft.core.BlockPos
 import org.bukkit.Bukkit

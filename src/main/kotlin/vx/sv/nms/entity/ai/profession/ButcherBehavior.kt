@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.construct
+package vx.sv.nms.entity.ai.profession
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -13,8 +13,9 @@ import org.bukkit.Material
 import org.bukkit.Sound
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Sheep
+import org.bukkit.entity.Villager
 import org.bukkit.inventory.ItemStack
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.entity.HumanoidVillager
 
 class ButcherBehavior(
     private val speedModifier: Float
@@ -30,8 +31,8 @@ class ButcherBehavior(
     private var noWorkUntil = 0L
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
-        val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
-        if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.BUTCHER || villager.settlement == null) {
+        val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
+        if (bukkitVillager.profession != Villager.Profession.BUTCHER || villager.settlement == null) {
             return false
         }
         val gameTime = world.gameTime
@@ -41,8 +42,8 @@ class ButcherBehavior(
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
-        val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
-        if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.BUTCHER || villager.settlement == null) {
+        val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
+        if (bukkitVillager.profession != Villager.Profession.BUTCHER || villager.settlement == null) {
             return false
         }
         val gameTime = world.gameTime
@@ -62,13 +63,13 @@ class ButcherBehavior(
             val localSheep = npcLoc.getNearbyEntities(30.0, 15.0, 30.0).filterIsInstance<Sheep>()
 
             if (localSheep.size > 8) {
-                cachedTargetSheep = localSheep.find { it.isAdult && ShepherdBehavior.isSheepFree(it, villager) }
+                cachedTargetSheep = localSheep.find { it.isAdult && ShepherdBehavior.Companion.isSheepFree(it, villager) }
             }
         }
 
         val targetSheep = cachedTargetSheep
         if (targetSheep != null && targetSheep.isValid && !targetSheep.isDead) {
-            ShepherdBehavior.claimSheep(targetSheep, villager)
+            ShepherdBehavior.Companion.claimSheep(targetSheep, villager)
 
             val distSq = npcLoc.distanceSquared(targetSheep.location)
             if (distSq <= 4.0) {
@@ -78,7 +79,7 @@ class ButcherBehavior(
                 villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.IRON_AXE)))
                 villager.swing(InteractionHand.MAIN_HAND)
 
-                ShepherdBehavior.releaseReservations(villager.uuid)
+                ShepherdBehavior.Companion.releaseReservations(villager.uuid)
                 cachedTargetSheep = null
             } else {
                 val targetPos = BlockPos(targetSheep.location.blockX, targetSheep.location.blockY, targetSheep.location.blockZ)
@@ -87,7 +88,7 @@ class ButcherBehavior(
             }
             return
         } else {
-            ShepherdBehavior.releaseReservations(villager.uuid)
+            ShepherdBehavior.Companion.releaseReservations(villager.uuid)
             villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
             cachedTargetSheep = null
 
@@ -97,7 +98,7 @@ class ButcherBehavior(
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
-        ShepherdBehavior.releaseReservations(villager.uuid)
+        ShepherdBehavior.Companion.releaseReservations(villager.uuid)
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
         cachedTargetSheep = null

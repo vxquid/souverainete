@@ -23,7 +23,7 @@ import vx.sv.gameplay.humanoid.race.RaceManager.Race
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
-import vx.sv.nms.v1_21_R7.entity.ai.construct.SettlementPlanner
+import vx.sv.nms.entity.ai.construct.SettlementPlanner
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import java.util.concurrent.CompletableFuture

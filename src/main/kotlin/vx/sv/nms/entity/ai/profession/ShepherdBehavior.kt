@@ -1,4 +1,4 @@
-package vx.sv.nms.v1_21_R7.entity.ai.construct
+package vx.sv.nms.entity.ai.profession
 
 import com.google.common.collect.ImmutableMap
 import net.minecraft.core.BlockPos
@@ -9,15 +9,16 @@ import net.minecraft.world.entity.ai.behavior.BlockPosTracker
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
+import net.minecraft.world.item.ItemStack
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.Sound
 import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Sheep
-import org.bukkit.inventory.ItemStack
+import org.bukkit.entity.Villager
 import org.bukkit.persistence.PersistentDataType
-import vx.sv.nms.v1_21_R7.VersionSpecificHumanoidEntityProvider.Companion.plugin
-import vx.sv.nms.v1_21_R7.entity.HumanoidVillager
+import vx.sv.nms.VersionSpecificHumanoidEntityProvider
+import vx.sv.nms.entity.HumanoidVillager
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
@@ -59,8 +60,8 @@ class ShepherdBehavior(
     }
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
-        val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
-        if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.SHEPHERD || villager.settlement == null) {
+        val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
+        if (bukkitVillager.profession != Villager.Profession.SHEPHERD || villager.settlement == null) {
             return false
         }
         val gameTime = world.gameTime
@@ -70,8 +71,8 @@ class ShepherdBehavior(
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
-        val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
-        if (bukkitVillager.profession != org.bukkit.entity.Villager.Profession.SHEPHERD || villager.settlement == null) {
+        val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
+        if (bukkitVillager.profession != Villager.Profession.SHEPHERD || villager.settlement == null) {
             return false
         }
         val gameTime = world.gameTime
@@ -103,7 +104,7 @@ class ShepherdBehavior(
             if (villager.stuckTicks > 100) {
                 leashedSheep.setLeashHolder(null)
                 releaseReservations(villager.uuid)
-                villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+                villager.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
                 cachedTargetSheep = null
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
                 villager.stuckTicks = 0
@@ -112,15 +113,27 @@ class ShepherdBehavior(
 
             if (leashedSheep.location.distanceSquared(center) <= 100.0) {
                 leashedSheep.setLeashHolder(null)
-                leashedSheep.persistentDataContainer.set(NamespacedKey(plugin, "village_animal"), PersistentDataType.BYTE, 1.toByte())
+                leashedSheep.persistentDataContainer.set(
+                    NamespacedKey(
+                        VersionSpecificHumanoidEntityProvider.Companion.plugin,
+                        "village_animal"
+                    ), PersistentDataType.BYTE, 1.toByte())
                 releaseReservations(villager.uuid)
-                villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+                villager.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
                 cachedTargetSheep = null
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
             } else {
-                villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.LEAD)))
+                villager.setItemInHand(
+                    InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(
+                        org.bukkit.inventory.ItemStack(
+                            Material.LEAD
+                        )
+                    ))
                 val targetPos = BlockPos(center.blockX, center.blockY, center.blockZ)
-                villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 2))
+                villager.brain.setMemory(
+                    MemoryModuleType.WALK_TARGET,
+                    WalkTarget(BlockPosTracker(targetPos), speedModifier, 2)
+                )
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
             }
             return
@@ -137,7 +150,11 @@ class ShepherdBehavior(
 
             if (cachedTargetSheep == null) {
                 cachedTargetSheep = allSheep.find { sheep ->
-                    val isVillageAnimal = sheep.persistentDataContainer.has(NamespacedKey(plugin, "village_animal"), PersistentDataType.BYTE)
+                    val isVillageAnimal = sheep.persistentDataContainer.has(
+                        NamespacedKey(
+                            VersionSpecificHumanoidEntityProvider.Companion.plugin,
+                            "village_animal"
+                        ), PersistentDataType.BYTE)
                     val needsHerding = if (isVillageAnimal) sheep.location.distanceSquared(center) > 900.0 else sheep.location.distanceSquared(center) <= 1600.0
                     needsHerding && !sheep.isLeashed && isSheepFree(sheep, villager)
                 }
@@ -162,10 +179,18 @@ class ShepherdBehavior(
             if (isHerding) {
                 if (distSq <= 9.0) {
                     sheep.setLeashHolder(villager.bukkitEntity)
-                    villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.LEAD)))
+                    villager.setItemInHand(
+                        InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(
+                            org.bukkit.inventory.ItemStack(
+                                Material.LEAD
+                            )
+                        ))
                 } else {
                     val targetPos = BlockPos(sheep.location.blockX, sheep.location.blockY, sheep.location.blockZ)
-                    villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
+                    villager.brain.setMemory(
+                        MemoryModuleType.WALK_TARGET,
+                        WalkTarget(BlockPosTracker(targetPos), speedModifier, 1)
+                    )
                     villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
                 }
             } else {
@@ -173,22 +198,32 @@ class ShepherdBehavior(
                     sheep.isSheared = true
                     bukkitWorld.playSound(sheep.location, Sound.ENTITY_SHEEP_SHEAR, 1.0f, 1.0f)
                     val woolMat = try { Material.valueOf(sheep.color?.name + "_WOOL") } catch (e: Exception) { Material.WHITE_WOOL }
-                    bukkitWorld.dropItemNaturally(sheep.location, ItemStack(woolMat, 1 + world.random.nextInt(3)))
+                    bukkitWorld.dropItemNaturally(sheep.location,
+                        org.bukkit.inventory.ItemStack(woolMat, 1 + world.random.nextInt(3))
+                    )
 
-                    villager.setItemInHand(InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(ItemStack(Material.SHEARS)))
+                    villager.setItemInHand(
+                        InteractionHand.MAIN_HAND, CraftItemStack.asNMSCopy(
+                            org.bukkit.inventory.ItemStack(
+                                Material.SHEARS
+                            )
+                        ))
                     villager.swing(InteractionHand.MAIN_HAND)
 
                     releaseReservations(villager.uuid)
                     cachedTargetSheep = null
                 } else {
                     val targetPos = BlockPos(sheep.location.blockX, sheep.location.blockY, sheep.location.blockZ)
-                    villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(targetPos), speedModifier, 1))
+                    villager.brain.setMemory(
+                        MemoryModuleType.WALK_TARGET,
+                        WalkTarget(BlockPosTracker(targetPos), speedModifier, 1)
+                    )
                     villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPos))
                 }
             }
         } else {
             releaseReservations(villager.uuid)
-            villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
+            villager.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
             cachedTargetSheep = null
 
             // ИСПРАВЛЕНО: Если овец нет — ИИ засыпает на 10 секунд и даёт жителю пойти поработать строителем

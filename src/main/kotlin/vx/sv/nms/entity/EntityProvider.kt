@@ -1,4 +1,4 @@
-package vx.sv.nms
+package vx.sv.nms.entity
 
 import org.bukkit.Location
 import org.bukkit.Sound
@@ -25,4 +25,5 @@ interface EntityProvider {
 
         var talkingPlayer: Player?
     }
+
 }
