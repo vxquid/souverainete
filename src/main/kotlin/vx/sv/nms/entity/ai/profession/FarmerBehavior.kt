@@ -47,23 +47,24 @@ class FarmerBehavior(
     private var targetTillPos: BlockPos? = null
     private var targetBoneMealPos: BlockPos? = null
 
-    // Target water position and absolute shore standing position for the fisher
     private var targetWaterPos: BlockPos? = null
     private var targetShorePos: BlockPos? = null
 
-    // Private cache to store a valid fishing location once found
     private var cachedWaterPos: BlockPos? = null
     private var cachedShorePos: BlockPos? = null
 
     companion object {
         private val activeBobbers = ConcurrentHashMap<UUID, Int>()
         private val reservedWaterSpots = ConcurrentHashMap<BlockPos, UUID>()
-
-        // Thread-safe registry mapping Villager UUID -> Active Shore Standing Position
         private val activeFishermenPositions = ConcurrentHashMap<UUID, BlockPos>()
+
+        private val biteTicks = ConcurrentHashMap<UUID, Int>()
+        private val fishAngles = ConcurrentHashMap<UUID, Double>()
 
         fun releaseWaterSpot(villagerUuid: UUID) {
             activeFishermenPositions.remove(villagerUuid)
+            biteTicks.remove(villagerUuid)
+            fishAngles.remove(villagerUuid)
             val iterator = reservedWaterSpots.entries.iterator()
             while (iterator.hasNext()) {
                 if (iterator.next().value == villagerUuid) {
@@ -114,7 +115,6 @@ class FarmerBehavior(
             return
         }
 
-        // Validate current targets
         if (targetCropPos != null) {
             val cropBlock = bukkitWorld.getBlockAt(targetCropPos!!.x, targetCropPos!!.y, targetCropPos!!.z)
             val ageable = cropBlock.blockData as? Ageable
@@ -149,7 +149,6 @@ class FarmerBehavior(
             }
         }
 
-        // COARSE TIMED SCAN FOR TASKS (Runs every 3 seconds synchronously, zero snapshot allocations)
         if (targetCropPos == null && targetPlantPos == null && targetTillPos == null && targetBoneMealPos == null && targetWaterPos == null && gameTime - lastCropSearchTime > 60L) {
             lastCropSearchTime = gameTime
 
@@ -161,7 +160,6 @@ class FarmerBehavior(
             var foundTill: BlockPos? = null
             var foundBoneMeal: BlockPos? = null
 
-            // 1. Search for tasks inside the specific Farm bounds (Exclusive limits to prevent out of bounds tilling)
             scanCrops@ for (box in farmBoxes) {
                 for (x in box.minX.toInt() until box.maxX.toInt()) {
                     for (z in box.minZ.toInt() until box.maxZ.toInt()) {
@@ -206,12 +204,10 @@ class FarmerBehavior(
             targetTillPos = foundTill
             targetBoneMealPos = foundBoneMeal
 
-            // 2. If the fields are perfectly managed, check/search for a valid fishing spot
             if (foundCrop == null && foundPlant == null && foundTill == null && foundBoneMeal == null) {
                 val cachedW = cachedWaterPos
                 val cachedS = cachedShorePos
 
-                // Validate existing cached water spot to completely bypass full scan loops
                 if (cachedW != null && cachedS != null) {
                     if (bukkitWorld.isChunkLoaded(cachedW.x shr 4, cachedW.z shr 4) &&
                         bukkitWorld.getBlockAt(cachedW.x, cachedW.y, cachedW.z).type == Material.WATER) {
@@ -236,21 +232,35 @@ class FarmerBehavior(
 
                             if (!bukkitWorld.isChunkLoaded(px shr 4, pz shr 4)) continue
 
-                            // Skip water inside farm boxes
                             val isFarmWater = farmBoxes.any { box ->
                                 px >= box.minX && px <= box.maxX && pz >= box.minZ && pz <= box.maxZ
                             }
                             if (isFarmWater) continue
 
-                            // Use Minecraft's internal heightmap directly! Very fast, O(1)
                             val highestY = bukkitWorld.getHighestBlockYAt(px, pz)
+                            val waterSpot = BlockPos(px, highestY, pz)
+
+                            val res = reservedWaterSpots[waterSpot]
+                            if (res != null && res != villager.uuid) continue
+
+                            var isWaterTooClose = false
+                            for ((otherWater, otherUuid) in reservedWaterSpots) {
+                                if (otherUuid != villager.uuid) {
+                                    val dx = waterSpot.x - otherWater.x
+                                    val dz = waterSpot.z - otherWater.z
+                                    if (dx * dx + dz * dz <= 36) { // 6 блоков дистанции
+                                        isWaterTooClose = true
+                                        break
+                                    }
+                                }
+                            }
+                            if (isWaterTooClose) continue
+
                             val block = bukkitWorld.getBlockAt(px, highestY, pz)
                             val blockType = block.type
 
-                            // If the highest block is water, we found a potential water body
                             if (blockType == Material.WATER || block.isLiquid) {
 
-                                // Verify that it is a large water body (at least a 5x5 water surface grid)
                                 var isLargeWaterBody = true
                                 checkWaterBody@ for (dx in -2..2) {
                                     for (dz in -2..2) {
@@ -263,7 +273,6 @@ class FarmerBehavior(
                                         val hY = bukkitWorld.getHighestBlockYAt(sx, sz)
                                         val bType = bukkitWorld.getBlockAt(sx, hY, sz).type
 
-                                        // Include aquatic vegetation as valid water surface components
                                         if (bType != Material.WATER && bType != Material.KELP &&
                                             bType != Material.SEAGRASS && bType != Material.TALL_SEAGRASS &&
                                             bType != Material.LILY_PAD) {
@@ -274,7 +283,6 @@ class FarmerBehavior(
                                 }
                                 if (!isLargeWaterBody) continue
 
-                                // Find a solid standing shore block 5-6 blocks away from water target
                                 shoreScan@ for (sx in -6..6) {
                                     for (sz in -6..6) {
                                         if (max(abs(sx), abs(sz)) in 5..6) {
@@ -283,16 +291,15 @@ class FarmerBehavior(
 
                                             if (!bukkitWorld.isChunkLoaded(tx shr 4, tz shr 4)) continue
 
-                                            // Check if the proposed shore is within 10 blocks of any other active fisherman
                                             var isTooCloseToAnotherFisher = false
-                                            val proposedShore = BlockPos(tx, 0, tz) // Y is omitted during distance check for stability
+                                            val proposedShore = BlockPos(tx, 0, tz)
 
                                             for ((otherUuid, otherShore) in activeFishermenPositions) {
                                                 if (otherUuid != villager.uuid) {
                                                     val dx = proposedShore.x - otherShore.x
                                                     val dz = proposedShore.z - otherShore.z
-                                                    val distSq = dx * dx + dz * dz // 2D distance squared (X, Z plane) is much safer for shorelines
-                                                    if (distSq <= 100) { // 10 blocks squared = 100
+                                                    val distSq = dx * dx + dz * dz
+                                                    if (distSq <= 100) { // 10 блоков дистанции
                                                         isTooCloseToAnotherFisher = true
                                                         break
                                                     }
@@ -308,9 +315,9 @@ class FarmerBehavior(
                                                 val feetBlock = sBlock.getRelative(BlockFace.UP)
                                                 val headBlock = feetBlock.getRelative(BlockFace.UP)
                                                 if (feetBlock.type == Material.AIR && headBlock.type == Material.AIR) {
-                                                    foundWater = BlockPos(px, highestY, pz)
+                                                    foundWater = waterSpot
                                                     foundShore = BlockPos(tx, sY, tz)
-                                                    break@waterScan // Found perfect water and shore! Stop searching.
+                                                    break@waterScan
                                                 }
                                             }
                                         }
@@ -325,6 +332,9 @@ class FarmerBehavior(
                         cachedShorePos = foundShore
                         targetWaterPos = foundWater
                         targetShorePos = foundShore
+
+                        reservedWaterSpots[foundWater] = villager.uuid
+                        activeFishermenPositions[villager.uuid] = foundShore
                     }
                 }
             }
@@ -334,7 +344,6 @@ class FarmerBehavior(
             }
         }
 
-        // ACTIONS EXECUTION (Priorities: Harvest > Plant > Till > Fertilizer > Fish)
         if (targetCropPos != null) {
             val cropBlock = bukkitWorld.getBlockAt(targetCropPos!!.x, targetCropPos!!.y, targetCropPos!!.z)
             val ageable = cropBlock.blockData as? Ageable
@@ -443,7 +452,7 @@ class FarmerBehavior(
 
         } else if (targetTillPos != null) {
             val dirtBlock = bukkitWorld.getBlockAt(targetTillPos!!.x, targetTillPos!!.y, targetTillPos!!.z)
-            val blockAbove = dirtBlock.getRelative(org.bukkit.block.BlockFace.UP)
+            val blockAbove = dirtBlock.getRelative(BlockFace.UP)
 
             if ((dirtBlock.type != Material.DIRT && dirtBlock.type != Material.GRASS_BLOCK) || blockAbove.type != Material.AIR) {
                 targetTillPos = null
@@ -581,10 +590,51 @@ class FarmerBehavior(
                         val user = com.github.retrooper.packetevents.PacketEvents.getAPI().playerManager.getUser(player)
                         user?.sendPacket(spawnPacket)
                     }
+
+                    val sessionBiteTick = 120 + world.random.nextInt(120)
+                    biteTicks[villager.uuid] = sessionBiteTick
+                    fishAngles[villager.uuid] = world.random.nextDouble() * 2 * Math.PI
                 }
 
-                if (farmTicks >= 300) {
+                val currentBiteTick = biteTicks[villager.uuid] ?: 200
+                val currentFishAngle = fishAngles[villager.uuid] ?: 0.0
+
+                if (farmTicks > 10 && farmTicks < currentBiteTick) {
+                    val ticksLeft = currentBiteTick - farmTicks
+                    if (ticksLeft <= 50) {
+                        val progress = (50 - ticksLeft).toDouble() / 50.0
+                        val startDist = 3.5
+                        val currentDist = startDist * (1.0 - progress)
+
+                        val fx = waterLoc.x + Math.cos(currentFishAngle) * currentDist
+                        val fz = waterLoc.z + Math.sin(currentFishAngle) * currentDist
+                        val particleLoc = Location(bukkitWorld, fx, waterLoc.y + 0.1, fz)
+
+                        bukkitWorld.spawnParticle(Particle.BUBBLE, particleLoc, 1, 0.05, 0.0, 0.05, 0.0)
+                        if (farmTicks % 3 == 0) {
+                            bukkitWorld.spawnParticle(Particle.FISHING, particleLoc, 2, 0.1, 0.0, 0.1, 0.01)
+                        }
+                    } else {
+                        if (farmTicks % 30 == 0) {
+                            bukkitWorld.spawnParticle(Particle.FISHING, waterLoc, 3, 0.15, 0.0, 0.15, 0.0)
+                        }
+                    }
+                }
+
+                if (farmTicks == currentBiteTick) {
+                    bukkitWorld.playSound(waterLoc, Sound.ENTITY_FISHING_BOBBER_SPLASH, 1.2f, 0.8f + world.random.nextFloat() * 0.4f)
+                    bukkitWorld.spawnParticle(Particle.SPLASH, waterLoc, 25, 0.2, 0.1, 0.2, 0.1)
+                    bukkitWorld.spawnParticle(Particle.BUBBLE, waterLoc, 15, 0.15, 0.1, 0.15, 0.2)
+                    bukkitWorld.spawnParticle(Particle.FISHING, waterLoc, 10, 0.3, 0.0, 0.3, 0.05)
+
+                    villager.swing(InteractionHand.MAIN_HAND)
+                }
+
+                if (farmTicks >= currentBiteTick + 15) {
                     farmTicks = 0
+                    biteTicks.remove(villager.uuid)
+                    fishAngles.remove(villager.uuid)
+
                     val bobberId = activeBobbers.remove(villager.uuid)
                     if (bobberId != null) {
                         val destroyPacket = WrapperPlayServerDestroyEntities(bobberId)
@@ -597,14 +647,16 @@ class FarmerBehavior(
                         }
                     }
 
-                    bukkitWorld.playSound(waterLoc, Sound.ENTITY_FISHING_BOBBER_SPLASH, 1.0f, 1.0f)
-                    bukkitWorld.spawnParticle(Particle.BUBBLE, waterLoc.add(0.0, 0.5, 0.0), 15, 0.2, 0.2, 0.2, 0.1)
+                    bukkitWorld.playSound(villagerEye, Sound.ENTITY_FISHING_BOBBER_RETRIEVE, 1.0f, 1.0f)
 
                     val fish = when (world.random.nextInt(10)) {
                         in 0..5 -> Material.COD
                         in 6..8 -> Material.SALMON
                         else -> Material.PUFFERFISH
                     }
+
+                    val directionToVillager = villagerEye.toVector().subtract(waterLoc.toVector()).normalize()
+                    bukkitWorld.spawnParticle(Particle.FALLING_WATER, waterLoc.clone().add(0.0, 0.2, 0.0), 10, directionToVillager.x * 0.2, directionToVillager.y * 0.2 + 0.3, directionToVillager.z * 0.2, 0.3)
 
                     val virtualInv = settlement.villageInventory
                     val copy = ItemStack(fish, 1)
@@ -640,6 +692,8 @@ class FarmerBehavior(
         targetBoneMealPos = null
         targetWaterPos = null
         targetShorePos = null
+        biteTicks.remove(villager.uuid)
+        fishAngles.remove(villager.uuid)
         villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
 
         releaseWaterSpot(villager.uuid)

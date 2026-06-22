@@ -22,10 +22,14 @@ class BuildBreakBehavior(
 ) {
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
+        val timeOfDay = world.world.time
+        if (timeOfDay >= 13000 && timeOfDay <= 23000) {
+            return false
+        }
+
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
         val prof = bukkitVillager.profession
 
-        // ИСПРАВЛЕНО: Шахтеры освобождаются от перекуров
         if (prof == org.bukkit.entity.Villager.Profession.FARMER ||
             prof == org.bukkit.entity.Villager.Profession.SHEPHERD ||
             prof == org.bukkit.entity.Villager.Profession.BUTCHER ||
@@ -37,6 +41,10 @@ class BuildBreakBehavior(
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
+        val timeOfDay = world.world.time
+        if (timeOfDay >= 13000 && timeOfDay <= 23000) {
+            return false
+        }
         return world.gameTime < villager.buildBreakUntilTime && villager.settlement != null
     }
 

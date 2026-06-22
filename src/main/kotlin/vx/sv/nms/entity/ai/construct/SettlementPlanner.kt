@@ -85,7 +85,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
             val key = "${s.data.id}_${buildingTypeName}"
 
-            // Prevent main-thread chunkSnapshot copying spam if previous scan failed recently
             val cooldown = scanCooldowns[key] ?: 0L
             if (s.world.gameTime < cooldown) return null
 
@@ -106,8 +105,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 var found: BlockPos? = null
 
-                // TPS OPTIMIZATION: Direct synchronous check. No snapshots, no async threads.
-                // Checks ~500 blocks which takes < 0.1ms.
                 scan@ for (x in box.minX.toInt()..box.maxX.toInt()) {
                     for (z in box.minZ.toInt()..box.maxZ.toInt()) {
                         if (!world.isChunkLoaded(x shr 4, z shr 4)) continue
@@ -136,6 +133,40 @@ class SettlementPlanner(val settlement: Settlement) {
         fun getActiveOrNextJob(settlement: Settlement): SchematicBuildJob? {
             val settlementId = settlement.data.id
             val activeList = activeJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
+
+            // Перехватываем завершение ИИ-работ для вызова триггеров
+            val iterator = activeList.iterator()
+            while (iterator.hasNext()) {
+                val job = iterator.next()
+                if (job.isFinished()) {
+                    val records = buildings[settlementId]
+                    if (records != null) {
+                        val golemRecord = records.find { it.jobId == job.jobId && it.type.startsWith("IRON_GOLEM") }
+                        if (golemRecord != null) {
+                            // 1. Спавним голема в центре временной структуры
+                            val loc = golemRecord.box.center.toLocation(settlement.world)
+                            settlement.world.spawn(loc, org.bukkit.entity.IronGolem::class.java) { golem ->
+                                golem.customName(net.kyori.adventure.text.Component.text("Защитник поселения", net.kyori.adventure.text.format.NamedTextColor.GOLD))
+                                golem.isCustomNameVisible = true
+                            }
+
+                            // 2. Очищаем блоки железной конструкции, заменяя их на воздух
+                            job.getBlocks().forEach { blockToPlace ->
+                                val block = settlement.world.getBlockAt(blockToPlace.pos.x, blockToPlace.pos.y, blockToPlace.pos.z)
+                                block.type = Material.AIR
+                            }
+
+                            // Эффекты сборки голема
+                            settlement.world.playSound(loc, Sound.ENTITY_IRON_GOLEM_DEATH, 1.0f, 1.0f)
+                            settlement.world.spawnParticle(Particle.CLOUD, loc.clone().add(0.0, 1.0, 0.0), 20, 0.5, 0.5, 0.5, 0.1)
+
+                            // 3. Удаляем структуру из чертежей поселения
+                            records.remove(golemRecord)
+                        }
+                    }
+                }
+            }
+
             activeList.removeIf { it.isFinished() }
 
             val builders = settlement.villagers.mapNotNull {
@@ -438,7 +469,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val records = buildings[settlement.data.id] ?: emptyList()
         val jobId = records.find { it.type == "MEETING_POINT" }?.jobId ?: UUID.randomUUID()
 
-        // Pass the actual entrance pos. For the meeting point, the base floor is at baseY.
         val entrancePos = BlockPos(cx, baseY + 1, cz)
         val buildJobsList = startVanillaStructureConstruction(cx, baseY, cz, entrancePos, type, StructureRotation.NONE, jobId)
 
@@ -459,7 +489,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val gameTime = world.gameTime
         val lastFailed = planningCooldowns[settlementId] ?: 0L
 
-        // FIXED: Planning cooldown reduced from 5 minutes (6000L) to 1 minute (1200L) for a faster layout tick
         if (gameTime - lastFailed < 1200L) {
             return false
         }
@@ -587,8 +616,6 @@ class SettlementPlanner(val settlement: Settlement) {
             BlockPos(rawWidth / 2, 0, 0)
         }
 
-        // TPS OPTIMIZATION: Segmented task execution to avoid freezing the main thread.
-        // Doing 25 placement attempts per tick entirely removes the lag spikes.
         object : org.bukkit.scheduler.BukkitRunnable() {
             var attemptsMade = 0
 
@@ -609,7 +636,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     val cx = center.blockX + (cos(angle) * distance).toInt()
                     val cz = center.blockZ + (sin(angle) * distance).toInt()
 
-                    // Protection against generating chunks randomly
                     if (!world.isChunkLoaded(cx shr 4, cz shr 4)) continue
 
                     var targetX = center.blockX
@@ -842,7 +868,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
         val records = buildings[settlementId] ?: emptyList()
 
-        // 1. Trace the 2D path coordinates first using Bresenham's line algorithm pointing specifically to the door
         val pathPoints = mutableListOf<BlockPos>()
         var currentX = center.blockX
         var currentZ = center.blockZ
@@ -868,7 +893,7 @@ class SettlementPlanner(val settlement: Settlement) {
         var err = dX - dZ
 
         while (true) {
-            pathPoints.add(BlockPos(currentX, 0, currentZ)) // Y is a placeholder initially
+            pathPoints.add(BlockPos(currentX, 0, currentZ))
 
             if (currentX == entrancePos.x && currentZ == entrancePos.z) break
             val e2 = 2 * err
@@ -882,7 +907,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // 2. Pre-cache and batch the heavy world/NMS block lookups to protect main-thread TPS [O(N)]
         val isWaterArray = BooleanArray(pathPoints.size)
         val naturalYArray = DoubleArray(pathPoints.size)
         val surfaceYArray = DoubleArray(pathPoints.size)
@@ -902,7 +926,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val heights = DoubleArray(pathPoints.size)
         heights[0] = if (isWaterArray[0]) surfaceYArray[0] else naturalYArray[0]
 
-        // FIXED: The end target of the path is exactly one block below the door to create a smooth entrance step
         heights[pathPoints.size - 1] = (entrancePos.y - 1).toDouble()
 
         for (i in 1 until pathPoints.size - 1) {
@@ -911,7 +934,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val isSuspendedArray = BooleanArray(pathPoints.size)
 
-        // Detect canyon/gorge gaps where the natural ground is more than 1.5 blocks below the smoothed path
         for (i in 0 until pathPoints.size) {
             val isWater = isWaterArray[i]
             val isTrench = !isWater && (surfaceYArray[i] < heights[i] - 1.5)
@@ -920,14 +942,11 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // 3. Apply relaxation passes (moving average) over the heights array to eliminate jagged micro-relief bumps [No GC or NMS overhead]
         repeat(5) {
             val nextHeights = heights.clone()
             for (i in 1 until heights.size - 1) {
                 nextHeights[i] = (heights[i - 1] + heights[i] + heights[i + 1]) / 3.0
             }
-            // Protect against floating or deep tunneling road sections by clamping to natural height boundaries.
-            // For water columns, we enforce that the bridge must never sink below the water surface level.
             for (i in 1 until heights.size - 1) {
                 val isWater = isWaterArray[i]
                 val isBridge = isSuspendedArray[i]
@@ -936,7 +955,7 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 val minAllowedY = when {
                     isWater -> surfaceY
-                    isBridge -> heights[i] - 0.2 // Tight clamp to preserve the parabolic curve
+                    isBridge -> heights[i] - 0.2
                     else -> naturalY - 2.0
                 }
                 val maxAllowedY = when {
@@ -949,7 +968,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // Group continuous canyon points and apply suspension bridge sag curve to them
         var inGap = false
         var gapStart = -1
         for (i in 0 until pathPoints.size) {
@@ -978,12 +996,10 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // Re-verify slope gradient restrictions
         val finalHeights = IntArray(pathPoints.size) { i ->
             Math.round(heights[i]).toInt()
         }
 
-        // 5. Force slope gradients to a maximum step of 1 to guarantee step-free path walking
         for (i in 1 until finalHeights.size) {
             val diff = finalHeights[i] - finalHeights[i - 1]
             if (abs(diff) > 1) {
@@ -998,7 +1014,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val halfW = width / 2 + 1
         val halfL = length / 2 + 1
 
-        // 6. Build the 2D footprint of the road to determine edges accurately
         val footprint2D = mutableMapOf<Pair<Int, Int>, Int>()
         val isWaterMap = mutableMapOf<Pair<Int, Int>, Boolean>()
         val isSuspendedMap = mutableMapOf<Pair<Int, Int>, Boolean>()
@@ -1023,8 +1038,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     val pz = pathZ + wz
                     val key = Pair(px, pz)
 
-                    // Water path overwrites dirt path if they overlap at the shore,
-                    // to ensure the bridge extends fully to the land.
                     if (isWaterAtCenter || !isWaterMap.getOrDefault(key, false)) {
                         footprint2D[key] = centerRoadY
                         isWaterMap[key] = isWaterAtCenter
@@ -1038,7 +1051,6 @@ class SettlementPlanner(val settlement: Settlement) {
         var blocksInJob = 0
         val maxBlocksPerJob = 64
 
-        // 7. Iterate and build the smoothed road segments using the footprint
         for ((key, py) in footprint2D) {
             val px = key.first
             val pz = key.second
@@ -1063,7 +1075,7 @@ class SettlementPlanner(val settlement: Settlement) {
             val currentBlock = world.getBlockAt(px, py, pz)
 
             val clearStart = py + 1
-            val clearEnd = py + 3 // For bridge structures, clear only local headroom space
+            val clearEnd = py + 3
             for (y in clearStart..clearEnd) {
                 currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
             }
@@ -1088,7 +1100,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     currentRoadJob.addBlock(BlockPos(px, py - 1, pz), slabData, isRoad = true)
                 }
             } else if (isSuspended) {
-                // Determine if this is a side block on the suspension bridge (fences are on a width of 3)
                 val isMovingX = abs(dX) > abs(dZ)
                 val isEdge = if (isMovingX) {
                     !footprint2D.containsKey(Pair(px, pz + 1)) || !footprint2D.containsKey(Pair(px, pz - 1))
@@ -1132,7 +1143,6 @@ class SettlementPlanner(val settlement: Settlement) {
             jobsList.add(currentRoadJob)
         }
 
-        // Process and rotate structure blocks first to obtain exact footprint coordinates
         val rawRelativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)
         val isBirchOverride = java.util.Random().nextDouble() < 0.30
 
@@ -1146,7 +1156,14 @@ class SettlementPlanner(val settlement: Settlement) {
             if (isBirchOverride) {
                 val dataStr = rotData.asString
                 if (dataStr.contains("oak") && !dataStr.contains("dark_oak")) {
-                    val birchDataStr = dataStr.replace("oak", "birch")
+                    var birchDataStr = dataStr.replace("oak", "birch")
+
+                    if (birchDataStr.contains("birch_log")) {
+                        birchDataStr = birchDataStr.replace("birch_log", "stripped_birch_log")
+                    } else if (birchDataStr.contains("birch_wood")) {
+                        birchDataStr = birchDataStr.replace("birch_wood", "stripped_birch_wood")
+                    }
+
                     try {
                         rotData = Bukkit.createBlockData(birchDataStr)
                     } catch (_: Exception) {}
@@ -1155,7 +1172,6 @@ class SettlementPlanner(val settlement: Settlement) {
             Pair(rotPos, rotData)
         }
 
-        // 2D Scanline Bounding footprint coordinates [Optimized to flat array primitive lookups to eliminate GC pressure]
         val minXArray = IntArray(length) { Int.MAX_VALUE }
         val maxXArray = IntArray(length) { Int.MIN_VALUE }
         val minZArray = IntArray(width) { Int.MAX_VALUE }
@@ -1198,7 +1214,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // Flat high-speed cache map for vertical terrain scanner
         val highestYMap = HashMap<Pair<Int, Int>, Int>()
         fun getCachedHighest(absX: Int, absZ: Int, x: Int, z: Int): Int {
             return highestYMap.getOrPut(Pair(x, z)) {
@@ -1244,8 +1259,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 val minY = if (minYArray[idx] == Int.MAX_VALUE) 0 else minYArray[idx]
                 val maxY = if (maxYArray[idx] == Int.MIN_VALUE) height else maxYArray[idx]
 
-                // Excavate only the exact vertical span occupied by structure blocks in this specific column.
-                // This preserves natural terrain under roof eaves, balconies, and outer decorations.
                 val startClearY = baseY + minY
                 val endClearY = baseY + maxY
                 for (y in startClearY..endClearY) {
@@ -1254,8 +1267,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
                 }
 
-                // Place foundation below the structure down to the ground ONLY if the column blocks actually
-                // start at the floor/ground level (minY <= 1). This keeps overhangs and roofs floating naturally.
                 if (minY <= 1) {
                     for (y in highest + 1 until baseY) {
                         val singleFoundationData = applyStoneVariability(foundationBlockData)
@@ -1289,7 +1300,6 @@ class SettlementPlanner(val settlement: Settlement) {
             val ratio = j.toDouble() / len
             val interpY = hStart + ratio * (hEnd - hStart)
 
-            // Parabolic dip (sag). Max 1 block dip for short bridges, 2 blocks for longer spans.
             val maxSag = if (len <= 8) 1.0 else 2.0
             val sagOffset = 4.0 * maxSag * ratio * (1.0 - ratio)
 

@@ -12,7 +12,6 @@ import org.bukkit.craftbukkit.block.CraftJigsaw
 import org.bukkit.util.BlockVector
 import vx.sv.util.RelativeBlock
 
-// Model of entrance candidate for rotation vector calculations
 data class EntranceCandidate(val pos: BlockPos, val facing: BlockFace?, val weight: Double)
 
 object VanillaStructureLoader {
@@ -20,6 +19,9 @@ object VanillaStructureLoader {
     fun getStructureSize(structurePath: String): BlockVector {
         if (structurePath == "custom/mine") {
             return BlockVector(7, 6, 7)
+        }
+        if (structurePath == "custom/iron_golem") {
+            return BlockVector(3, 3, 3)
         }
         val key = NamespacedKey.minecraft(structurePath)
         val structureManager = Bukkit.getStructureManager()
@@ -32,6 +34,9 @@ object VanillaStructureLoader {
     fun loadVanillaStructure(structurePath: String): List<RelativeBlock> {
         if (structurePath == "custom/mine") {
             return generateCustomMine()
+        }
+        if (structurePath == "custom/iron_golem") {
+            return generateCustomIronGolem()
         }
 
         val key = NamespacedKey.minecraft(structurePath)
@@ -55,7 +60,6 @@ object VanillaStructureLoader {
                     val craftJigsaw = blockState as CraftJigsaw
                     var finalStateStr: String? = null
 
-                    // Fallback 1: Extract directly from the raw snapshot NBT compound (highly stable, bypasses null tileEntity)
                     try {
                         val nbt = craftJigsaw.snapshotNBT
                         if (nbt != null && nbt.contains("final_state")) {
@@ -63,7 +67,6 @@ object VanillaStructureLoader {
                         }
                     } catch (_: Exception) {}
 
-                    // Fallback 2: Fallback to reading from the unplaced tile entity 'snapshot' field
                     if (finalStateStr.isNullOrEmpty()) {
                         try {
                             val snapshotField = CraftBlockEntityState::class.java.getDeclaredField("snapshot").apply { isAccessible = true }
@@ -72,7 +75,6 @@ object VanillaStructureLoader {
                         } catch (_: Exception) {}
                     }
 
-                    // Fallback 3: Final fallback to reading from 'tileEntity' field
                     if (finalStateStr.isNullOrEmpty()) {
                         try {
                             val tileEntityField = CraftBlockEntityState::class.java.getDeclaredField("tileEntity").apply { isAccessible = true }
@@ -91,7 +93,6 @@ object VanillaStructureLoader {
                 }
             }
 
-            // FIXED: Turning ready-made farmland into regular dirt so that farmers till it themselves
             if (blockData.material == Material.FARMLAND) {
                 blockData = Material.DIRT.createBlockData()
             }
@@ -116,6 +117,20 @@ object VanillaStructureLoader {
         }
 
         return relativeBlocks
+    }
+
+    private fun generateCustomIronGolem(): List<RelativeBlock> {
+        val blocks = mutableListOf<RelativeBlock>()
+        val iron = Material.IRON_BLOCK.createBlockData()
+        val pumpkin = Material.CARVED_PUMPKIN.createBlockData()
+
+        blocks.add(RelativeBlock(BlockPos(1, 0, 1), iron)) // Ноги
+        blocks.add(RelativeBlock(BlockPos(1, 1, 1), iron)) // Тело
+        blocks.add(RelativeBlock(BlockPos(0, 1, 1), iron)) // Рука 1
+        blocks.add(RelativeBlock(BlockPos(2, 1, 1), iron)) // Рука 2
+        blocks.add(RelativeBlock(BlockPos(1, 2, 1), pumpkin)) // Голова
+
+        return blocks
     }
 
     private fun generateCustomMine(): List<RelativeBlock> {
@@ -196,6 +211,9 @@ object VanillaStructureLoader {
     fun getRawEntranceCandidates(structurePath: String): List<EntranceCandidate> {
         if (structurePath == "custom/mine") {
             return listOf(EntranceCandidate(BlockPos(3, 0, 0), BlockFace.NORTH, 100.0))
+        }
+        if (structurePath == "custom/iron_golem") {
+            return listOf(EntranceCandidate(BlockPos(1, 0, 0), BlockFace.NORTH, 100.0))
         }
 
         val key = NamespacedKey.minecraft(structurePath)

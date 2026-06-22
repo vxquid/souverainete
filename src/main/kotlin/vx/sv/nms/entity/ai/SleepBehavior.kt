@@ -24,7 +24,6 @@ class SleepBehavior(
     200
 ) {
     companion object {
-        // Карта зарезервированных кроватей (BlockPos -> UUID жителя)
         private val reservedBeds = ConcurrentHashMap<BlockPos, UUID>()
 
         fun releaseBed(villagerUuid: UUID) {
@@ -41,7 +40,6 @@ class SleepBehavior(
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val time = world.world.time
-        // Время сна в Minecraft: с 13000 (закат) до 23000 тиков (рассвет)
         if (time < 13000 || time > 23000) {
             if (villager.isSleeping) {
                 villager.stopSleeping()
@@ -49,6 +47,16 @@ class SleepBehavior(
             }
             return false
         }
+
+        // Если обнаружен враг, спать нельзя — нужно обороняться
+        if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
+            if (villager.isSleeping) {
+                villager.stopSleeping()
+                releaseBed(villager.uuid)
+            }
+            return false
+        }
+
         return villager.settlement != null
     }
 
@@ -61,18 +69,43 @@ class SleepBehavior(
             }
             return false
         }
+
+        // Прерываем сон при обнаружении врага во время тика
+        if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
+            if (villager.isSleeping) {
+                villager.stopSleeping()
+                releaseBed(villager.uuid)
+            }
+            return false
+        }
+
         return villager.settlement != null
     }
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
         if (villager.isSleeping) {
+            // Проверка на случай появления врага непосредственно в фазе сна
+            if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
+                villager.stopSleeping()
+                releaseBed(villager.uuid)
+                return
+            }
+
+            if (villager.navigation.isInProgress) {
+                villager.navigation.stop()
+            }
+            if (villager.brain.hasMemoryValue(MemoryModuleType.WALK_TARGET)) {
+                villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+            }
+            if (villager.brain.hasMemoryValue(MemoryModuleType.LOOK_TARGET)) {
+                villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+            }
             return
         }
 
         val npcLoc = villager.bukkitEntity.location
         val bukkitWorld = world.world
 
-        // Ищем свободную кровать в радиусе 24 блоков, если цель еще не выбрана
         var bedPos = targetBedPos
         if (bedPos == null) {
             val r = 24
@@ -87,7 +120,6 @@ class SleepBehavior(
                         val block = bukkitWorld.getBlockAt(px, absY, pz)
                         if (block.type.name.endsWith("_BED")) {
                             val bedData = block.blockData as? Bed ?: continue
-                            // Проверяем только изголовье кровати (HEAD), так как на него ложится сущность
                             if (bedData.part != Bed.Part.HEAD) continue
 
                             val bp = BlockPos(px, absY, pz)
@@ -105,7 +137,6 @@ class SleepBehavior(
         }
 
         if (bedPos == null) {
-            // Если кроватей нет — отправляем жителя спать в центр (к колоколу)
             val settlement = villager.settlement ?: return
             val center = settlement.data.center
             val bellPos = BlockPos(center.blockX, center.blockY, center.blockZ)
@@ -118,15 +149,19 @@ class SleepBehavior(
         val distSq = npcLoc.distanceSquared(Location(bukkitWorld, bedPos.x.toDouble() + 0.5, bedPos.y.toDouble() + 0.5, bedPos.z.toDouble() + 0.5))
 
         if (distSq <= 4.0) {
+            villager.navigation.stop()
             villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
+            villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
+
+            val preciseBedLoc = Location(bukkitWorld, bedPos.x.toDouble() + 0.5, bedPos.y.toDouble() + 0.2, bedPos.z.toDouble() + 0.5, npcLoc.yaw, npcLoc.pitch)
+            villager.bukkitEntity.teleport(preciseBedLoc)
+
             try {
                 villager.startSleeping(bedPos)
             } catch (e: Exception) {
-                // Фоллбек на случай системных заклиниваний
                 villager.pose = net.minecraft.world.entity.Pose.SLEEPING
             }
         } else {
-            // Ведем жителя к кровати
             villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(bedPos), speedModifier, 1))
             villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(bedPos))
         }

@@ -35,12 +35,31 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
         val brain = villager.brain
         brain.eraseMemory(MemoryModuleType.ATTACK_TARGET)
 
-        val nearestVisible = brain.getMemory(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES).orElse(null) ?: return
+        val targetsList = mutableListOf<LivingEntity>()
 
-        // Search for the closest valid target
-        val target = nearestVisible.findClosest { entity ->
-            isValidTarget(villager, entity)
-        }.orElse(null)
+        // 1. Попытка получить видимых целей через сенсоры NMS
+        val nearestVisible = brain.getMemory(MemoryModuleType.NEAREST_VISIBLE_LIVING_ENTITIES).orElse(null)
+        if (nearestVisible != null) {
+            nearestVisible.findAll { entity -> isValidTarget(villager, entity) }.forEach { targetsList.add(it) }
+        }
+
+        // 2. Если житель спит или ничего не видит глазами (из-за темноты или стен),
+        // задействуем тактильно-слуховой радар в радиусе 12 блоков
+        if (targetsList.isEmpty()) {
+            val npcLoc = villager.bukkitEntity.location
+            val nearby = npcLoc.getNearbyEntities(12.0, 6.0, 12.0)
+            for (entity in nearby) {
+                if (entity is org.bukkit.entity.LivingEntity) {
+                    val nmsEntity = (entity as? org.bukkit.craftbukkit.entity.CraftLivingEntity)?.handle
+                    if (nmsEntity != null && isValidTarget(villager, nmsEntity)) {
+                        targetsList.add(nmsEntity)
+                    }
+                }
+            }
+        }
+
+        // Находим ближайшую валидную цель из всех обнаруженных
+        val target = targetsList.minByOrNull { it.distanceToSqr(villager) }
 
         if (target != null) {
             val bukkitVillager = villager.bukkitEntity as? Villager
@@ -51,7 +70,7 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
                 Bukkit.getPluginManager().callEvent(event)
 
                 if (event.isCancelled) {
-                    return // Event cancelled, abort targeting
+                    return // Ивент отменен, прерываем установку цели
                 }
             }
 
@@ -65,16 +84,10 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
         if (!target.isAlive) return false
 
         if (target is Monster) {
-            // Always defend if the monster is already actively targeting this villager
             if (target.target == attacker) return true
-
-            // Ignore Creepers so they don't blow up the settlement
             if (target is Creeper) return false
-
-            // Ignore Endermen since they are neutral unless provoked
             if (target is EnderMan) return false
 
-            // Ignore Spiders during the day since they become neutral in daylight
             if (target is Spider) {
                 val timeOfDay = attacker.level().world.time
                 if (timeOfDay in 0..12000) return false

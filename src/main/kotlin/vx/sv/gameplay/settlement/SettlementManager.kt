@@ -24,6 +24,7 @@ import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.gameplay.reputation.ReputationManager.Reputation
 import vx.sv.gameplay.settlement.gui.SettlementMenus
 import vx.sv.nms.entity.ai.construct.SettlementPlanner
+import vx.sv.nms.entity.ai.construct.VanillaBuildingType
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import java.util.concurrent.CompletableFuture
@@ -194,7 +195,18 @@ class SettlementManager : Listener {
                         saveSettlements(world)
                     }
 
+                    // Сканируем присутствие големов на территории поселения
+                    val golemCount = world.getNearbyEntities(settlement.territory) { it is org.bukkit.entity.IronGolem }.size
                     val planner = SettlementPlanner(settlement)
+
+                    if (golemCount == 0) {
+                        val records = SettlementPlanner.buildings[settlement.data.id] ?: emptyList()
+                        val alreadyPlanningGolem = records.any { it.type.startsWith("IRON_GOLEM") }
+                        if (!alreadyPlanningGolem) {
+                            planner.planBuilding(VanillaBuildingType.IRON_GOLEM)
+                        }
+                    }
+
                     val success = planner.planNextPriorityBuilding()
                     if (success) {
                         saveSettlements(world)
