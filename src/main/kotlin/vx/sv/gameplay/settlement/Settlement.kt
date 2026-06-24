@@ -1,5 +1,6 @@
 package vx.sv.gameplay.settlement
 
+import net.minecraft.core.BlockPos
 import org.bukkit.Location
 import org.bukkit.NamespacedKey
 import org.bukkit.entity.Villager
@@ -8,6 +9,7 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
 import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 
 class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> = mutableSetOf()) {
 
@@ -50,6 +52,9 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
     // РАКТИВНЫЙ РАНТАЙМ-ИНВЕНТАРЬ (ХРАНИТ РЕАЛЬНЫЕ ITEMSTACK В ПАМЯТИ)
     val villageInventory: MutableList<ItemStack> = mutableListOf()
 
+    // КЭШ КРОВАТЕЙ ДЛЯ ОПТИМИЗАЦИИ ИИ СНА (BlockPos изголовья кровати)
+    val cachedBeds = ConcurrentHashMap.newKeySet<BlockPos>()
+
     init {
         // Десериализуем предметы из Base64 при инициализации поселения
         if (data.serializedInventory.isNotEmpty()) {
@@ -74,6 +79,43 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
             syncToData()
         }
     }
+
+    // Сканирование и обновление кэша кроватей (выполняется планировщиком)
+    fun refreshCachedBeds() {
+        cachedBeds.clear()
+        val radius = plugin.gameplayManager.config.settlement.detectionDistance.toInt()
+        val center = data.center
+        val centerCX = center.blockX shr 4
+        val centerCZ = center.blockZ shr 4
+        val cRadius = radius shr 4
+
+        for (cx in (centerCX - cRadius)..(centerCX + cRadius)) {
+            for (cz in (centerCZ - cRadius)..(centerCZ + cRadius)) {
+                if (!world.isChunkLoaded(cx, cz)) continue
+                try {
+                    val chunk = world.getChunkAt(cx, cz)
+                    chunk.tileEntities.forEach { tile ->
+                        val block = tile.block
+                        if (block.type.name.endsWith("_BED")) {
+                            val bedData = block.blockData as? org.bukkit.block.data.type.Bed ?: return@forEach
+                            if (bedData.part == org.bukkit.block.data.type.Bed.Part.HEAD) {
+                                if (block.location.distanceSquared(center) <= radius * radius) {
+                                    // Валидация выживания (свет и потолок) прямо на этапе кэширования
+                                    if (block.lightLevel < 5) return@forEach
+                                    if (world.getHighestBlockYAt(block.x, block.z) < block.y) return@forEach
+
+                                    reservedBedsToBlockPos()
+                                    cachedBeds.add(BlockPos(block.x, block.y, block.z))
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    private fun reservedBedsToBlockPos() {}
 
     // Синхронизирует активные предметы в плоский Base64 список перед сохранением мира
     fun syncToData() {

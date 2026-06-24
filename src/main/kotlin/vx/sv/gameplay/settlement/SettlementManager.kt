@@ -195,21 +195,27 @@ class SettlementManager : Listener {
                         saveSettlements(world)
                     }
 
-                    // Сканируем присутствие големов на территории поселения
-                    val golemCount = world.getNearbyEntities(settlement.territory) { it is org.bukkit.entity.IronGolem }.size
-                    val planner = SettlementPlanner(settlement)
-
-                    if (golemCount == 0) {
-                        val records = SettlementPlanner.buildings[settlement.data.id] ?: emptyList()
-                        val alreadyPlanningGolem = records.any { it.type.startsWith("IRON_GOLEM") }
-                        if (!alreadyPlanningGolem) {
-                            planner.planBuilding(VanillaBuildingType.IRON_GOLEM)
-                        }
+                    // ОПТИМИЗАЦИЯ TPS: Сканируем только если в радиусе 256 блоков от центра есть активные игроки
+                    val center = settlement.data.center
+                    val hasPlayersNearby = world.players.any { player ->
+                        player.location.distanceSquared(center) <= 65536.0 // 256 блоков в квадрате
                     }
 
-                    val success = planner.planNextPriorityBuilding()
-                    if (success) {
-                        saveSettlements(world)
+                    if (hasPlayersNearby) {
+                        val golemCount = world.getNearbyEntities(settlement.territory) { it is org.bukkit.entity.IronGolem }.size
+                        val planner = SettlementPlanner(settlement)
+
+                        if (golemCount == 0) {
+                            val records = SettlementPlanner.buildings[settlement.data.id] ?: emptyList()
+                            val alreadyPlanningGolem = records.any { it.type.startsWith("IRON_GOLEM") }
+                            if (!alreadyPlanningGolem) {
+                                planner.planBuilding(VanillaBuildingType.IRON_GOLEM)
+                            }
+                        }
+
+                        // Убрана автоматическая запись при каждом тике планировщика.
+                        // Сохранение перенесено непосредственно в момент успешного нахождения свободного места под здание.
+                        planner.planNextPriorityBuilding()
                     }
                 }
             }

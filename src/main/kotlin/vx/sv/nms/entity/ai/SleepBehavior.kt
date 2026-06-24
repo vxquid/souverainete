@@ -9,7 +9,6 @@ import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
 import org.bukkit.Location
-import org.bukkit.block.data.type.Bed
 import vx.sv.nms.entity.HumanoidVillager
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -48,7 +47,6 @@ class SleepBehavior(
             return false
         }
 
-        // Если обнаружен враг, спать нельзя — нужно обороняться
         if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
             if (villager.isSleeping) {
                 villager.stopSleeping()
@@ -70,7 +68,6 @@ class SleepBehavior(
             return false
         }
 
-        // Прерываем сон при обнаружении врага во время тика
         if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
             if (villager.isSleeping) {
                 villager.stopSleeping()
@@ -84,7 +81,6 @@ class SleepBehavior(
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
         if (villager.isSleeping) {
-            // Проверка на случай появления врага непосредственно в фазе сна
             if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
                 villager.stopSleeping()
                 releaseBed(villager.uuid)
@@ -108,30 +104,24 @@ class SleepBehavior(
 
         var bedPos = targetBedPos
         if (bedPos == null) {
-            val r = 24
-            searchLoop@ for (cx in -r..r) {
-                for (cz in -r..r) {
-                    val px = npcLoc.blockX + cx
-                    val pz = npcLoc.blockZ + cz
-                    val py = npcLoc.blockY
+            val settlement = villager.settlement
+            if (settlement != null) {
+                // Сортируем кровати по удаленности от жителя, чтобы выбрать ближайшую
+                val sortedBeds = settlement.cachedBeds.sortedBy { bp ->
+                    val loc = Location(bukkitWorld, bp.x + 0.5, bp.y + 0.5, bp.z + 0.5)
+                    npcLoc.distanceSquared(loc)
+                }
 
-                    for (cy in -6..6) {
-                        val absY = py + cy
-                        val block = bukkitWorld.getBlockAt(px, absY, pz)
-                        if (block.type.name.endsWith("_BED")) {
-                            val bedData = block.blockData as? Bed ?: continue
-                            if (bedData.part != Bed.Part.HEAD) continue
+                // Ищем первую свободную или зарезервированную этим же жителем кровать
+                val availableBed = sortedBeds.find { bp ->
+                    val res = reservedBeds[bp]
+                    res == null || res == villager.uuid
+                }
 
-                            val bp = BlockPos(px, absY, pz)
-                            val res = reservedBeds[bp]
-                            if (res == null || res == villager.uuid) {
-                                reservedBeds[bp] = villager.uuid
-                                bedPos = bp
-                                targetBedPos = bp
-                                break@searchLoop
-                            }
-                        }
-                    }
+                if (availableBed != null) {
+                    reservedBeds[availableBed] = villager.uuid
+                    bedPos = availableBed
+                    targetBedPos = availableBed
                 }
             }
         }
@@ -146,14 +136,14 @@ class SleepBehavior(
             return
         }
 
-        val distSq = npcLoc.distanceSquared(Location(bukkitWorld, bedPos.x.toDouble() + 0.5, bedPos.y.toDouble() + 0.5, bedPos.z.toDouble() + 0.5))
+        val distSq = npcLoc.distanceSquared(Location(bukkitWorld, bedPos.x + 0.5, bedPos.y + 0.5, bedPos.z + 0.5))
 
         if (distSq <= 4.0) {
             villager.navigation.stop()
             villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
             villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
 
-            val preciseBedLoc = Location(bukkitWorld, bedPos.x.toDouble() + 0.5, bedPos.y.toDouble() + 0.2, bedPos.z.toDouble() + 0.5, npcLoc.yaw, npcLoc.pitch)
+            val preciseBedLoc = Location(bukkitWorld, bedPos.x + 0.5, bedPos.y + 0.2, bedPos.z + 0.5, npcLoc.yaw, npcLoc.pitch)
             villager.bukkitEntity.teleport(preciseBedLoc)
 
             try {

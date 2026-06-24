@@ -5,7 +5,6 @@ import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer
 import org.bukkit.Bukkit
 import org.bukkit.Material
 import org.bukkit.Sound
-import org.bukkit.block.data.type.Bed
 import org.bukkit.entity.Player
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
@@ -37,7 +36,6 @@ object SettlementMenus : Listener {
 
     enum class MenuType { MAIN, POPULATION, SETTINGS, INVENTORY }
 
-    // --- MAIN MENU ---
     fun openMainMenu(player: Player, settlement: Settlement) {
         val titleRaw = settlement.data.settlementName
         val title = LegacyComponentSerializer.legacySection().deserialize("§8$titleRaw")
@@ -46,29 +44,28 @@ object SettlementMenus : Listener {
 
         fillBorders(inv)
 
-        // 1. Кнопка населения
         inv.setItem(11, createItem(
             Material.PLAYER_HEAD,
             lang("settlement.menu.main.population.name", "§a👥 Citizens"),
             langList("settlement.menu.main.population.lore", listOf("§7Click to view", "§7resident list."))
         ))
 
-        // 2. Кнопка склада (виртуальный инвентарь поселения)
         inv.setItem(14, createItem(
             Material.CHEST,
             lang("settlement.menu.main.inventory.name", "§6📦 Warehouse"),
             langList("settlement.menu.main.inventory.lore", listOf("§7Click to view", "§7settlement warehouse."))
         ))
 
-        // 3. Кнопка настроек
         inv.setItem(15, createItem(
             Material.COMPARATOR,
             lang("settlement.menu.main.settings.name", "§6⚙ Management"),
             langList("settlement.menu.main.settings.lore", listOf("§7Rename and settings."))
         ))
 
-        // 4. Книга статистики
-        val bedCount = countValidBeds(settlement)
+        // ОПТИМИЗАЦИЯ ИСПРАВЛЕНИЯ: Вместо тяжелого сканирования TileEntities в цикле, берем размер кэша
+        settlement.refreshCachedBeds()
+        val bedCount = settlement.cachedBeds.size
+
         val statsLore = langList("settlement.menu.main.stats.lore", listOf(
             "§7Population: §b{pop}",
             "§7Size: §a{size}",
@@ -94,7 +91,6 @@ object SettlementMenus : Listener {
         playClickSound(player)
     }
 
-    // --- POPULATION MENU ---
     fun openPopulationMenu(player: Player, settlement: Settlement) {
         val citizens = settlement.villagers.filter { it.isValid }.toList()
         val size = minOf(54, ((citizens.size / 9) + 1) * 9).coerceAtLeast(27)
@@ -139,7 +135,6 @@ object SettlementMenus : Listener {
         playClickSound(player)
     }
 
-    // --- SETTINGS MENU ---
     fun openSettingsMenu(player: Player, settlement: Settlement) {
         val titleRaw = lang("settlement.menu.settings.title", "§8Management")
         val title = LegacyComponentSerializer.legacySection().deserialize(titleRaw)
@@ -162,9 +157,7 @@ object SettlementMenus : Listener {
         playClickSound(player)
     }
 
-    // --- WAREHOUSE MENU (PAGINATED) ---
     fun openInventoryMenu(player: Player, settlement: Settlement, page: Int = 0) {
-        // ИСПРАВЛЕНО: Безопасное аккумулирование бесконечного количества предметов без порчи хэш-ключей
         val aggregatedMap = mutableMapOf<ItemStack, Int>()
         for (item in settlement.villageInventory) {
             if (item.type == Material.AIR) continue
@@ -183,17 +176,16 @@ object SettlementMenus : Listener {
             }
         }
 
-        // ИСПРАВЛЕНО: Группировка и сортировка по категориям: еда, оружие, броня, инструменты, стройматериалы
         val sortedItemsList = aggregatedMap.toList().sortedWith(
             compareBy<Pair<ItemStack, Int>> { pair ->
                 val type = pair.first.type
                 val name = type.name
                 when {
-                    type.isEdible -> 0 // Еда в самом начале
-                    name.contains("SWORD") || name.contains("BOW") || name.contains("TRIDENT") || name.contains("CROSSBOW") -> 1 // Оружие
-                    name.contains("HELMET") || name.contains("CHESTPLATE") || name.contains("LEGGINGS") || name.contains("BOOTS") || type == Material.SHIELD -> 2 // Броня
-                    name.contains("PICKAXE") || name.contains("AXE") || name.contains("SHOVEL") || name.contains("HOE") || type == Material.SHEARS || type == Material.LEAD -> 3 // Инструменты
-                    else -> 4 // Все остальное (блоки, стройматериалы)
+                    type.isEdible -> 0
+                    name.contains("SWORD") || name.contains("BOW") || name.contains("TRIDENT") || name.contains("CROSSBOW") -> 1
+                    name.contains("HELMET") || name.contains("CHESTPLATE") || name.contains("LEGGINGS") || name.contains("BOOTS") || type == Material.SHIELD -> 2
+                    name.contains("PICKAXE") || name.contains("AXE") || name.contains("SHOVEL") || name.contains("HOE") || type == Material.SHEARS || type == Material.LEAD -> 3
+                    else -> 4
                 }
             }.thenBy { it.first.type.name }
         )
@@ -213,11 +205,10 @@ object SettlementMenus : Listener {
         val startIndex = currentPage * itemsPerPage
         val endIndex = minOf(startIndex + itemsPerPage, totalItems)
 
-        // Заполняем слоты инвентаря
         for (i in startIndex until endIndex) {
             val (baseItem, totalCount) = sortedItemsList[i]
             val displayItem = baseItem.clone()
-            displayItem.amount = 1 // Визуально в слоте отображаем ровно 1 штуку
+            displayItem.amount = 1
 
             val meta = displayItem.itemMeta
             if (meta != null) {
@@ -226,23 +217,19 @@ object SettlementMenus : Listener {
                 } else {
                     displayItem.type.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() }
                 }
-                // Название в форме name - count
                 meta.setDisplayName("§e$originalName §7- §b$totalCount")
                 displayItem.itemMeta = meta
             }
             inv.setItem(i - startIndex, displayItem)
         }
 
-        // Заполняем нижнюю панель
         val glass = createItem(Material.GRAY_STAINED_GLASS_PANE, " ", emptyList())
         for (slot in 45..53) {
             inv.setItem(slot, glass)
         }
 
-        // Возврат назад
         inv.setItem(49, createItem(Material.ARROW, lang("settlement.menu.common.back", "§cBack"), emptyList()))
 
-        // Стрелка назад (Предыдущая страница)
         if (currentPage > 0) {
             inv.setItem(45, createItem(Material.PLAYER_HEAD, lang("settlement.menu.inventory.prev", "§a« Previous Page"), emptyList()).apply {
                 editMeta(SkullMeta::class.java) { meta ->
@@ -254,7 +241,6 @@ object SettlementMenus : Listener {
             })
         }
 
-        // Стрелка вперед (Следующая страница)
         if (currentPage < maxPage) {
             inv.setItem(53, createItem(Material.PLAYER_HEAD, lang("settlement.menu.inventory.next", "§aNext Page »"), emptyList()).apply {
                 editMeta(SkullMeta::class.java) { meta ->
@@ -270,7 +256,6 @@ object SettlementMenus : Listener {
         playClickSound(player)
     }
 
-    // --- МЕТОД ПОЛУЧЕНИЯ ГОЛОВЫ ---
     private fun getSkull(textures: String): ItemStack {
         val head = ItemStack(Material.PLAYER_HEAD)
         head.editMeta(SkullMeta::class.java) { skullMeta ->
@@ -282,41 +267,9 @@ object SettlementMenus : Listener {
         return head
     }
 
-    // --- ПОДСЧЕТ КРОВАТЕЙ (В основном потоке) ---
-    private fun countValidBeds(settlement: Settlement): Int {
-        var count = 0
-        val world = settlement.world
-        val center = settlement.data.center
-        val radius = plugin.gameplayManager.config.settlement.detectionDistance.toInt()
+    // Метод полностью упразднен за ненадобностью и перенесен внутрь Settlement в оптимизированном виде.
+    private fun countValidBeds(settlement: Settlement): Int = settlement.cachedBeds.size
 
-        val centerCX = center.blockX shr 4
-        val centerCZ = center.blockZ shr 4
-        val cRadius = radius shr 4
-
-        for (cx in (centerCX - cRadius)..(centerCX + cRadius)) {
-            for (cz in (centerCZ - cRadius)..(centerCZ + cRadius)) {
-                if (!world.isChunkLoaded(cx, cz)) continue
-
-                world.getChunkAt(cx, cz).tileEntities.forEach { tile ->
-                    val block = tile.block
-                    if (!block.type.name.endsWith("_BED")) return@forEach
-
-                    val bedData = block.blockData as? Bed ?: return@forEach
-                    if (bedData.part != Bed.Part.HEAD) return@forEach
-
-                    if (block.location.distance(center) > radius) return@forEach
-
-                    if (block.lightLevel < 5) return@forEach
-                    if (world.getHighestBlockYAt(block.x, block.z) <= block.y) return@forEach
-
-                    count++
-                }
-            }
-        }
-        return count
-    }
-
-    // --- EVENTS ---
     @EventHandler
     fun onInventoryClick(event: InventoryClickEvent) {
         val holder = event.inventory.holder as? SettlementHolder ?: return
@@ -382,7 +335,6 @@ object SettlementMenus : Listener {
         })
     }
 
-    // --- HELPERS ---
     private fun lang(path: String, def: String) = plugin.language.getString(path, def) ?: def
     private fun langList(path: String, def: List<String>) = plugin.language.getStringList(path).ifEmpty { def }
 

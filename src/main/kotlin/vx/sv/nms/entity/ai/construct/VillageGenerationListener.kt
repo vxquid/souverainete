@@ -34,9 +34,8 @@ class VillageGenerationListener : Listener {
 
     private fun spawnVillageAnimals(center: Location) {
         val world = center.world ?: return
-        val random = java.util.Random()
+        val random = Random()
 
-        val sheepNames = listOf("Шон", "Кудряш", "Облачко", "Снежок", "Зефир", "Долли", "Пуговка")
         val sheepCount = 4 + random.nextInt(3)
 
         for (i in 0 until sheepCount) {
@@ -48,10 +47,6 @@ class VillageGenerationListener : Listener {
             spawnLoc.y = groundY.toDouble() + 1.0
 
             world.spawn(spawnLoc, org.bukkit.entity.Sheep::class.java) { sheep ->
-                val name = sheepNames.getOrElse(i % sheepNames.size) { "Деревенская овца" }
-                sheep.customName(net.kyori.adventure.text.Component.text(name, net.kyori.adventure.text.format.NamedTextColor.GREEN))
-                sheep.isCustomNameVisible = true
-
                 sheep.persistentDataContainer.set(
                     NamespacedKey(plugin, "village_animal"),
                     PersistentDataType.BYTE,
@@ -60,7 +55,6 @@ class VillageGenerationListener : Listener {
             }
         }
 
-        val catNames = listOf("Мурзик", "Барсик", "Рыжик", "Уголек", "Пушок")
         for (i in 0 until 2) {
             val angle = random.nextDouble() * 2 * Math.PI
             val distance = 2.0 + random.nextDouble() * 3.0
@@ -70,10 +64,6 @@ class VillageGenerationListener : Listener {
             spawnLoc.y = groundY.toDouble() + 1.0
 
             world.spawn(spawnLoc, org.bukkit.entity.Cat::class.java) { cat ->
-                val name = catNames.getOrElse(i % catNames.size) { "Деревенский кот" }
-                cat.customName(net.kyori.adventure.text.Component.text(name, net.kyori.adventure.text.format.NamedTextColor.YELLOW))
-                cat.isCustomNameVisible = true
-
                 cat.persistentDataContainer.set(
                     NamespacedKey(plugin, "village_animal"),
                     PersistentDataType.BYTE,
@@ -132,7 +122,6 @@ class VillageGenerationListener : Listener {
     fun onVanillaVillageSpawn(event: AsyncStructureSpawnEvent) {
         val world = event.world
 
-        // Check if the world is allowed in early config before cancelling generation
         if (!plugin.gameplayConfig.worlds.allowedWorlds.contains(world.name)) {
             return
         }

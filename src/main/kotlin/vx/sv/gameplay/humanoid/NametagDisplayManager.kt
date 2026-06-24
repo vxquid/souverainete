@@ -56,6 +56,8 @@ class NametagDisplayManager : Listener {
     // Safe starting ID for fake text display entities to prevent collision with actual server entities
     private val entityIdGenerator = AtomicInteger(2_000_000)
 
+    enum class DisplayState { PENDING, SPAWNED, DESTROYED }
+
     /**
      * Holds the current state of a rendered nametag to avoid sending redundant packets.
      */
@@ -66,7 +68,7 @@ class NametagDisplayManager : Listener {
         var lastBgColor: Int? = null,
         var lastText: String = "",
         val randomYOffset: Float,
-        @Volatile var isSpawned: Boolean = false
+        @Volatile var state: DisplayState = DisplayState.PENDING
     )
 
     /**
@@ -130,7 +132,6 @@ class NametagDisplayManager : Listener {
         PacketEvents.getAPI().eventManager.registerListener(object : SimplePacketListenerAbstract(PacketListenerPriority.MONITOR) {
 
             override fun onPacketPlaySend(event: PacketPlaySendEvent) {
-                // Ignore if it's not a DESTROY_ENTITIES packet
                 if (event.packetType != PacketType.Play.Server.DESTROY_ENTITIES) return
 
                 val packet = WrapperPlayServerDestroyEntities(event)
@@ -141,17 +142,21 @@ class NametagDisplayManager : Listener {
 
                 val displaysToDestroy = mutableListOf<Int>()
 
-                // Check if any of the destroyed entities have an attached nametag
                 for (entityId in packet.entityIds) {
                     initializedSet?.remove(entityId)
 
                     val displayData = displaysMap?.remove(entityId)
-                    if (displayData != null && displayData.isSpawned) {
-                        displaysToDestroy.add(displayData.displayEntityId)
+                    if (displayData != null) {
+                        // Синхронизируем доступ к стейту для предотвращения деспавн-гонки
+                        synchronized(displayData) {
+                            if (displayData.state == DisplayState.SPAWNED) {
+                                displaysToDestroy.add(displayData.displayEntityId)
+                            }
+                            displayData.state = DisplayState.DESTROYED
+                        }
                     }
                 }
 
-                // Append the nametag entities to a new destroy packet
                 if (displaysToDestroy.isNotEmpty() && player.isOnline) {
                     val destroyPacket = WrapperPlayServerDestroyEntities(*displaysToDestroy.toIntArray())
                     PacketEvents.getAPI().playerManager.getUser(player)?.sendPacket(destroyPacket)
@@ -167,14 +172,12 @@ class NametagDisplayManager : Listener {
 
     @EventHandler
     fun onHumanoidInit(event: HumanoidInitializationEvent) {
-        // Allow spawning the nametag as soon as the ProtocolListener has successfully shown the fake player model.
         initializedHumanoids.computeIfAbsent(event.player.uniqueId) { ConcurrentHashMap.newKeySet() }
             .add(event.entity.entityId)
     }
 
     @EventHandler
     fun onPlayerQuit(event: PlayerQuitEvent) {
-        // Clear memory on disconnect
         val uuid = event.player.uniqueId
         initializedHumanoids.remove(uuid)
         activeDisplays.remove(uuid)
@@ -197,7 +200,6 @@ class NametagDisplayManager : Listener {
                 val viewDistance = cfg.nametag.viewDistance.toDouble()
                 val viewDistanceSq = viewDistance * viewDistance
 
-                // Cache snapshots so we don't query Bukkit API multiple times for the same NPC
                 val npcCache = mutableMapOf<Int, NpcSnapshot>()
                 val dispatchMap = mutableMapOf<Player, List<PlayerViewData>>()
 
@@ -215,7 +217,6 @@ class NametagDisplayManager : Listener {
                     val viewList = mutableListOf<PlayerViewData>()
 
                     for (npc in nearbyVillagers) {
-                        // SKIP VILLAGERS that haven't been replaced with fake players by the ProtocolListener yet!
                         if (!initializedIds.contains(npc.entityId)) continue
 
                         val toNpcVector = npc.eyeLocation.toVector().subtract(playerEyeLoc.toVector())
@@ -225,11 +226,8 @@ class NametagDisplayManager : Listener {
                         val dist = sqrt(distSq)
                         val dot = playerDir.dot(toNpcVector.normalize())
 
-                        // Calculate focus score using dot product.
-                        // High score means the player is looking directly at the NPC.
                         val focusScore = if (dot > 0.5) (dot * 10.0) - dist else -Double.MAX_VALUE
 
-                        // Build or retrieve the NPC snapshot
                         val snapshot = npcCache.getOrPut(npc.entityId) {
                             val isCeilingLow = npc.location.clone().add(0.0, 2.2, 0.0).block.type.isSolid
                             val isRaider = npc.persistentDataContainer.has(RAIDER_KEY, PersistentDataType.BYTE)
@@ -238,7 +236,6 @@ class NametagDisplayManager : Listener {
                             val nmsVillager = (npc as? CraftVillager)?.handle as? HumanoidVillager
                             val isBuilding = nmsVillager?.activeBuildJob != null && nmsVillager.assignedBlock != null
 
-                            // FIXED: Map 'toolsmith' to 'miner' ONLY if the villager has the 'is_miner' PDC tag (works at the mine)
                             val baseProf = npc.profession.key.key.lowercase()
                             val isMiner = npc.persistentDataContainer.has(MINER_KEY, PersistentDataType.BYTE)
                             val profName = if (isBuilding) "builder" else if (baseProf == "toolsmith" && isMiner) "miner" else baseProf
@@ -258,12 +255,11 @@ class NametagDisplayManager : Listener {
                                 maxHealth = npc.getAttribute(Attribute.MAX_HEALTH)?.value ?: 20.0,
                                 hungerValue = npc.hunger.toInt(),
                                 partyLeaderUuid = plugin.gameplayManager.partyManager.getLeaderUUID(npc),
-                                randomYOffset = (npc.uniqueId.hashCode() % 16) / 100f, // Adds slight variance to prevent z-fighting
+                                randomYOffset = (npc.uniqueId.hashCode() % 16) / 100f,
                                 settlementRepMap = settlementData?.reputation?.toMap() ?: emptyMap()
                             )
                         }
 
-                        // Collect player-specific data regarding this NPC
                         val personalRep = plugin.gameplayManager.reputationManager.getReputationMap(npc)[player.uniqueId] ?: 0
                         val npcState = plugin.gameplayManager.reputationTracker.getNPCState(npc, player)
 
@@ -275,14 +271,13 @@ class NametagDisplayManager : Listener {
                                 stateColor = npcState?.color,
                                 focusScore = focusScore,
                                 distanceSq = distSq,
-                                isSingleClose = (nearbyVillagers.size == 1 && distSq < 9.0) // Auto-focus if it's the only one nearby
+                                isSingleClose = (nearbyVillagers.size == 1 && distSq < 9.0)
                             )
                         )
                     }
                     dispatchMap[player] = viewList
                 }
 
-                // Process the collected views off the main thread to save tick time
                 plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
                     processAsyncDisplayUpdates(dispatchMap)
                 })
@@ -304,7 +299,6 @@ class NametagDisplayManager : Listener {
             val currentVisibleIds = mutableSetOf<Int>()
             val isVanillaMode = player.preferences.nametagMode == NametagMode.VANILLA
 
-            // Find the NPC the player is looking at most directly
             var bestFocusId = -1
             var bestScore = -Double.MAX_VALUE
             for (view in viewList) {
@@ -319,7 +313,6 @@ class NametagDisplayManager : Listener {
                 val isFocused = (snapshot.entityId == bestFocusId) || view.isSingleClose
                 currentVisibleIds.add(snapshot.entityId)
 
-                // Render the text depending on the player's preference
                 val text = if (isVanillaMode) {
                     val nameToShow = if (snapshot.name != "Unknown") snapshot.name else {
                         when {
@@ -328,23 +321,21 @@ class NametagDisplayManager : Listener {
                             else -> (plugin.language.getString("villager-professions.${snapshot.professionName}") ?: snapshot.professionName).replace("_", " ").capitalizeWords()
                         }
                     }
-                    "&f$nameToShow" // White text like vanilla nametags
+                    "&f$nameToShow"
                 } else {
                     buildText(view, isFocused, player.uniqueId)
                 }
 
                 val targetBgColor = if (isVanillaMode) {
-                    toARGBInt(64, 0, 0, 0) // Standard vanilla translucent black background
+                    toARGBInt(64, 0, 0, 0)
                 } else {
                     determineBackgroundColor(snapshot, player.uniqueId, baseConfigColor, isFocused)
                 }
 
                 val baseOffsetY = config.nametag.displayOffsetY.toFloat()
-                // Lower the nametag slightly if the NPC is standing under a low ceiling
                 val targetOffsetY = (if (snapshot.isCeilingLow) baseOffsetY - 0.45f else baseOffsetY) + snapshot.randomYOffset
 
                 val baseScaleCfg = config.nametag.displayScale
-                // In vanilla mode, scale is static so it doesn't jump
                 val targetScaleMult = if (isVanillaMode) 0.85f else if (isFocused) 1.0f else 0.65f
                 val scale = PEVector3f(
                     baseScaleCfg[0] * targetScaleMult,
@@ -357,7 +348,6 @@ class NametagDisplayManager : Listener {
 
                 val data = playerDisplays[snapshot.entityId]
 
-                // If nametag doesn't exist yet, spawn it
                 if (data == null) {
                     val newDisplayId = entityIdGenerator.incrementAndGet()
                     val newData = DisplayData(newDisplayId, randomYOffset = snapshot.randomYOffset)
@@ -368,56 +358,68 @@ class NametagDisplayManager : Listener {
                     newData.lastBgColor = targetBgColor
                     newData.lastText = text
 
-                    // Delay the spawn slightly to ensure the base entity passenger update registers
                     plugin.server.scheduler.runTaskLaterAsynchronously(plugin, Runnable {
                         if (player.isOnline && playerDisplays[snapshot.entityId] == newData) {
-                            sendSpawnPackets(player, snapshot.entityId, newDisplayId)
-                            sendMetadataPacket(player, newDisplayId, newData.lastText, newData.lastBgColor ?: targetBgColor, opacity, scale, translation, 0, 0)
-                            newData.isSpawned = true
+                            // Синхронизируем вызов спавна
+                            synchronized(newData) {
+                                if (newData.state == DisplayState.PENDING) {
+                                    sendSpawnPackets(player, snapshot.entityId, newDisplayId)
+                                    sendMetadataPacket(player, newDisplayId, newData.lastText, newData.lastBgColor ?: targetBgColor, opacity, scale, translation, 0, 0)
+                                    newData.state = DisplayState.SPAWNED
+                                }
+                            }
                         }
                     }, 5L)
                 } else {
-                    // Update existing nametag if needed
-                    if (!data.isSpawned) {
+                    synchronized(data) {
+                        if (data.state == DisplayState.DESTROYED) return@synchronized
+
+                        val focusGained = isFocused && data.lastFocusState != true
+                        val visualChanged = data.lastFocusState != isFocused || data.lastCeilingState != snapshot.isCeilingLow || data.lastBgColor != targetBgColor
+                        val textChanged = data.lastText != text
+
+                        if (focusGained && !isVanillaMode) {
+                            sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 0, 0)
+
+                            plugin.server.scheduler.runTaskLaterAsynchronously(plugin, Runnable {
+                                if (player.isOnline && playerDisplays[snapshot.entityId] == data) {
+                                    synchronized(data) {
+                                        if (data.state == DisplayState.SPAWNED) {
+                                            sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 10, 0)
+                                        }
+                                    }
+                                }
+                            }, 1L)
+                        } else if (visualChanged || textChanged) {
+                            if (data.state == DisplayState.SPAWNED) {
+                                sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 10, 0)
+                            }
+                        }
+
                         data.lastFocusState = isFocused
                         data.lastCeilingState = snapshot.isCeilingLow
                         data.lastBgColor = targetBgColor
                         data.lastText = text
-                        continue
                     }
-
-                    val focusGained = isFocused && data.lastFocusState != true
-                    val visualChanged = data.lastFocusState != isFocused || data.lastCeilingState != snapshot.isCeilingLow || data.lastBgColor != targetBgColor
-                    val textChanged = data.lastText != text
-
-                    if (focusGained && !isVanillaMode) {
-                        // When gaining focus, instantly snap to full opacity to make it feel responsive
-                        sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 0, 0)
-
-                        // Follow up with a smooth interpolation for scale/translation
-                        plugin.server.scheduler.runTaskLaterAsynchronously(plugin, Runnable {
-                            if (player.isOnline && playerDisplays.contains(snapshot.entityId)) {
-                                sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 10, 0)
-                            }
-                        }, 1L)
-                    } else if (visualChanged || textChanged) {
-                        sendMetadataPacket(player, data.displayEntityId, text, targetBgColor, opacity, scale, translation, 10, 0)
-                    }
-
-                    // Update cached state
-                    data.lastFocusState = isFocused
-                    data.lastCeilingState = snapshot.isCeilingLow
-                    data.lastBgColor = targetBgColor
-                    data.lastText = text
                 }
             }
 
-            // Remove displays for entities that are no longer visible or out of range
             val oldIds = playerDisplays.keys().toList()
             val toRemove = oldIds.filter { it !in currentVisibleIds }
 
             if (toRemove.isNotEmpty()) {
-                val destroyEntityIds = toRemove.mapNotNull { playerDisplays.remove(it)?.displayEntityId }.toIntArray()
+                val destroyEntityIds = toRemove.mapNotNull {
+                    val displayData = playerDisplays.remove(it) ?: return@mapNotNull null
+                    var idToDestroy: Int? = null
+                    synchronized(displayData) {
+                        if (displayData.state == DisplayState.SPAWNED) {
+                            idToDestroy = displayData.displayEntityId
+                        }
+                        displayData.state = DisplayState.DESTROYED
+                    }
+                    idToDestroy
+                }.toIntArray()
+
                 if (destroyEntityIds.isNotEmpty() && player.isOnline) {
                     PacketEvents.getAPI().playerManager.getUser(player)?.sendPacket(
                         WrapperPlayServerDestroyEntities(*destroyEntityIds)
@@ -512,7 +514,7 @@ class NametagDisplayManager : Listener {
             else -> {
                 when (snap.professionName) {
                     "armorer", "weaponsmith", "toolsmith", "guard" -> Color.fromARGB(targetAlpha, 80, 85, 95)
-                    "miner" -> Color.fromARGB(targetAlpha, 70, 70, 70) // Slate gray/charcoal background for active miners
+                    "miner" -> Color.fromARGB(targetAlpha, 70, 70, 70)
                     "cleric", "librarian", "mage" -> Color.fromARGB(targetAlpha, 100, 40, 140)
                     "farmer", "shepherd", "fisherman", "fletcher" -> Color.fromARGB(targetAlpha, 80, 120, 40)
                     "butcher", "leatherworker" -> Color.fromARGB(targetAlpha, 130, 60, 40)
@@ -539,7 +541,6 @@ class NametagDisplayManager : Listener {
             player.location.z
         )
 
-        // Spawn Text Display entity
         val spawnPacket = WrapperPlayServerSpawnEntity(
             displayEntityId,
             Optional.of(UUID.randomUUID()),
@@ -549,7 +550,6 @@ class NametagDisplayManager : Listener {
         )
         user.sendPacket(spawnPacket)
 
-        // Mount the display on the NPC as a passenger
         val passengerPacket = WrapperPlayServerSetPassengers(
             baseEntityId,
             intArrayOf(displayEntityId)
@@ -582,8 +582,8 @@ class NametagDisplayManager : Listener {
             EntityData(DisplayMeta.TRANSLATION, EntityDataTypes.VECTOR3F, translation),
             EntityData(DisplayMeta.INTERPOLATION_DURATION, EntityDataTypes.INT, interpDuration),
             EntityData(DisplayMeta.INTERPOLATION_DELAY, EntityDataTypes.INT, interpDelay),
-            EntityData(DisplayMeta.BILLBOARD, EntityDataTypes.BYTE, 3.toByte()), // 3 = Center Billboard (always faces player)
-            EntityData(DisplayMeta.FLAGS, EntityDataTypes.BYTE, 1.toByte()) // 1 = Shadow (Makes it look natively vanilla!)
+            EntityData(DisplayMeta.BILLBOARD, EntityDataTypes.BYTE, 3.toByte()),
+            EntityData(DisplayMeta.FLAGS, EntityDataTypes.BYTE, 1.toByte())
         )
 
         user.sendPacket(WrapperPlayServerEntityMetadata(displayEntityId, metadata))

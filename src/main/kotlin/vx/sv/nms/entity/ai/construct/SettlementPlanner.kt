@@ -134,7 +134,6 @@ class SettlementPlanner(val settlement: Settlement) {
             val settlementId = settlement.data.id
             val activeList = activeJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
 
-            // Перехватываем завершение ИИ-работ для вызова триггеров
             val iterator = activeList.iterator()
             while (iterator.hasNext()) {
                 val job = iterator.next()
@@ -143,24 +142,19 @@ class SettlementPlanner(val settlement: Settlement) {
                     if (records != null) {
                         val golemRecord = records.find { it.jobId == job.jobId && it.type.startsWith("IRON_GOLEM") }
                         if (golemRecord != null) {
-                            // 1. Спавним голема в центре временной структуры
                             val loc = golemRecord.box.center.toLocation(settlement.world)
-                            settlement.world.spawn(loc, org.bukkit.entity.IronGolem::class.java) { golem ->
-                                golem.customName(net.kyori.adventure.text.Component.text("Защитник поселения", net.kyori.adventure.text.format.NamedTextColor.GOLD))
-                                golem.isCustomNameVisible = true
-                            }
 
-                            // 2. Очищаем блоки железной конструкции, заменяя их на воздух
+                            // Спавним железного голема как стандартного ванильного моба, без кастомного имени
+                            settlement.world.spawn(loc, org.bukkit.entity.IronGolem::class.java)
+
                             job.getBlocks().forEach { blockToPlace ->
                                 val block = settlement.world.getBlockAt(blockToPlace.pos.x, blockToPlace.pos.y, blockToPlace.pos.z)
                                 block.type = Material.AIR
                             }
 
-                            // Эффекты сборки голема
                             settlement.world.playSound(loc, Sound.ENTITY_IRON_GOLEM_DEATH, 1.0f, 1.0f)
                             settlement.world.spawnParticle(Particle.CLOUD, loc.clone().add(0.0, 1.0, 0.0), 20, 0.5, 0.5, 0.5, 0.1)
 
-                            // 3. Удаляем структуру из чертежей поселения
                             records.remove(golemRecord)
                         }
                     }
@@ -616,13 +610,25 @@ class SettlementPlanner(val settlement: Settlement) {
             BlockPos(rawWidth / 2, 0, 0)
         }
 
+        // ОПТИМИЗАЦИЯ TPS: Снижаем лимит попыток сканирования за тик с 25 до 2.
+        // Это полностью убирает фризы основного потока при поиске места.
         object : org.bukkit.scheduler.BukkitRunnable() {
             var attemptsMade = 0
 
             override fun run() {
                 val rand = Random()
 
-                for (i in 0 until 25) {
+                // Проверяем, остались ли поблизости игроки. Если все ушли, досрочно тушим планирование.
+                val hasPlayersNearby = world.players.any { player ->
+                    player.location.distanceSquared(center) <= 65536.0 // 256 блоков
+                }
+                if (!hasPlayersNearby) {
+                    activePlanning.remove(settlementId)
+                    cancel()
+                    return
+                }
+
+                for (i in 0 until 2) {
                     if (attemptsMade >= maxAttempts) {
                         activePlanning.remove(settlementId)
                         cancel()
@@ -834,6 +840,10 @@ class SettlementPlanner(val settlement: Settlement) {
                     synchronized(queue) {
                         buildJobsList.forEach { queue.offer(it) }
                     }
+
+                    // ОПТИМИЗАЦИЯ ИСПРАВЛЕНИЯ: Вызываем сохранение и спамим сообщения ТОЛЬКО тогда,
+                    // когда чертеж успешно занял свободное место, а не при холостых пробах.
+                    SettlementManager.saveSettlements(world)
 
                     activePlanning.remove(settlementId)
                     cancel()
