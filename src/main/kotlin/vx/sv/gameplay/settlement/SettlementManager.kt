@@ -9,6 +9,7 @@ import org.bukkit.entity.Villager
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.block.Action
+import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.event.entity.EntityPickupItemEvent
 import org.bukkit.event.player.PlayerInteractEvent
 import org.bukkit.event.world.ChunkLoadEvent
@@ -96,6 +97,20 @@ class SettlementManager : Listener {
             remaining -= toAdd
         }
 
+    }
+
+    @EventHandler
+    fun onVillagerDeath(event: EntityDeathEvent) {
+        val villager = event.entity as? Villager ?: return
+        val settlement = villager.settlement ?: return
+
+        settlement.villagers.remove(villager)
+
+        val aliveCount = settlement.villagers.count { it.isValid && !it.isDead }
+        // Уничтожаем поселение только если в нем нет выживших жителей И нет активного рейда (защита от багов завоевания)
+        if (aliveCount == 0 && settlement.data.activeRaid == null) {
+            destroySettlement(settlement)
+        }
     }
 
     fun handleWorldLoad(world: World) {
@@ -195,13 +210,14 @@ class SettlementManager : Listener {
                         saveSettlements(world)
                     }
 
-                    // ОПТИМИЗАЦИЯ TPS: Сканируем только если в радиусе 256 блоков от центра есть активные игроки
                     val center = settlement.data.center
                     val hasPlayersNearby = world.players.any { player ->
-                        player.location.distanceSquared(center) <= 65536.0 // 256 блоков в квадрате
+                        player.location.distanceSquared(center) <= 65536.0
                     }
 
                     if (hasPlayersNearby) {
+                        settlement.refreshCachedBeds()
+
                         val golemCount = world.getNearbyEntities(settlement.territory) { it is org.bukkit.entity.IronGolem }.size
                         val planner = SettlementPlanner(settlement)
 
@@ -213,8 +229,6 @@ class SettlementManager : Listener {
                             }
                         }
 
-                        // Убрана автоматическая запись при каждом тике планировщика.
-                        // Сохранение перенесено непосредственно в момент успешного нахождения свободного места под здание.
                         planner.planNextPriorityBuilding()
                     }
                 }
@@ -467,6 +481,29 @@ class SettlementManager : Listener {
         val settlements: MutableMap<World, MutableList<Settlement>> = mutableMapOf()
         val settlementsWorldKey = NamespacedKey(plugin, "SettlementList")
         val currentSettlementKey = NamespacedKey(plugin, "CurrentSettlement")
+
+        // Статический метод полного удаления поселения и зачистки ИИ-очередей
+        fun destroySettlement(settlement: Settlement) {
+            val world = settlement.world
+            val worldSettlements = settlements[world] ?: return
+            if (worldSettlements.remove(settlement)) {
+
+                // Зачистка всех очередей и планировщиков для ликвидированного поселения
+                SettlementPlanner.buildings.remove(settlement.data.id)
+                SettlementPlanner.pendingJobs.remove(settlement.data.id)
+                SettlementPlanner.activeJobs.remove(settlement.data.id)
+                SettlementPlanner.settlementRoads.remove(settlement.data.id)
+
+                saveSettlements(world)
+
+                // Отправляем глобальное оповещение о падении поселения
+                val rawMsg = plugin.language.getString("settlement.destroyed-broadcast")
+                    ?: "§4☠ §cThe settlement §6{settlementName} §chas been completely destroyed because its last citizen died!"
+                val formattedMsg = rawMsg.replace("{settlementName}", settlement.data.settlementName)
+
+                Bukkit.broadcast(LegacyComponentSerializer.legacySection().deserialize(formattedMsg))
+            }
+        }
 
         fun getDominantRace(settlement: Settlement): String {
             return settlement.data.dominantRace

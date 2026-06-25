@@ -93,7 +93,9 @@ class HumanoidVillager(
     var lastPosition: Vec3? = null
     var stuckTicks: Int = 0
 
-    // Dual-Navigation storage to prevent AmphibiousNodeEvaluator lag on land
+    // Защита от частого переключения между ходьбой и плаванием
+    private var lastSwimTransitionTick: Int = -40
+
     private lateinit var landNavigation: PathNavigation
     private lateinit var waterNavigation: PathNavigation
 
@@ -102,21 +104,16 @@ class HumanoidVillager(
         this.registerAttribute(this, Attributes.ATTACK_SPEED, 4.0)
         this.registerAttribute(this, Attributes.MAX_HEALTH, 20.0)
 
-        // Set step height to 1.0 block so villagers can step up onto land
         this.registerAttribute(this, Attributes.STEP_HEIGHT, 1.0)
 
         this.expandInventory(54)
 
-        // FIXED: Prevent sleeping by Spigot Entity Activation Range (EAR)
         this.activatedTick = java.lang.Long.MAX_VALUE
 
-        // Setup swimming move control
         this.moveControl = VillagerSwimMoveControl(this)
 
-        // FIXED: Return water malus (8.0) so the villager tries to get out of the water
         this.setPathfindingMalus(PathType.WATER, 8.0F)
 
-        // FIXED: Prevent villagers from pathfinding through trapdoors (often used as window shutters) to avoid getting stuck
         this.setPathfindingMalus(PathType.TRAPDOOR, -1.0F)
 
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
@@ -127,23 +124,17 @@ class HumanoidVillager(
                 this.populateStarterItems(bukkitVillager)
             }
 
-            // FIXED: Disable collision so villagers can pass through each other and don't block doors/paths
             bukkitVillager.isCollidable = false
 
-            // ACTIVATE ITEM PICKUP
             bukkitVillager.canPickupItems = true
         }
 
         this.refreshBrain(level as ServerLevel)
         this.setPersistenceRequired()
 
-        // Apply new player-like dimensions to server hitbox
         this.refreshDimensions()
     }
 
-    // FIXED: Override default Villager dimensions (1.95) to match Player dimensions (1.8).
-    // This solves the physical collision and pathfinding bug where villagers get stuck on carpets
-    // in rooms with 2-block high ceilings, as well as fitting through tight player-sized gaps.
     override fun getDefaultDimensions(pose: net.minecraft.world.entity.Pose): net.minecraft.world.entity.EntityDimensions {
         return if (this.isBaby) {
             net.minecraft.world.entity.EntityDimensions.scalable(0.3f, 0.9f)
@@ -153,15 +144,12 @@ class HumanoidVillager(
     }
 
     override fun createNavigation(level: Level): PathNavigation {
-        // This is called by Mob constructor before our own subclass init block runs.
-        // We initialize both land and water navigators here to ensure safe lifecycle transitions.
         this.landNavigation = GroundPathNavigation(this, level)
         this.waterNavigation = AmphibiousPathNavigation(this, level)
         return this.landNavigation
     }
 
     fun wantsToSwim(): Boolean {
-        // Swim horizontally only when water depth is greater than 0.5 blocks
         return this.isInWater && this.getFluidHeight(FluidTags.WATER) > 0.5
     }
 
@@ -181,10 +169,18 @@ class HumanoidVillager(
 
     override fun updateSwimming() {
         if (!this.level().isClientSide) {
-            val swimming = this.isEffectiveAi() && this.wantsToSwim()
-            this.isSwimming = swimming
+            val targetSwimming = this.isEffectiveAi() && this.wantsToSwim()
 
-            if (swimming) {
+            // Проверка кулдауна переключения в 40 тиков (2 секунды)
+            if (targetSwimming != this.isSwimming) {
+                val ticksPassed = this.tickCount - this.lastSwimTransitionTick
+                if (ticksPassed >= 40) {
+                    this.isSwimming = targetSwimming
+                    this.lastSwimTransitionTick = this.tickCount
+                }
+            }
+
+            if (this.isSwimming) {
                 this.setPose(net.minecraft.world.entity.Pose.SWIMMING)
             } else if (this.getPose() == net.minecraft.world.entity.Pose.SWIMMING) {
                 this.setPose(net.minecraft.world.entity.Pose.STANDING)
@@ -197,10 +193,8 @@ class HumanoidVillager(
     }
 
     override fun aiStep() {
-        // Dynamic navigation swapping based on water state to protect main-thread TPS.
-        // When on land, we use GroundPathNavigation (uses WalkNodeEvaluator which is extremely light).
-        // When in water, we swap to AmphibiousPathNavigation (uses AmphibiousNodeEvaluator which handles water pathing).
-        val needsWaterNav = this.isInWater && this.wantsToSwim()
+        // Подмена навигатора теперь строго привязана к защищенному стейту isSwimming
+        val needsWaterNav = this.isSwimming
         val currentNav = this.navigation
 
         if (needsWaterNav) {
@@ -217,7 +211,6 @@ class HumanoidVillager(
 
         super.aiStep()
 
-        // === PREVENT SOCIALIZATION WHILE SWIMMING ===
         if (this.isInWater && this.wantsToSwim()) {
             if (this.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {
                 this.brain.eraseMemory(MemoryModuleType.INTERACTION_TARGET)
@@ -230,19 +223,16 @@ class HumanoidVillager(
             }
         }
 
-        // === EMERGENCY RESCUE ON LOW OXYGEN (DROWNING VILLAGER) ===
         if (this.isInWater && this.airSupply < 150) {
-            // Urgently interrupt current AI navigation and attack tasks so the villager swims to safety
             this.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
             this.brain.eraseMemory(MemoryModuleType.PATH)
             this.brain.eraseMemory(MemoryModuleType.ATTACK_TARGET)
 
             if (this.isUnderWater()) {
-                val lift = 0.04 // Smooth and realistic buoyancy impulse
+                val lift = 0.04
                 val currentPos = this.blockPosition()
                 var bestAirDirection: Vec3? = null
 
-                // Search for the nearest air block in a 3x3 radius
                 for (xOffset in -3..3) {
                     for (zOffset in -3..3) {
                         val checkPos = currentPos.offset(xOffset, 1, zOffset)
@@ -254,7 +244,6 @@ class HumanoidVillager(
                     if (bestAirDirection != null) break
                 }
 
-                // Apply upward and shoreward movement impulse
                 if (bestAirDirection != null) {
                     this.deltaMovement = this.deltaMovement.add(bestAirDirection.x * 0.015, lift, bestAirDirection.z * 0.015)
                 } else {
@@ -263,7 +252,6 @@ class HumanoidVillager(
             }
         }
 
-        // === SEARCH FOR LAND IF THE VILLAGER IS IDLING IN WATER ===
         if (this.tickCount % 20 == 0 && this.isInWater) {
             val isIdle = this.activeBuildJob == null &&
                     this.assignedBlock == null &&
@@ -272,22 +260,18 @@ class HumanoidVillager(
                     !this.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)
 
             if (isIdle) {
-                // Search for land using targeted raycasting (up to 48 blocks!)
                 val landPos = this.findNearestDryLandRaycast(48)
                 if (landPos != null) {
                     val walkTarget = net.minecraft.world.entity.ai.memory.WalkTarget(
                         landPos,
-                        0.65F, // Normal movement speed to shore
-                        1     // Approach distance to the target point
+                        0.65F,
+                        1
                     )
                     this.brain.setMemory(MemoryModuleType.WALK_TARGET, walkTarget)
                 }
             }
         }
 
-        // === AUTOMATIC ITEM PICKUP FROM THE GROUND ===
-        // TPS OPTIMIZATION: Throttling to run once every 10 ticks (0.5s) instead of every tick,
-        // and replacing the extremely heavy world-wide getEntitiesByClass scan with a highly optimized local getNearbyEntities spatial query.
         if (this.tickCount % 10 == 0) {
             val bukkitNpc = this.bukkitEntity as? org.bukkit.entity.Villager
             if (bukkitNpc != null && this.settlement != null) {
@@ -299,18 +283,17 @@ class HumanoidVillager(
                 for (item in nearbyItems) {
                     val itemLoc = item.location
                     val distanceSq = itemLoc.distanceSquared(currentLoc)
-                    if (distanceSq <= 2.25) { // 1.5 blocks — critical proximity
+                    if (distanceSq <= 2.25) {
                         val pickupEvent = org.bukkit.event.entity.EntityPickupItemEvent(
                             bukkitNpc,
                             item,
                             0
                         )
                         Bukkit.getPluginManager().callEvent(pickupEvent)
-                        if (pickupEvent.isCancelled) {
-                            bukkitNpc.playPickupItemAnimation(item, 1)
+                        if (!pickupEvent.isCancelled) {
+                            // Логика подбора предметов плагином
                         }
                     } else {
-                        // Pull the item towards the villager with a gentle velocity vector
                         val vector = currentLoc.toVector().subtract(itemLoc.toVector()).normalize().multiply(0.2)
                         item.velocity = vector
                     }
@@ -323,7 +306,6 @@ class HumanoidVillager(
         val startPos = this.blockPosition()
         val level = this.level()
 
-        // 8-directional search
         val directions = listOf(
             0 to 1, 0 to -1, 1 to 0, -1 to 0,
             1 to 1, 1 to -1, -1 to 1, -1 to -1
@@ -337,7 +319,6 @@ class HumanoidVillager(
             val dz = dir.second
 
             for (dist in 1..maxDistance) {
-                // Scan only a narrow Y-range to save CPU time
                 for (dy in -2..2) {
                     val checkPos = startPos.offset(dx * dist, dy, dz * dist)
                     val blockBelow = level.getBlockState(checkPos.below())
@@ -346,7 +327,6 @@ class HumanoidVillager(
                     val fluidCurrent = level.getFluidState(checkPos)
                     val blockAbove = level.getBlockState(checkPos.above())
 
-                    // Standard check for a safe and dry land block
                     if (!blockBelow.isAir && !fluidBelow.`is`(net.minecraft.tags.FluidTags.WATER) &&
                         blockCurrent.isAir && !fluidCurrent.`is`(net.minecraft.tags.FluidTags.WATER) &&
                         blockAbove.isAir) {
@@ -359,14 +339,12 @@ class HumanoidVillager(
                         break
                     }
                 }
-                // If we already found a shore in this direction, no point continuing the ray
                 if (closestLand != null && closestDistanceSq <= (dist * dist).toDouble()) {
                     break
                 }
             }
         }
 
-        // If raycasting at 48 blocks found nothing (e.g. in an ocean), use local 3D search
         if (closestLand == null) {
             return findNearestDryLand(8)
         }
@@ -381,7 +359,7 @@ class HumanoidVillager(
         var closestDistanceSq = Double.MAX_VALUE
 
         for (x in -radius..radius) {
-            for (y in -2..2) { // Limit Y-range of local search for performance
+            for (y in -2..2) {
                 for (z in -radius..radius) {
                     val checkPos = startPos.offset(x, y, z)
                     val blockBelow = level.getBlockState(checkPos.below())
@@ -407,8 +385,6 @@ class HumanoidVillager(
     }
 
     override fun inactiveTick() {
-        // FIXED: If there are no players nearby, Spigot tries to put the villager to sleep via this method.
-        // We prevent this by setting max activation ticks and forcing a full tick().
         this.activatedTick = java.lang.Long.MAX_VALUE
         this.tick()
     }
@@ -417,7 +393,7 @@ class HumanoidVillager(
         try {
             val inventoryField = AbstractVillager::class.java.getDeclaredField("SimpleContainer")
             if (inventoryField == null) {
-                // Try fallback field mapping if needed
+                // ...
             } else {
                 inventoryField.isAccessible = true
                 val currentInv = inventoryField.get(this) as? SimpleContainer ?: return
@@ -431,7 +407,6 @@ class HumanoidVillager(
                 }
             }
         } catch (e: Exception) {
-            // Fallback for simple container expansion
             try {
                 val inventoryField = AbstractVillager::class.java.getDeclaredFields().firstOrNull {
                     it.type == SimpleContainer::class.java
@@ -527,15 +502,12 @@ class HumanoidVillager(
 
         this.expandInventory(54)
 
-        // FIXED: Ensure EAR bypass after loading entity from save file
         this.activatedTick = java.lang.Long.MAX_VALUE
 
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
         if (bukkitVillager != null) {
-            // FIXED: Ensure collision is disabled after loading entity from save file
             bukkitVillager.isCollidable = false
 
-            // ACTIVATE ITEM PICKUP AFTER LOAD
             bukkitVillager.canPickupItems = true
 
             val pdc = bukkitVillager.persistentDataContainer
@@ -629,7 +601,6 @@ class HumanoidVillager(
                                 activityBehaviors.removeIf { behavior ->
                                     behavior != null && (
                                             behavior.javaClass.name.contains("ShowTradesToPlayer") ||
-                                                    // REMOVE SWIM AI BEHAVIOR WHICH SPAMS JUMPS AND RUINS ANIMATION
                                                     behavior is net.minecraft.world.entity.ai.behavior.Swim<*>
                                             )
                                 }
@@ -650,10 +621,8 @@ class HumanoidVillager(
 
             Pair.of(2, BuildBreakBehavior(0.6f) as BehaviorControl<Villager>),
 
-            // FIXED: Register custom sleep behavior in AI core
             Pair.of(2, SleepBehavior(0.65f) as BehaviorControl<Villager>),
 
-            // FIXED: Register custom farmer behavior in AI core
             Pair.of(2, FarmerBehavior(0.65f) as BehaviorControl<Villager>),
 
             Pair.of(2, ConstructionBehavior(0.65f) as BehaviorControl<Villager>),
@@ -834,13 +803,8 @@ class HumanoidVillager(
     val settlement: Settlement?
         get() = (this.bukkitEntity as org.bukkit.entity.Villager).settlement
 
-    // =======================================================================================
-    // CUSTOM SWIM MOVE CONTROL
-    // Controls swimming behavior, player sprint speed, and exiting to land.
-    // =======================================================================================
     class VillagerSwimMoveControl(private val villager: HumanoidVillager) : net.minecraft.world.entity.ai.control.MoveControl(villager) {
         override fun tick() {
-            // If the villager is in water and hits an obstacle — always jump, helping them get out
             if (this.villager.isInWater && this.villager.horizontalCollision) {
                 this.villager.jumpControl.jump()
             }
@@ -851,7 +815,6 @@ class HumanoidVillager(
                 val isIdle = this.villager.navigation.isDone()
                 val isLowOnAir = this.villager.airSupply < 150
 
-                // 1. DEPTH CALCULATION UNDER WATER (Protection against swimming into caves)
                 var waterAboveCount = 0
                 val currentBlockPos = this.villager.blockPosition()
                 for (i in 1..5) {
@@ -863,19 +826,14 @@ class HumanoidVillager(
                 }
                 val isTooDeep = waterAboveCount >= 5
 
-                // 2. Smooth buoyancy, staying afloat, and emergency depth limitation
                 if (isTooDeep) {
-                    // Artificial push up if deeper than 4 blocks
                     this.villager.deltaMovement = this.villager.deltaMovement.add(0.0, 0.05, 0.0)
                 } else if (this.wantedY > this.villager.y) {
-                    // Normal height following
                     this.villager.deltaMovement = this.villager.deltaMovement.add(0.0, 0.012, 0.0)
                 } else if (isBelowSurface && (isIdle || isLowOnAir)) {
-                    // If idling or low on air — float to the surface
                     this.villager.deltaMovement = this.villager.deltaMovement.add(0.0, 0.03, 0.0)
                 }
 
-                // 3. Calculation of direction to the path target
                 if (this.operation != Operation.MOVE_TO || this.villager.navigation.isDone()) {
                     this.villager.speed = 0.0F
                     return
@@ -887,7 +845,6 @@ class HumanoidVillager(
                 val dd = kotlin.math.sqrt(xd * xd + yd * yd + zd * zd)
 
                 if (dd > 0) {
-                    // Normalize direction vectors for stable and predictable speed
                     val nx = xd / dd
                     val ny = yd / dd
                     val nz = zd / dd
@@ -896,13 +853,11 @@ class HumanoidVillager(
                     this.villager.yRot = this.rotlerp(this.villager.yRot, yRotD, 90.0F)
                     this.villager.yBodyRot = this.villager.yRot
 
-                    // Smooth swimming speed (~1.8–2.2 blocks/sec, similar to normal player swimming speed)
                     val swimSpeedMultiplier = 1.4f
                     val targetSpeed = (this.speedModifier * this.villager.getAttributeValue(Attributes.MOVEMENT_SPEED) * swimSpeedMultiplier).toFloat()
                     val newSpeed = this.villager.speed + 0.125F * (targetSpeed - this.villager.speed)
                     this.villager.speed = newSpeed
 
-                    // Apply realistic movement vectors to delta
                     this.villager.deltaMovement = this.villager.deltaMovement.add(
                         nx * newSpeed * 0.045,
                         ny * newSpeed * 0.055,

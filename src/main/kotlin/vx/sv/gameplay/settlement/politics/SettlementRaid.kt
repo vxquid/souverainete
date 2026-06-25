@@ -32,28 +32,16 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
 
     private val viewingPlayers = mutableSetOf<Player>()
 
-    // Primary Boss Bar: Attacker vs Defender
     private var bossBar: BossBar = createBossBar()
-
-    // Secondary Boss Bar: Alive Defenders
     private var defendersBossBar: BossBar = createDefendersBossBar()
 
-    // Timer Logic
     private var lastWaveStartTick: Long = data.activeTicks
     private var maxDefendersTracked: Int = 1
 
-    // Flag to prevent infinite reinforcements loops
     private var hasReinforced: Boolean = false
-
-    // Chunk Loading Flag
     private var chunksLocked: Boolean = false
-
-    // Glowing State
     private var isGlowingEnabled: Boolean = false
 
-    // ==========================================
-    // === VIRTUAL TEAMS (PACKET EVENTS)      ===
-    // ==========================================
     private val teamAttackerName get() = "atk_${data.attackerId}".take(16)
     private val teamDefenderName get() = "def_${defender.data.id}".take(16)
 
@@ -64,7 +52,7 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     private fun getTeamInfo(color: NamedTextColor): ScoreBoardTeamInfo {
         return ScoreBoardTeamInfo(
             Component.empty(), Component.empty(), Component.empty(),
-            NameTagVisibility.NEVER, // Important: prevents showing UUIDs above heads
+            NameTagVisibility.NEVER,
             CollisionRule.ALWAYS,
             color,
             OptionData.NONE
@@ -77,7 +65,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         user.sendPacket(WrapperPlayServerTeams(teamAttackerName, TeamMode.CREATE, getTeamInfo(NamedTextColor.RED), emptyList()))
         user.sendPacket(WrapperPlayServerTeams(teamDefenderName, TeamMode.CREATE, getTeamInfo(NamedTextColor.GREEN), emptyList()))
 
-        // If glowing is already activated, add entities to the created colored teams
         if (isGlowingEnabled) {
             val raiders = data.aliveRaiders.map { getFakeName(it) }
             val defenders = defender.villagers.map { getFakeName(it.uniqueId) }
@@ -143,31 +130,22 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         }
     }
 
-    // ==========================================
-    // === CONFIGURATION & STRINGS            ===
-    // ==========================================
     private val raidConfig get() = plugin.gameplayManager.config.raid
 
-    // Thresholds & Ranges
     private val glowThresholdTicks get() = raidConfig.glowThreshold
     private val killThresholdTicks get() = raidConfig.killThreshold
 
     private val broadcastRadius get() = raidConfig.broadcastRadius
     private val hornRadius get() = raidConfig.hornRadius
-
-    // Chunk Loading Radius (8 chunks = 128 blocks radius)
     private val forceLoadRadius = 8
 
-    // Reputation Balancing
     private val allyReputationThreshold get() = raidConfig.allyReputationThreshold
     private val repGainPerKill get() = raidConfig.repGainPerKill
 
-    // UI Strings
     private val msgRaidInit get() = plugin.language.getString("raid.bossbar.init", "Raid Initialization...") ?: "Raid Initialization..."
     private val msgDefendersAlive get() = plugin.language.getString("raid.bossbar.defenders-alive", "Defenders Alive: {count}") ?: "Defenders Alive: {count}"
     private val msgTitlePrimary get() = plugin.language.getString("raid.bossbar.title", "{attacker} ⚔ {defender} (Wave {wave}/{total})") ?: "{attacker} ⚔ {defender} (Wave {wave}/{total})"
 
-    // Victory/Loss End Titles
     private val msgVictoryPrimary get() = plugin.language.getString("raid.bossbar.victory-primary", "Attackers defeated") ?: "Attackers defeated"
     private val msgVictorySecondary get() = plugin.language.getString("raid.bossbar.victory-secondary", "Settlement protected") ?: "Settlement protected"
 
@@ -177,7 +155,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     private val msgStoppedPrimary get() = plugin.language.getString("raid.bossbar.stopped-primary", "Raid stopped") ?: "Raid stopped"
     private val msgStoppedSecondary get() = plugin.language.getString("raid.bossbar.stopped-secondary", "Combat ceased") ?: "Combat ceased"
 
-    // Chat Broadcasts & Entities
     private val msgRaiderName get() = plugin.language.getString("raid.entity.raider-name", "§cRaider ({attacker})") ?: "§cRaider ({attacker})"
     private val msgWaveStarted get() = plugin.language.getString("raid.chat.wave-started", "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!") ?: "§c⚔ A raid wave has started! §6{attacker} §cis attacking §6{defender}§c!"
     private val msgReinforcements get() = plugin.language.getString("raid.chat.reinforcements", "§c⚔ Reinforcements have arrived for §6{attacker}§c!") ?: "§c⚔ Reinforcements have arrived for §6{attacker}§c!"
@@ -186,8 +163,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     private val msgLossChat get() = plugin.language.getString("raid.chat.loss", "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c.") ?: "§4☠ §c{defender} has fallen! Conquered by §4{attacker}§c. It is now known as §6{newName}§c."
     private val msgLossWipedChat get() = plugin.language.getString("raid.chat.loss-wiped", "§4☠ §cThe settlement {defender} has been wiped out!") ?: "§4☠ §cThe settlement {defender} has been wiped out!"
     private val msgRepIncrease get() = plugin.language.getString("settlement-reputation.increase", "§a+ {amount} reputation with {entity}.") ?: "§a+ {amount} reputation with {entity}."
-
-    // ==========================================
 
     val isActive: Boolean
         get() = data.status == Settlement.RaidStatus.ONGOING
@@ -206,7 +181,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         if (!isActive) return
         data.activeTicks++
 
-        // Ensure chunks are force-loaded for simulation
         if (!chunksLocked) {
             manageChunkLoading(true)
         }
@@ -241,7 +215,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         val center = defender.data.center
         val world = defender.world
 
-        // Математически вычисляем координаты чанка (сдвиг вправо на 4 эквивалентен делению на 16).
         val centerChunkX = center.blockX shr 4
         val centerChunkZ = center.blockZ shr 4
 
@@ -265,10 +238,8 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     private fun checkStuckState(attacker: Settlement) {
         val waveDuration = data.activeTicks - lastWaveStartTick
 
-        // Glowing: Wave lasts > 1 minute (1200 ticks)
         if (waveDuration > glowThresholdTicks) {
 
-            // Safe to call every tick: Bukkit internally checks if the value has changed before sending metadata
             data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) }.forEach {
                 it.isGlowing = true
             }
@@ -276,7 +247,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 it.isGlowing = true
             }
 
-            // Send PacketEvents strictly once to avoid spamming the client
             if (!isGlowingEnabled) {
                 isGlowingEnabled = true
                 updateEntitiesInTeams()
@@ -286,9 +256,8 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
         if (waveDuration > killThresholdTicks && data.aliveRaiders.isNotEmpty()) {
 
             if (!hasReinforced) {
-                resetGlowingState() // Reset glowing state before spawning reinforcements
+                resetGlowingState()
 
-                // First stuck: Reinforcements
                 val center = defender.data.center
                 val world = center.world ?: return
                 val stuckCount = data.aliveRaiders.size
@@ -342,7 +311,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 lastWaveStartTick = data.activeTicks
 
             } else {
-                // Second stuck: Abandon Raid
                 broadcastGlobalMessage(msgRaidAbandoned)
 
                 data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) }.forEach {
@@ -365,7 +333,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                     (player.gameMode == GameMode.SURVIVAL || player.gameMode == GameMode.ADVENTURE)
         }
 
-        // --- Raider AI ---
         for (raider in aliveRaidersList) {
             adjustFollowRange(raider)
 
@@ -389,7 +356,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
             }
         }
 
-        // --- Defender AI ---
         for (def in aliveDefenders) {
             adjustFollowRange(def)
 
@@ -431,7 +397,7 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
     }
 
     private fun spawnNextWave(attacker: Settlement) {
-        resetGlowingState() // Reset glowing state before a new wave
+        resetGlowingState()
 
         data.currentWave++
         lastWaveStartTick = data.activeTicks
@@ -620,8 +586,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
             val uuid = iterator.next()
             val entity = Bukkit.getEntity(uuid)
 
-            // Only process removal if the entity is actually dead.
-            // If entity is null, the chunk might just be unloaded, so we keep tracking it.
             if (entity != null) {
                 if (entity.isDead) {
                     if (entity is LivingEntity) {
@@ -638,7 +602,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                             }
                         }
                     }
-                    // Remove from tracker only when confirmed dead
                     iterator.remove()
                 }
             }
@@ -727,6 +690,12 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 secondaryText = msgVictorySecondary
                 primaryColor = NamedTextColor.GREEN
                 secondaryColor = NamedTextColor.GREEN
+
+                // Дополнительная проверка на случай, если последний житель погиб сразу после победы
+                val aliveCount = defender.villagers.count { !it.isDead && it.isValid }
+                if (aliveCount == 0) {
+                    SettlementManager.destroySettlement(defender)
+                }
             }
 
             Settlement.RaidStatus.LOSS -> {
@@ -734,7 +703,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
 
                     val oldName = defender.data.settlementName
 
-                    // Added protection from NullPointerException if chunk unloads exactly during loss
                     val randomRaiderEntity = this.data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) as? Villager }.randomOrNull()
                     val newName = randomRaiderEntity?.race?.settlementNames?.random() ?: "Conquered Settlement"
 
@@ -744,7 +712,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                         player.currentSettlement = newName
                     }
 
-                    // --- CONQUEST CONSEQUENCES ---
                     SettlementManager.Companion.setRelation(attacker, defender, Settlement.RelationLevel.ALLIANCE)
                     defender.data.reputation.clear()
                     defender.data.reputation.putAll(attacker.data.reputation)
@@ -783,6 +750,9 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                     secondaryText = msgLossSecondary
                     primaryColor = NamedTextColor.DARK_RED
                     secondaryColor = NamedTextColor.DARK_RED
+
+                    // Ликвидируем вымершее поселение
+                    SettlementManager.destroySettlement(defender)
                 }
             }
 
@@ -792,11 +762,16 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 primaryColor = NamedTextColor.GRAY
                 secondaryColor = NamedTextColor.GRAY
 
-                // Forcefully remove all raiders if the raid is stopped or cancelled
                 data.aliveRaiders.mapNotNull { Bukkit.getEntity(it) }.forEach {
                     it.remove()
                 }
                 data.aliveRaiders.clear()
+
+                // Если рейд остановлен, а живых жителей не осталось, поселение уничтожается
+                val aliveCount = defender.villagers.count { !it.isDead && it.isValid }
+                if (aliveCount == 0) {
+                    SettlementManager.destroySettlement(defender)
+                }
             }
         }
 

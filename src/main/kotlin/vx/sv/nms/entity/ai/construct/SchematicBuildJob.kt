@@ -24,10 +24,11 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
     private fun getPlacementPriority(material: Material): Int {
         val name = material.name
         return when {
-            material == Material.WATER || material == Material.LAVA -> 100
-            name.contains("DOOR") || name.contains("BED") -> 50
-            name.contains("TORCH") || name.contains("LANTERN") || name.contains("CARPET") || name.contains("SIGN") -> 20
-            else -> 0
+            material == Material.WATER || material == Material.LAVA -> 1 // liquids
+            material == Material.AIR -> 2 // clearing
+            name.contains("DOOR") || name.contains("BED") -> 10 // doors/beds last
+            name.contains("TORCH") || name.contains("LANTERN") || name.contains("CARPET") || name.contains("SIGN") -> 8
+            else -> 5
         }
     }
 
@@ -47,78 +48,92 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
     private fun claimFromListOptimized(list: List<BlockToPlace>, npc: HumanoidVillager, npcPos: BlockPos): BlockToPlace? {
         if (list.isEmpty()) return null
 
-        // ОПТИМИЗАЦИЯ TPS: Мы сканируем только самый нижний незаконченный Y-слой,
-        // вместо тысяч блоков по всей высоте здания.
-        val minY = list.minOf { it.pos.y }
-        val activeLayer = list.filter { it.pos.y == minY }
-
-        val obstacles = mutableListOf<BlockToPlace>()
-        val candidates = mutableListOf<BlockToPlace>()
-
-        for (block in activeLayer) {
-            val currentBlock = world.getBlockAt(block.pos.x, block.pos.y, block.pos.z)
-            val currentType = currentBlock.type
-
-            val isAirCorrect = currentType.isAir && block.blockData.material.isAir
-            val isBlockCorrect = currentBlock.blockData == block.blockData
-
-            // ЛЕНИВОЕ ЗАВЕРШЕНИЕ: Если игрок сам поставил блок, мы мгновенно помечаем его готовым
-            if (isAirCorrect || isBlockCorrect) {
-                block.isPlaced = true
-                continue
+        // 1. Сначала обрабатываем блоки раскопок (цель — воздух/AIR) сверху вниз (от наибольшего Y к наименьшему)
+        val excavationList = list.filter { it.blockData.material.isAir }
+        if (excavationList.isNotEmpty()) {
+            val yLevels = excavationList.map { it.pos.y }.distinct().sortedDescending()
+            for (y in yLevels) {
+                val activeLayer = excavationList.filter { it.pos.y == y }
+                val candidates = mutableListOf<BlockToPlace>()
+                for (block in activeLayer) {
+                    val currentBlock = world.getBlockAt(block.pos.x, block.pos.y, block.pos.z)
+                    if (currentBlock.type.isAir) {
+                        block.isPlaced = true // Уже воздух, помечаем выполненным
+                        continue
+                    }
+                    candidates.add(block)
+                }
+                if (candidates.isNotEmpty()) {
+                    val closest = candidates.minByOrNull { it.pos.distSqr(npcPos) }
+                    closest?.claimedBy = npc
+                    return closest
+                }
             }
-
-            if (currentBlock.isIgnorableObstacle()) {
-                candidates.add(block)
-                continue
-            }
-            if (currentType.isShovelable() && block.blockData.material == Material.DIRT_PATH) {
-                candidates.add(block)
-                continue
-            }
-            if (currentBlock.isLiquid && block.blockData.material.isAir) {
-                candidates.add(block)
-                continue
-            }
-
-            obstacles.add(block)
         }
 
-        if (obstacles.isNotEmpty()) {
-            val closest = obstacles.minByOrNull { it.pos.distSqr(npcPos) }
-            closest?.claimedBy = npc
-            return closest
+        // 2. Если все раскопки завершены, строим твердые блоки фундамента и стен снизу вверх (от наименьшего Y к наибольшему)
+        val constructionList = list.filter { !it.blockData.material.isAir }
+        if (constructionList.isNotEmpty()) {
+            val yLevels = constructionList.map { it.pos.y }.distinct().sorted()
+            for (y in yLevels) {
+                val activeLayer = constructionList.filter { it.pos.y == y }
+
+                val obstacles = mutableListOf<BlockToPlace>()
+                val candidates = mutableListOf<BlockToPlace>()
+
+                for (block in activeLayer) {
+                    val currentBlock = world.getBlockAt(block.pos.x, block.pos.y, block.pos.z)
+                    val currentType = currentBlock.type
+
+                    // Если блок уже стоит правильный — помечаем готовым и скипаем
+                    if (currentBlock.blockData == block.blockData) {
+                        block.isPlaced = true
+                        continue
+                    }
+
+                    // Проверка на превращение тропинки лопатой
+                    val isPathTransformation = currentType.isShovelable() && block.blockData.material == Material.DIRT_PATH
+                    if (isPathTransformation) {
+                        candidates.add(block)
+                        continue
+                    }
+
+                    // Если на пути стоит игнорируемое препятствие (трава, вода, воздух) — можно строить поверх
+                    if (currentBlock.isIgnorableObstacle()) {
+                        candidates.add(block)
+                        continue
+                    }
+
+                    // ИНАЧЕ: Это твердый блок (например, камень), который мешает постройке стены. Его нужно сломать!
+                    obstacles.add(block)
+                }
+
+                // ВАЖНО: Сначала жители должны разбить твердые препятствия на текущем Y-слое
+                if (obstacles.isNotEmpty()) {
+                    val closest = obstacles.minByOrNull { it.pos.distSqr(npcPos) }
+                    closest?.claimedBy = npc
+                    return closest
+                }
+
+                // Если препятствий нет, ставим сами блоки постройки
+                if (candidates.isNotEmpty()) {
+                    val minPriority = candidates.minOf { getPlacementPriority(it.blockData.material) }
+                    val priorityBlocks = candidates.filter { getPlacementPriority(it.blockData.material) == minPriority }
+                    val closest = priorityBlocks.minByOrNull { it.pos.distSqr(npcPos) }
+                    closest?.claimedBy = npc
+                    return closest
+                }
+            }
         }
 
-        if (candidates.isNotEmpty()) {
-            val minPriority = candidates.minOf { getPlacementPriority(it.blockData.material) }
-            val priorityBlocks = candidates.filter { getPlacementPriority(it.blockData.material) == minPriority }
-            val closest = priorityBlocks.minByOrNull { it.pos.distSqr(npcPos) }
-            closest?.claimedBy = npc
-            return closest
-        }
-
-        // Если весь Y-слой уже был построен (игроками или сгенерен), возвращаем null.
-        // В следующем тике ИИ автоматически возьмет в обработку следующий Y-слой выше.
         return null
     }
 
     fun claimNextBlock(npc: HumanoidVillager): BlockToPlace? {
         synchronized(lock) {
             val npcPos = npc.blockPosition()
-            val blocksList = getBlocks()
+            val available = getBlocks().filter { !it.isPlaced && it.claimedBy == null }
 
-            // Сбрасываем зависшие брони от убитых/переназначенных рабочих
-            blocksList.forEach { block ->
-                val claimer = block.claimedBy
-                if (claimer != null) {
-                    if (!claimer.isAlive || claimer.activeBuildJob != this || claimer.assignedBlock != block) {
-                        block.claimedBy = null
-                    }
-                }
-            }
-
-            val available = blocksList.filter { !it.isPlaced && it.claimedBy == null }
             if (available.isEmpty()) return null
 
             val buildingBlocks = available.filter { !it.isRoad }
@@ -157,8 +172,6 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
 
     fun isFinished(): Boolean {
         synchronized(lock) {
-            // ОПТИМИЗАЦИЯ TPS: Никаких вызовов world.getBlockAt() в этом методе больше нет.
-            // ИИ доверяет кэшированным флагам isPlaced.
             return getBlocks().all { it.isPlaced }
         }
     }
