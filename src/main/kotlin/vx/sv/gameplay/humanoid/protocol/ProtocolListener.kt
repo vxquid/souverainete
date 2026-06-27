@@ -480,7 +480,7 @@ class ProtocolListener(private val humanoidRegistry: HashMap<LivingEntity, Human
 
     private fun Location.toPacketEventsLocation() = com.github.retrooper.packetevents.protocol.world.Location(this.x, this.y, this.z, this.yaw, this.pitch)
 
-    private fun Player.channel() : Any = PacketEvents.getAPI().playerManager.getChannel(this)
+    private fun Player.channel() : Any = PacketEvents.getAPI().playerManager.getChannel(this)!!
 
     private fun Player.sendPacket(packet: PacketWrapper<*>) {
         PacketEvents.getAPI().protocolManager.sendPacket(this.channel(), packet)

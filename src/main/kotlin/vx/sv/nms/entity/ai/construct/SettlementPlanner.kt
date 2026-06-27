@@ -51,7 +51,6 @@ data class SettlementPlannerSaveData(
     val activeJobsList: List<SchematicJobSaveData>? = null
 )
 
-// Структура для глобальной очереди планирования
 data class PlanRequest(val settlement: Settlement, val type: VanillaBuildingType)
 
 class SettlementPlanner(val settlement: Settlement) {
@@ -73,7 +72,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
         private val activePlanning = ConcurrentHashMap.newKeySet<UUID>()
 
-        // Глобальная система Тайм-слайсинга
         private val planningQueue = ConcurrentLinkedQueue<PlanRequest>()
         private var isGlobalPlannerRunning = false
 
@@ -94,7 +92,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 var currentRequest: PlanRequest? = null
                 var attemptsMade = 0
 
-                // Контекст текущей задачи
                 var reqSettlement: Settlement? = null
                 var reqType: VanillaBuildingType? = null
                 var center: Location? = null
@@ -346,7 +343,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 override fun run() {
                     val startNanos = System.nanoTime()
-                    // Time Budget: 3 миллисекунды за тик (около 6% от 50мс)
                     val timeBudget = 3_000_000L
 
                     while (System.nanoTime() - startNanos < timeBudget) {
@@ -789,7 +785,6 @@ class SettlementPlanner(val settlement: Settlement) {
         return true
     }
 
-    // Сохранено для совместимости с внешними вызовами (VillageGenerationListener, SettlementManager)
     fun planBuilding(type: VanillaBuildingType): Boolean {
         requestPlanning(settlement, type)
         return true

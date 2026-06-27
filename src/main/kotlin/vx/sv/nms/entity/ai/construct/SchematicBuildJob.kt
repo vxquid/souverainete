@@ -21,14 +21,15 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
         }
     }
 
+    // Приоритеты установки блоков (чем меньше число, тем раньше ставится блок)
     private fun getPlacementPriority(material: Material): Int {
         val name = material.name
         return when {
-            material == Material.WATER || material == Material.LAVA -> 1 // liquids
-            material == Material.AIR -> 2 // clearing
-            name.contains("DOOR") || name.contains("BED") -> 10 // doors/beds last
-            name.contains("TORCH") || name.contains("LANTERN") || name.contains("CARPET") || name.contains("SIGN") -> 8
-            else -> 5
+            material == Material.AIR -> 1 // Сначала всегда вырезаем воздух/раскопки
+            name.contains("DOOR") || name.contains("BED") -> 10 // Двери и кровати в конце основного этапа
+            name.contains("TORCH") || name.contains("LANTERN") || name.contains("CARPET") || name.contains("SIGN") -> 8 // Декор после стен
+            material == Material.WATER || material == Material.LAVA -> 15 // Жидкости заливаем в САМЫЙ последний момент, когда все чаши построены
+            else -> 5 // Обычные твердые блоки (стены, фундамент)
         }
     }
 

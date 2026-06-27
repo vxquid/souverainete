@@ -114,7 +114,7 @@ class FollowLeaderBehavior(
         val blockState = level.getBlockState(pos)
         val belowState = level.getBlockState(pos.below())
 
-        val solidGround = belowState.isValidSpawn(level, pos.below(), net.minecraft.world.entity.EntityType.VILLAGER)
+        val solidGround = belowState.isValidSpawn(level, pos.below(), net.minecraft.world.entity.EntityTypes.VILLAGER)
         val spaceBody = blockState.occlusionShape.isEmpty || blockState.isAir
         val spaceHead = level.getBlockState(pos.above()).occlusionShape.isEmpty || level.getBlockState(pos.above()).isAir
 

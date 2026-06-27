@@ -299,7 +299,7 @@ class FarmerBehavior(
                                                     val dx = proposedShore.x - otherShore.x
                                                     val dz = proposedShore.z - otherShore.z
                                                     val distSq = dx * dx + dz * dz
-                                                    if (distSq <= 100) { // 10 блоков дистанции
+                                                    if (distSq <= 100) {
                                                         isTooCloseToAnotherFisher = true
                                                         break
                                                     }
@@ -344,6 +344,11 @@ class FarmerBehavior(
             }
         }
 
+        // ==========================================
+        // Увеличенная дистанция (12.0 sqr = ~3.4 блока)
+        // Ускорено время выполнения (farmTicks >= 5 / 10)
+        // ==========================================
+
         if (targetCropPos != null) {
             val cropBlock = bukkitWorld.getBlockAt(targetCropPos!!.x, targetCropPos!!.y, targetCropPos!!.z)
             val ageable = cropBlock.blockData as? Ageable
@@ -354,14 +359,14 @@ class FarmerBehavior(
 
             val distSq = npcLoc.distanceSquared(Location(bukkitWorld, targetCropPos!!.x + 0.5, targetCropPos!!.y + 0.5, targetCropPos!!.z + 0.5))
 
-            if (distSq <= 4.0) {
+            if (distSq <= 12.0) {
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetCropPos!!))
 
                 farmTicks++
-                if (farmTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+                if (farmTicks % 3 == 0) villager.swing(InteractionHand.MAIN_HAND)
 
-                if (farmTicks >= 15) {
+                if (farmTicks >= 10) {
                     farmTicks = 0
                     val type = cropBlock.type
                     val drop = when (type) {
@@ -416,14 +421,14 @@ class FarmerBehavior(
 
             val distSq = npcLoc.distanceSquared(Location(bukkitWorld, blockAbove.x + 0.5, blockAbove.y + 0.5, blockAbove.z + 0.5))
 
-            if (distSq <= 4.0) {
+            if (distSq <= 12.0) {
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetPlantPos!!))
 
                 farmTicks++
-                if (farmTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+                if (farmTicks % 3 == 0) villager.swing(InteractionHand.MAIN_HAND)
 
-                if (farmTicks >= 15) {
+                if (farmTicks >= 5) {
                     farmTicks = 0
                     val seeds = settlement.villageInventory.find {
                         it.type == Material.WHEAT_SEEDS || it.type == Material.CARROT || it.type == Material.POTATO || it.type == Material.BEETROOT_SEEDS
@@ -461,7 +466,7 @@ class FarmerBehavior(
 
             val distSq = npcLoc.distanceSquared(Location(bukkitWorld, dirtBlock.x + 0.5, dirtBlock.y + 0.5, dirtBlock.z + 0.5))
 
-            if (distSq <= 4.0) {
+            if (distSq <= 12.0) {
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetTillPos!!))
 
@@ -471,9 +476,9 @@ class FarmerBehavior(
                 }
 
                 farmTicks++
-                if (farmTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+                if (farmTicks % 3 == 0) villager.swing(InteractionHand.MAIN_HAND)
 
-                if (farmTicks >= 15) {
+                if (farmTicks >= 5) {
                     farmTicks = 0
                     dirtBlock.type = Material.FARMLAND
                     bukkitWorld.playSound(dirtBlock.location, Sound.ITEM_HOE_TILL, 1.0f, 1.0f)
@@ -496,7 +501,7 @@ class FarmerBehavior(
 
             val distSq = npcLoc.distanceSquared(Location(bukkitWorld, cropBlock.x + 0.5, cropBlock.y + 0.5, cropBlock.z + 0.5))
 
-            if (distSq <= 4.0) {
+            if (distSq <= 12.0) {
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
                 villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, BlockPosTracker(targetBoneMealPos!!))
 
@@ -506,9 +511,9 @@ class FarmerBehavior(
                 }
 
                 farmTicks++
-                if (farmTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
+                if (farmTicks % 3 == 0) villager.swing(InteractionHand.MAIN_HAND)
 
-                if (farmTicks >= 15) {
+                if (farmTicks >= 10) {
                     farmTicks = 0
 
                     val boneMeal = settlement.villageInventory.find { it.type == Material.BONE_MEAL }

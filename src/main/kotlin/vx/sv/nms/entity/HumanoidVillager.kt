@@ -657,7 +657,7 @@ class HumanoidVillager(
     @Suppress("UNCHECKED_CAST")
     private fun registerAttribute(entity: LivingEntity, attribute: Holder<Attribute>, value: Double) {
         try {
-            val attributesMapField = AttributeMap::class.java.declaredFields.firstOrNull {
+            val attributesMapField = AttributeMap::class.java.getDeclaredFields().firstOrNull {
                 Map::class.java.isAssignableFrom(it.type)
             } ?: return
 
@@ -803,7 +803,9 @@ class HumanoidVillager(
     val settlement: Settlement?
         get() = (this.bukkitEntity as org.bukkit.entity.Villager).settlement
 
-    class VillagerSwimMoveControl(private val villager: HumanoidVillager) : net.minecraft.world.entity.ai.control.MoveControl(villager) {
+    class VillagerSwimMoveControl(private val villager: HumanoidVillager) :
+        net.minecraft.world.entity.ai.control.MoveControl<net.minecraft.world.entity.Mob>(villager) {
+
         override fun tick() {
             if (this.villager.isInWater && this.villager.horizontalCollision) {
                 this.villager.jumpControl.jump()
@@ -834,7 +836,7 @@ class HumanoidVillager(
                     this.villager.deltaMovement = this.villager.deltaMovement.add(0.0, 0.03, 0.0)
                 }
 
-                if (this.operation != Operation.MOVE_TO || this.villager.navigation.isDone()) {
+                if (this.operation != net.minecraft.world.entity.ai.control.MoveControl.Operation.MOVE_TO || this.villager.navigation.isDone()) {
                     this.villager.speed = 0.0F
                     return
                 }

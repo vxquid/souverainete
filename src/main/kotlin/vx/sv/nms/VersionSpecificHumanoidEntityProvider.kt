@@ -1,6 +1,7 @@
 package vx.sv.nms
 
 import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.EntityTypes
 import org.bukkit.craftbukkit.entity.CraftLivingEntity
 import org.bukkit.entity.LivingEntity
 import org.bukkit.plugin.java.JavaPlugin
@@ -33,9 +34,9 @@ class VersionSpecificHumanoidEntityProvider(override val plugin: JavaPlugin) : E
             // и у всех жителей стабильно будет работать квестовое и диалоговое поведение.
             reflection.setFieldUsingUnsafe(
                 field,
-                EntityType.VILLAGER,
+                EntityTypes.VILLAGER,
                 EntityType.EntityFactory { _, level ->
-                    HumanoidVillager(EntityType.VILLAGER, level)
+                    HumanoidVillager(EntityTypes.VILLAGER, level)
                 })
         } catch (exception: ReflectiveOperationException) {
             exception.printStackTrace()

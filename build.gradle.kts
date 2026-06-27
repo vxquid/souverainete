@@ -15,7 +15,7 @@ val buildSuffix = if (isPremiumBuild) "premium" else "free"
 val javaVersion = 25
 
 group = "souverainete"
-version = "1.0.2"
+version = "1.0.3"
 description = "The definitive overhaul of villager intelligence and society."
 
 buildConfig {
@@ -30,7 +30,7 @@ bukkitPluginYaml {
   depend = listOf("packetevents")
   softDepend = listOf("MythicMobs")
   authors.add("vxquid")
-  apiVersion = "26.1" // Обновлено под формат версионирования 26.1.x
+  apiVersion = "26.2"
 
   permissions {
     register("sv.player.settings") {
@@ -67,7 +67,7 @@ repositories {
 }
 
 dependencies {
-  paperweight.paperDevBundle("26.1.2.build.+")
+  paperweight.paperDevBundle("26.2.build.+")
   implementation(kotlin("stdlib"))
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.code.gson:gson:2.11.0")
@@ -75,8 +75,7 @@ dependencies {
   implementation("co.aikar:acf-paper:0.5.1-SNAPSHOT")
   implementation("org.yaml:snakeyaml:1.33") // Специфическая версия YAML сохранена
   compileOnly(files("libs/vivaldi-1.0.0-all.jar"))
-  compileOnly("com.github.retrooper:packetevents-spigot:2.12.2") // Обновлено до 2.12.2 (поддержка 26.1.2)
-  compileOnly("io.lumine:Mythic-Dist:5.12.1") // Обновлено до 5.12.1 (поддержка 26.1.2)
+  compileOnly("com.github.retrooper:packetevents-spigot:2.13.0")
   compileOnly("org.geysermc.geyser:api:2.9.0-SNAPSHOT")
   compileOnly("org.geysermc.floodgate:api:2.2.4-SNAPSHOT")
 }
