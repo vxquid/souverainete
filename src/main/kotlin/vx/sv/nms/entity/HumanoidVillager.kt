@@ -26,7 +26,6 @@ import net.minecraft.world.entity.ai.behavior.BehaviorControl
 import net.minecraft.world.entity.ai.memory.MemoryModuleType
 import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.navigation.AmphibiousPathNavigation
-import net.minecraft.world.entity.ai.navigation.GroundPathNavigation
 import net.minecraft.world.entity.ai.navigation.PathNavigation
 import net.minecraft.world.entity.monster.CrossbowAttackMob
 import net.minecraft.world.entity.monster.RangedAttackMob
@@ -55,6 +54,7 @@ import vx.sv.nms.VersionSpecificHumanoidEntityProvider.Companion.plugin
 import vx.sv.nms.entity.EntityProvider.Humanoid
 import vx.sv.nms.entity.ai.*
 import vx.sv.nms.entity.ai.construct.*
+import vx.sv.nms.entity.ai.evaluator.HumanoidGroundNavigation
 import vx.sv.nms.entity.ai.fight.BowAttackBehavior
 import vx.sv.nms.entity.ai.fight.CrossbowAttackBehavior
 import vx.sv.nms.entity.ai.fight.FindEnemyBehavior
@@ -68,6 +68,7 @@ import vx.sv.util.VillagerBridge
 import java.util.*
 import kotlin.math.atan2
 import kotlin.math.sqrt
+import vx.sv.nms.entity.ai.evaluator.InteractFenceGateGoal
 
 class HumanoidVillager(
     type: EntityType<out Villager>?,
@@ -93,7 +94,6 @@ class HumanoidVillager(
     var lastPosition: Vec3? = null
     var stuckTicks: Int = 0
 
-    // Защита от частого переключения между ходьбой и плаванием
     private var lastSwimTransitionTick: Int = -40
 
     private lateinit var landNavigation: PathNavigation
@@ -113,7 +113,6 @@ class HumanoidVillager(
         this.moveControl = VillagerSwimMoveControl(this)
 
         this.setPathfindingMalus(PathType.WATER, 8.0F)
-
         this.setPathfindingMalus(PathType.TRAPDOOR, -1.0F)
 
         val bukkitVillager = this.bukkitEntity as? org.bukkit.entity.Villager
@@ -125,7 +124,6 @@ class HumanoidVillager(
             }
 
             bukkitVillager.isCollidable = false
-
             bukkitVillager.canPickupItems = true
         }
 
@@ -133,6 +131,8 @@ class HumanoidVillager(
         this.setPersistenceRequired()
 
         this.refreshDimensions()
+
+        this.goalSelector.addGoal(2, InteractFenceGateGoal(this))
     }
 
     override fun getDefaultDimensions(pose: net.minecraft.world.entity.Pose): net.minecraft.world.entity.EntityDimensions {
@@ -144,7 +144,7 @@ class HumanoidVillager(
     }
 
     override fun createNavigation(level: Level): PathNavigation {
-        this.landNavigation = GroundPathNavigation(this, level)
+        this.landNavigation = HumanoidGroundNavigation(this, level)
         this.waterNavigation = AmphibiousPathNavigation(this, level)
         return this.landNavigation
     }
@@ -171,7 +171,6 @@ class HumanoidVillager(
         if (!this.level().isClientSide) {
             val targetSwimming = this.isEffectiveAi() && this.wantsToSwim()
 
-            // Проверка кулдауна переключения в 40 тиков (2 секунды)
             if (targetSwimming != this.isSwimming) {
                 val ticksPassed = this.tickCount - this.lastSwimTransitionTick
                 if (ticksPassed >= 40) {
@@ -193,7 +192,6 @@ class HumanoidVillager(
     }
 
     override fun aiStep() {
-        // Подмена навигатора теперь строго привязана к защищенному стейту isSwimming
         val needsWaterNav = this.isSwimming
         val currentNav = this.navigation
 
@@ -290,9 +288,6 @@ class HumanoidVillager(
                             0
                         )
                         Bukkit.getPluginManager().callEvent(pickupEvent)
-                        if (!pickupEvent.isCancelled) {
-                            // Логика подбора предметов плагином
-                        }
                     } else {
                         val vector = currentLoc.toVector().subtract(itemLoc.toVector()).normalize().multiply(0.2)
                         item.velocity = vector
@@ -393,7 +388,6 @@ class HumanoidVillager(
         try {
             val inventoryField = AbstractVillager::class.java.getDeclaredField("SimpleContainer")
             if (inventoryField == null) {
-                // ...
             } else {
                 inventoryField.isAccessible = true
                 val currentInv = inventoryField.get(this) as? SimpleContainer ?: return
@@ -549,7 +543,6 @@ class HumanoidVillager(
                     }
                 }
             }
-
         }
     }
 
@@ -732,7 +725,7 @@ class HumanoidVillager(
 
         val weaponStack = when {
             mainHandStack.`is`(Items.BOW) || mainHandStack.`is`(Items.CROSSBOW) -> mainHandStack
-            offHandStack.`is`(Items.BOW) || offHandStack.`is`(Items.CROSSBOW) -> offHandStack
+            offHandStack.`is`(Items.BOW) || offHandStack.`is`(Items.CROSSBOW) -> offhandItem
             else -> return
         }
 

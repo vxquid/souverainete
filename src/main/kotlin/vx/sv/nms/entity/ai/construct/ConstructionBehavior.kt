@@ -23,6 +23,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.settlement.Settlement
 import vx.sv.nms.entity.HumanoidVillager
 import java.util.*
 import kotlin.math.abs
@@ -173,7 +174,11 @@ class ConstructionBehavior(
         return material.name.contains("LEAVES")
     }
 
-    private fun removeWholeTree(startBlock: Block) {
+    private fun removeWholeTree(startBlock: Block, settlement: Settlement?) {
+        val farmBoxes = settlement?.let { s ->
+            SettlementPlanner.buildings[s.data.id]?.filter { it.type.startsWith("FARM") }?.map { it.box }
+        } ?: emptyList()
+
         val targetLogs = mutableSetOf<Block>()
         val logQueue = ArrayDeque<Block>()
 
@@ -188,8 +193,15 @@ class ConstructionBehavior(
                         if (dx == 0 && dy == 0 && dz == 0) continue
                         val neighbor = current.getRelative(dx, dy, dz)
                         if (isLogBlock(neighbor.type) && !targetLogs.contains(neighbor)) {
-                            targetLogs.add(neighbor)
-                            logQueue.add(neighbor)
+                            val inFarm = farmBoxes.any { box ->
+                                neighbor.x >= box.minX && neighbor.x <= box.maxX &&
+                                        neighbor.y >= box.minY && neighbor.y <= box.maxY &&
+                                        neighbor.z >= box.minZ && neighbor.z <= box.maxZ
+                            }
+                            if (!inFarm) {
+                                targetLogs.add(neighbor)
+                                logQueue.add(neighbor)
+                            }
                         }
                     }
                 }
@@ -295,7 +307,11 @@ class ConstructionBehavior(
         validLeaves.forEach { it.type = Material.AIR }
     }
 
-    private fun findConnectedTrunk(startBlock: Block): Block? {
+    private fun findConnectedTrunk(startBlock: Block, settlement: Settlement?): Block? {
+        val farmBoxes = settlement?.let { s ->
+            SettlementPlanner.buildings[s.data.id]?.filter { it.type.startsWith("FARM") }?.map { it.box }
+        } ?: emptyList()
+
         val checked = mutableSetOf<Block>()
         val queue = ArrayDeque<Block>()
         queue.add(startBlock)
@@ -306,7 +322,14 @@ class ConstructionBehavior(
             val current = queue.removeFirst()
 
             if (isLogBlock(current.type)) {
-                return current
+                val inFarm = farmBoxes.any { box ->
+                    current.x >= box.minX && current.x <= box.maxX &&
+                            current.y >= box.minY && current.y <= box.maxY &&
+                            current.z >= box.minZ && current.z <= box.maxZ
+                }
+                if (!inFarm) {
+                    return current
+                }
             }
 
             if (isLeafBlock(current.type)) {
@@ -337,7 +360,6 @@ class ConstructionBehavior(
         val bukkitVillager = villager.bukkitEntity as? org.bukkit.entity.Villager ?: return false
         val prof = bukkitVillager.profession
 
-        // FIXED: Forbidden miners (TOOLSMITH) and farmers (FARMER) from participating in building tasks
         if (prof == org.bukkit.entity.Villager.Profession.FARMER ||
             prof == org.bukkit.entity.Villager.Profession.TOOLSMITH) {
             return false
@@ -430,9 +452,10 @@ class ConstructionBehavior(
         val bukkitWorld = world.world
         var blockPos = assigned.pos
         var block = bukkitWorld.getBlockAt(blockPos.x, blockPos.y, blockPos.z)
+        val settlement = villager.settlement
 
         if (block.type.name.contains("LEAVES")) {
-            val trunk = findConnectedTrunk(block)
+            val trunk = findConnectedTrunk(block, settlement)
             if (trunk != null) {
                 block = trunk
                 blockPos = BlockPos(trunk.x, trunk.y, trunk.z)
@@ -519,7 +542,7 @@ class ConstructionBehavior(
 
             if (!block.isIgnorableObstacle() && !isPathTransformation) {
                 if (isLogBlock(block.type)) {
-                    removeWholeTree(block)
+                    removeWholeTree(block, settlement)
 
                     assignedBlockTicksMap.remove(villager)
                     villager.digTicks = 0
@@ -707,7 +730,6 @@ class BuilderSafetyListener : Listener {
         if (isSuffocation || isDrowning) {
             event.isCancelled = true
 
-            // Instantly restore air capacity if stuck underwater
             if (isDrowning) {
                 villager.remainingAir = villager.maximumAir
             }
