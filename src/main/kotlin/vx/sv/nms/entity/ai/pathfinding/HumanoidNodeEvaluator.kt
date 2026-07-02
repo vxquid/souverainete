@@ -1,4 +1,4 @@
-package vx.sv.nms.entity.ai.evaluator
+package vx.sv.nms.entity.ai.pathfinding
 
 import net.minecraft.core.BlockPos
 import net.minecraft.tags.BlockTags

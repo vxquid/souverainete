@@ -54,7 +54,7 @@ import vx.sv.nms.VersionSpecificHumanoidEntityProvider.Companion.plugin
 import vx.sv.nms.entity.EntityProvider.Humanoid
 import vx.sv.nms.entity.ai.*
 import vx.sv.nms.entity.ai.construct.*
-import vx.sv.nms.entity.ai.evaluator.HumanoidGroundNavigation
+import vx.sv.nms.entity.ai.pathfinding.HumanoidGroundNavigation
 import vx.sv.nms.entity.ai.fight.BowAttackBehavior
 import vx.sv.nms.entity.ai.fight.CrossbowAttackBehavior
 import vx.sv.nms.entity.ai.fight.FindEnemyBehavior
@@ -68,7 +68,7 @@ import vx.sv.util.VillagerBridge
 import java.util.*
 import kotlin.math.atan2
 import kotlin.math.sqrt
-import vx.sv.nms.entity.ai.evaluator.InteractFenceGateGoal
+import vx.sv.nms.entity.ai.pathfinding.InteractFenceGateGoal
 
 class HumanoidVillager(
     type: EntityType<out Villager>?,

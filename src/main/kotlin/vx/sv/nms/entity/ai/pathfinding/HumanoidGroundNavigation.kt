@@ -1,4 +1,4 @@
-package vx.sv.nms.entity.ai.evaluator
+package vx.sv.nms.entity.ai.pathfinding
 
 import net.minecraft.world.entity.Mob
 import net.minecraft.world.entity.ai.navigation.GroundPathNavigation
