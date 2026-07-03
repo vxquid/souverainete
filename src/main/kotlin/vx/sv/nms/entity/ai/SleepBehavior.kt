@@ -39,21 +39,26 @@ class SleepBehavior(
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val time = world.world.time
+
+        // Если сейчас день, житель не может начать спать
         if (time < 13000 || time > 23000) {
-            if (villager.isSleeping) {
+            // ИСПРАВЛЕНИЕ: Меняем позу на STANDING только если житель РЕАЛЬНО спит.
+            // Это предотвращает ежетиковый сброс позы плавания (SWIMMING) в дневное время.
+            if (villager.isSleeping || villager.pose == net.minecraft.world.entity.Pose.SLEEPING) {
                 villager.stopSleeping()
+                villager.pose = net.minecraft.world.entity.Pose.STANDING
+                releaseBed(villager.uuid)
             }
-            villager.pose = net.minecraft.world.entity.Pose.STANDING
-            releaseBed(villager.uuid)
             return false
         }
 
+        // Если житель в бою, он не может пойти спать
         if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
-            if (villager.isSleeping) {
+            if (villager.isSleeping || villager.pose == net.minecraft.world.entity.Pose.SLEEPING) {
                 villager.stopSleeping()
+                villager.pose = net.minecraft.world.entity.Pose.STANDING
+                releaseBed(villager.uuid)
             }
-            villager.pose = net.minecraft.world.entity.Pose.STANDING
-            releaseBed(villager.uuid)
             return false
         }
 
@@ -62,21 +67,12 @@ class SleepBehavior(
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
         val timeOfDay = world.world.time
+
         if (timeOfDay < 13000 || timeOfDay > 23000) {
-            if (villager.isSleeping) {
-                villager.stopSleeping()
-            }
-            villager.pose = net.minecraft.world.entity.Pose.STANDING
-            releaseBed(villager.uuid)
             return false
         }
 
         if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
-            if (villager.isSleeping) {
-                villager.stopSleeping()
-            }
-            villager.pose = net.minecraft.world.entity.Pose.STANDING
-            releaseBed(villager.uuid)
             return false
         }
 
@@ -85,6 +81,7 @@ class SleepBehavior(
 
     override fun tick(world: ServerLevel, villager: HumanoidVillager, time: Long) {
         if (villager.isSleeping) {
+            // Экстренное пробуждение при агрессии
             if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
                 villager.stopSleeping()
                 villager.pose = net.minecraft.world.entity.Pose.STANDING
@@ -92,6 +89,7 @@ class SleepBehavior(
                 return
             }
 
+            // Очищаем пути, пока спим
             if (villager.navigation.isInProgress) {
                 villager.navigation.stop()
             }
@@ -163,10 +161,10 @@ class SleepBehavior(
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
-        if (villager.isSleeping) {
+        if (villager.isSleeping || villager.pose == net.minecraft.world.entity.Pose.SLEEPING) {
             villager.stopSleeping()
+            villager.pose = net.minecraft.world.entity.Pose.STANDING
         }
-        villager.pose = net.minecraft.world.entity.Pose.STANDING
         releaseBed(villager.uuid)
         targetBedPos = null
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
