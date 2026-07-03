@@ -13,6 +13,8 @@ import org.bukkit.inventory.meta.PotionMeta
 import org.bukkit.potion.PotionType
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.event.VillagerProduceItemEvent
+import vx.sv.persistent.LivingEntityExtend.settlement
+import vx.sv.gameplay.settlement.SettlementManager
 import kotlin.random.Random
 
 /**
@@ -60,6 +62,65 @@ class ProfessionManager : Listener {
     }
 
     /**
+     * Helper to check total count of an item in both the villager's personal inventory
+     * and the settlement's shared village inventory.
+     */
+    private fun countItem(villager: Villager, material: Material): Int {
+        var count = villager.inventory.filterNotNull().filter { it.type == material }.sumOf { it.amount }
+        val villageInv = villager.settlement?.villageInventory
+        if (villageInv != null) {
+            count += villageInv.filterNotNull().filter { it.type == material }.sumOf { it.amount }
+        }
+        return count
+    }
+
+    /**
+     * Helper to consume an item from combined inventories (personal inventory takes priority,
+     * fallback to shared village inventory).
+     */
+    private fun consumeItem(villager: Villager, material: Material, amount: Int) {
+        var remaining = amount
+
+        // 1. Consume from personal inventory first
+        val inv = villager.inventory
+        val personalStacks = inv.filterNotNull().filter { it.type == material }
+        for (stack in personalStacks) {
+            if (remaining <= 0) break
+            val toTake = minOf(stack.amount, remaining)
+            if (stack.amount <= toTake) {
+                inv.removeItem(stack)
+            } else {
+                stack.amount -= toTake
+            }
+            remaining -= toTake
+        }
+
+        // 2. Consume from settlement shared storage if still needed
+        if (remaining > 0) {
+            val villageInv = villager.settlement?.villageInventory
+            if (villageInv != null) {
+                val iterator = villageInv.iterator()
+                while (iterator.hasNext()) {
+                    val stack = iterator.next() ?: continue
+                    if (stack.type == material) {
+                        val toTake = minOf(stack.amount, remaining)
+                        stack.amount -= toTake
+                        remaining -= toTake
+                        if (stack.amount <= 0) {
+                            iterator.remove()
+                        }
+                        if (remaining <= 0) break
+                    }
+                }
+            }
+        }
+
+        if (amount - remaining > 0 && villager.settlement != null) {
+            SettlementManager.saveSettlements(villager.world)
+        }
+    }
+
+    /**
      * Initiates item production for all eligible villagers across allowed worlds.
      * Handles cleric brewing separately and general crafting for other professions.
      */
@@ -98,24 +159,34 @@ class ProfessionManager : Listener {
     private fun handleClericBrewing(villager: Villager) {
         val maxPotions = gameplayConfig.profession.clericMaxPotionsBase * villager.villagerLevel + 1
         val inv = villager.inventory
-        if (inv.filterNotNull().count { it.type == Material.POTION } >= maxPotions) return
+        val settlement = villager.settlement
+        val villageInv = settlement?.villageInventory
 
-        val ingredients = cachedProfessionsConfig.getStringList("villager-item-producing.profession.CLERIC.item-priority").map { it.split("~")[0] }
-        inv.filterNotNull().find { ingredients.contains(it.type.toString()) }?.let { brewingIngredient ->
-            val amountToTake = gameplayConfig.profession.clericBrewingIngredientMin + Random.Default.nextInt(gameplayConfig.profession.clericBrewingIngredientMaxRandom)
-            takeItem(inv, brewingIngredient, amountToTake)
+        // Count total potions across both inventories
+        val personalPotions = inv.filterNotNull().count { it.type == Material.POTION }
+        val villagePotions = villageInv?.filterNotNull()?.count { it.type == Material.POTION } ?: 0
+        if (personalPotions + villagePotions >= maxPotions) return
 
-            val potion = ItemStack(Material.POTION).apply {
-                itemMeta = (itemMeta as PotionMeta).apply {
-                    basePotionType = PotionType.entries.random()
-                }
+        val ingredients = cachedProfessionsConfig.getStringList("villager-item-producing.profession.CLERIC.item-priority")
+            .map { it.split("~")[0] }
+            .mapNotNull { runCatching { Material.valueOf(it) }.getOrNull() }
+
+        // Find an ingredient available in combined storage
+        val foundIngredient = ingredients.firstOrNull { countItem(villager, it) > 0 } ?: return
+
+        val amountToTake = gameplayConfig.profession.clericBrewingIngredientMin + Random.Default.nextInt(gameplayConfig.profession.clericBrewingIngredientMaxRandom)
+        consumeItem(villager, foundIngredient, amountToTake)
+
+        val potion = ItemStack(Material.POTION).apply {
+            itemMeta = (itemMeta as PotionMeta).apply {
+                basePotionType = PotionType.entries.random()
             }
-
-            plugin.server.scheduler.runTask(plugin, Runnable {
-                plugin.server.pluginManager.callEvent(VillagerProduceItemEvent(villager, potion))
-                villager.world.playSound(villager, Sound.ENTITY_VILLAGER_WORK_CLERIC, 1F, 1F)
-            })
         }
+
+        plugin.server.scheduler.runTask(plugin, Runnable {
+            plugin.server.pluginManager.callEvent(VillagerProduceItemEvent(villager, potion))
+            villager.world.playSound(villager, Sound.ENTITY_VILLAGER_WORK_CLERIC, 1F, 1F)
+        })
     }
 
     /**
@@ -124,8 +195,6 @@ class ProfessionManager : Listener {
     private fun handleGeneralCrafting(villager: Villager, professionKey: String) {
         val itemsToProduce = cachedProfessionsConfig.getStringList("villager-item-producing.profession.$professionKey.item-produce").shuffled()
         if (itemsToProduce.isEmpty()) return
-
-        val inv = villager.inventory
 
         for (itemString in itemsToProduce) {
             val material = resolveMaterial(itemString) ?: continue
@@ -187,23 +256,21 @@ class ProfessionManager : Listener {
     }
 
     /**
-     * Checks if the villager has enough ingredients to craft the recipe.
+     * Checks if the villager has enough ingredients to craft the recipe using combined storage.
      */
     private fun canCraftRecipe(villager: Villager, ingredients: List<Material>): Boolean {
         ingredients.groupBy { it }.forEach { (material, list) ->
-            if (!villager.inventory.contains(material, list.size)) return false
+            if (countItem(villager, material) < list.size) return false
         }
         return true
     }
 
     /**
-     * Consumes ingredients from the villager's inventory.
+     * Consumes ingredients from both inventories.
      */
     private fun consumeIngredients(villager: Villager, ingredients: List<Material>) {
-        ingredients.forEach { material ->
-            villager.inventory.filterNotNull().find { it.type == material }?.let {
-                takeItem(villager.inventory, it, 1)
-            }
+        ingredients.groupBy { it }.forEach { (material, list) ->
+            consumeItem(villager, material, list.size)
         }
     }
 
@@ -225,7 +292,34 @@ class ProfessionManager : Listener {
 
         // TODO: Apply random enchantment on books for librarians with low chance
 
-        villager.inventory.addItem(item)
+        val settlement = villager.settlement
+        if (settlement != null) {
+            val virtualInv = settlement.villageInventory
+            val maxStack = item.type.maxStackSize
+            var remaining = item.amount
+
+            for (stored in virtualInv) {
+                if (stored.isSimilar(item)) {
+                    val space = maxStack - stored.amount
+                    if (space > 0) {
+                        val toAdd = minOf(space, remaining)
+                        stored.amount += toAdd
+                        remaining -= toAdd
+                        if (remaining <= 0) break
+                    }
+                }
+            }
+            while (remaining > 0) {
+                val copy = item.clone()
+                val toAdd = minOf(maxStack, remaining)
+                copy.amount = toAdd
+                virtualInv.add(copy)
+                remaining -= toAdd
+            }
+            SettlementManager.saveSettlements(villager.world)
+        } else {
+            villager.inventory.addItem(item)
+        }
     }
 
     companion object {

@@ -11,6 +11,7 @@ import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
+import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.nms.entity.HumanoidVillager
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -70,16 +71,13 @@ class SettlementPlanner(val settlement: Settlement) {
         private val activeScans = ConcurrentHashMap.newKeySet<String>()
         private val scanCooldowns = ConcurrentHashMap<String, Long>()
 
-        private val activePlanning = ConcurrentHashMap.newKeySet<UUID>()
+        // Хранит тип здания, который в ДАННЫЙ момент просчитывается асинхронно для конкретного поселения
+        private val activePlanningRequests = ConcurrentHashMap<UUID, VanillaBuildingType>()
 
         private val planningQueue = ConcurrentLinkedQueue<PlanRequest>()
         private var isGlobalPlannerRunning = false
 
         fun requestPlanning(settlement: Settlement, type: VanillaBuildingType) {
-            val settlementId = settlement.data.id
-            if (activePlanning.contains(settlementId)) return
-            activePlanning.add(settlementId)
-
             planningQueue.offer(PlanRequest(settlement, type))
             startGlobalPlanner()
         }
@@ -146,8 +144,8 @@ class SettlementPlanner(val settlement: Settlement) {
                     val angle = rand.nextDouble() * 2 * Math.PI
                     val distance = rand.nextInt(maxRadius - minRadius) + minRadius
 
-                    val cx = center!!.blockX + (cos(angle) * distance).toInt()
-                    val cz = center!!.blockZ + (sin(angle) * distance).toInt()
+                    var cx = center!!.blockX + (cos(angle) * distance).toInt()
+                    var cz = center!!.blockZ + (sin(angle) * distance).toInt()
 
                     if (!world.isChunkLoaded(cx shr 4, cz shr 4)) return false
 
@@ -166,12 +164,29 @@ class SettlementPlanner(val settlement: Settlement) {
                                 targetZ = pos.z
                             }
                         }
+
+                        if (reqType == VanillaBuildingType.LAMP) {
+                            val offsets = listOf(0 to 1, 0 to -1, 1 to 0, -1 to 0, 1 to 1, 1 to -1, -1 to 1, -1 to -1)
+                            var foundSide = false
+                            for (offset in offsets) {
+                                val checkX = targetX + offset.first
+                                val checkZ = targetZ + offset.second
+                                val isRoad = roadsCopy.any { it.x == checkX && it.z == checkZ }
+                                if (!isRoad) {
+                                    cx = checkX
+                                    cz = checkZ
+                                    foundSide = true
+                                    break
+                                }
+                            }
+                            if (!foundSide) return false
+                        }
                     }
 
                     var bestRotation = StructureRotation.NONE
                     var minJigsawDistSq = Double.MAX_VALUE
 
-                    for (rot in StructureRotation.values()) {
+                    for (rot in StructureRotation.entries) {
                         val rotJigsaw = rotateCoords(entrancePos!!, rot, rawWidth, rawLength)
                         val rotWidth = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
                         val rotLength = if (rot == StructureRotation.CLOCKWISE_90 || rot == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength
@@ -236,9 +251,10 @@ class SettlementPlanner(val settlement: Settlement) {
                         }
                     }
 
-                    val maxAllowedVariance = if (isCritical) 9 else 5
+                    val maxAllowedVariance = if (isCritical) 14 else 10
                     if (maxY - minY > maxAllowedVariance) return false
-                    if (abs(maxY - center!!.blockY) > 15) return false
+
+                    if (abs(maxY - center!!.blockY) > 25) return false
 
                     var px = center!!.blockX
                     var pz = center!!.blockZ
@@ -248,11 +264,14 @@ class SettlementPlanner(val settlement: Settlement) {
                     val sZ = if (pz < cz) 1 else -1
                     var err = dX - dZ
 
+                    var lastHy = center!!.blockY
                     while (true) {
                         if (!world.isChunkLoaded(px shr 4, pz shr 4)) return false
 
                         val hy = getHighestGroundYAt(world, px, pz)
-                        if (abs(hy - center!!.blockY) > 9) return false
+
+                        if (abs(hy - lastHy) > 4) return false
+                        lastHy = hy
 
                         if (px == cx && pz == cz) break
                         val e2 = 2 * err
@@ -353,6 +372,16 @@ class SettlementPlanner(val settlement: Settlement) {
                                 cancel()
                                 return
                             }
+
+                            val settlementId = currentRequest!!.settlement.data.id
+
+                            if (activePlanningRequests.containsKey(settlementId)) {
+                                planningQueue.offer(currentRequest)
+                                currentRequest = null
+                                continue
+                            }
+
+                            activePlanningRequests[settlementId] = currentRequest!!.type
                             setupContext(currentRequest!!)
                         }
 
@@ -361,7 +390,7 @@ class SettlementPlanner(val settlement: Settlement) {
                         }
 
                         if (!hasPlayersNearby) {
-                            activePlanning.remove(reqSettlement!!.data.id)
+                            activePlanningRequests.remove(reqSettlement!!.data.id)
                             currentRequest = null
                             continue
                         }
@@ -370,7 +399,7 @@ class SettlementPlanner(val settlement: Settlement) {
                         val success = processSingleAttempt()
 
                         if (success || attemptsMade >= maxAttempts) {
-                            activePlanning.remove(reqSettlement!!.data.id)
+                            activePlanningRequests.remove(reqSettlement!!.data.id)
                             currentRequest = null
                         }
                     }
@@ -388,6 +417,7 @@ class SettlementPlanner(val settlement: Settlement) {
                 org.bukkit.entity.Villager.Profession.SHEPHERD -> Pair("SHEPHERD", Material.LOOM)
                 org.bukkit.entity.Villager.Profession.TOOLSMITH -> Pair("MINE", Material.SMITHING_TABLE)
                 org.bukkit.entity.Villager.Profession.BUTCHER -> Pair("BAKERY", Material.SMOKER)
+                org.bukkit.entity.Villager.Profession.FISHERMAN -> Pair("FISHERMAN", Material.BARREL)
                 else -> return null
             }
 
@@ -407,22 +437,23 @@ class SettlementPlanner(val settlement: Settlement) {
 
             if (activeScans.add(key)) {
                 val records = buildings[s.data.id] ?: run { activeScans.remove(key); return null }
-                val record = records.find { it.type.startsWith(buildingTypeName) } ?: run { activeScans.remove(key); return null }
-                val box = record.box
                 val world = s.world
 
                 var found: BlockPos? = null
 
-                scan@ for (x in box.minX.toInt()..box.maxX.toInt()) {
-                    for (z in box.minZ.toInt()..box.maxZ.toInt()) {
-                        if (!world.isChunkLoaded(x shr 4, z shr 4)) continue
+                scan@ for (record in records) {
+                    val box = record.box
+                    for (x in box.minX.toInt()..box.maxX.toInt()) {
+                        for (z in box.minZ.toInt()..box.maxZ.toInt()) {
+                            if (!world.isChunkLoaded(x shr 4, z shr 4)) continue
 
-                        val searchMinY = box.minY.toInt() - 3
-                        val searchMaxY = box.maxY.toInt()
-                        for (y in searchMinY..searchMaxY) {
-                            if (world.getBlockAt(x, y, z).type == targetMaterial) {
-                                found = BlockPos(x, y, z)
-                                break@scan
+                            val searchMinY = box.minY.toInt() - 3
+                            val searchMaxY = box.maxY.toInt()
+                            for (y in searchMinY..searchMaxY) {
+                                if (world.getBlockAt(x, y, z).type == targetMaterial) {
+                                    found = BlockPos(x, y, z)
+                                    break@scan
+                                }
                             }
                         }
                     }
@@ -446,13 +477,18 @@ class SettlementPlanner(val settlement: Settlement) {
             while (iterator.hasNext()) {
                 val job = iterator.next()
                 if (job.isFinished()) {
+                    iterator.remove()
                     val records = buildings[settlementId]
                     if (records != null) {
                         val golemRecord = records.find { it.jobId == job.jobId && it.type.startsWith("IRON_GOLEM") }
                         if (golemRecord != null) {
                             val loc = golemRecord.box.center.toLocation(settlement.world)
 
-                            settlement.world.spawn(loc, org.bukkit.entity.IronGolem::class.java)
+                            val alreadyHasGolem = settlement.world.getNearbyEntities(loc, 3.0, 3.0, 3.0).any { it is org.bukkit.entity.IronGolem }
+
+                            if (!alreadyHasGolem) {
+                                settlement.world.spawn(loc, org.bukkit.entity.IronGolem::class.java)
+                            }
 
                             job.getBlocks().forEach { blockToPlace ->
                                 val block = settlement.world.getBlockAt(blockToPlace.pos.x, blockToPlace.pos.y, blockToPlace.pos.z)
@@ -484,13 +520,15 @@ class SettlementPlanner(val settlement: Settlement) {
                 return availableActiveJob
             }
 
-            val queue = pendingJobs[settlementId] ?: return null
-            synchronized(queue) {
-                val nextJob = queue.poll()
-                if (nextJob != null) {
-                    activeList.add(nextJob)
-                    settlement.data.activeProjectId = nextJob.jobId
-                    return nextJob
+            val queue = pendingJobs[settlementId]
+            if (queue != null && queue.isNotEmpty()) {
+                synchronized(queue) {
+                    val nextJob = queue.poll()
+                    if (nextJob != null) {
+                        activeList.add(nextJob)
+                        settlement.data.activeProjectId = nextJob.jobId
+                        return nextJob
+                    }
                 }
             }
 
@@ -499,6 +537,10 @@ class SettlementPlanner(val settlement: Settlement) {
                 settlement.data.activeProjectId = fallbackJob.jobId
             } else {
                 settlement.data.activeProjectId = null
+
+                if (queue == null || queue.isEmpty()) {
+                    SettlementPlanner(settlement).planNextPriorityBuilding()
+                }
             }
             return fallbackJob
         }
@@ -640,7 +682,7 @@ class SettlementPlanner(val settlement: Settlement) {
                 val typeToken = object : TypeToken<Map<String, SettlementPlannerSaveData>>() {}.type
                 val loadedData: Map<String, SettlementPlannerSaveData> = gson.fromJson(json, typeToken) ?: return
 
-                val worldSettlements = SettlementManager.settlements[world] ?: return
+                val worldSettlements = settlements[world] ?: return
 
                 loadedData.forEach { (uuidStr, data) ->
                     val settlementId = UUID.fromString(uuidStr)
@@ -796,88 +838,125 @@ class SettlementPlanner(val settlement: Settlement) {
         val gameTime = world.gameTime
         val lastFailed = planningCooldowns[settlementId] ?: 0L
 
-        if (gameTime - lastFailed < 1200L) {
+        if (gameTime - lastFailed < 400L) {
             return false
         }
 
         val records = buildings[settlementId] ?: mutableListOf()
 
-        val existingCounts = records.groupingBy { record ->
+        val allTypes = mutableListOf<String>()
+
+        // 1. Учитываем уже построенные здания
+        records.forEach { record ->
             val typeName = record.type
-            if (typeName.contains("_")) {
-                val lastPart = typeName.substringAfterLast("_")
-                if (lastPart.toIntOrNull() != null) {
-                    typeName.substringBeforeLast("_")
-                } else {
-                    typeName
-                }
+            val baseName = if (typeName.contains("_") && typeName.substringAfterLast("_").toIntOrNull() != null) {
+                typeName.substringBeforeLast("_")
             } else {
                 typeName
             }
-        }.eachCount()
+            allTypes.add(baseName)
+        }
 
+        var lastTypeName = allTypes.lastOrNull() ?: ""
+
+        // 2. Учитываем то, что прямо сейчас просчитывается в отдельном потоке планировщика
+        activePlanningRequests[settlementId]?.let { type ->
+            allTypes.add(type.typeName)
+            lastTypeName = type.typeName
+        }
+
+        // 3. Учитываем то, что ожидает расчетов в глобальной очереди планировщика
+        planningQueue.filter { it.settlement.data.id == settlementId }.forEach { req ->
+            val typeName = req.type.typeName
+            allTypes.add(typeName)
+            lastTypeName = typeName
+        }
+
+        val existingCounts = allTypes.groupingBy { it }.eachCount()
+
+        // =========================================================
+        // ЛОГИКА СТРОГОГО ЧЕРЕДОВАНИЯ
+        // =========================================================
+
+        // 1. Базовые жизненно необходимые постройки (строятся первыми)
+        val coreBuildings = listOf(
+            Pair(VanillaBuildingType.MEETING_POINT, 1),
+            Pair(VanillaBuildingType.TOWN_HALL, 1),
+            Pair(VanillaBuildingType.FARM, 2),
+            Pair(VanillaBuildingType.WOOD_FARM, 1),
+            Pair(VanillaBuildingType.MINE, 1),
+            Pair(VanillaBuildingType.SHEPHERD, 1)
+        )
+
+        for ((type, maxCount) in coreBuildings) {
+            if ((existingCounts[type.typeName] ?: 0) < maxCount) {
+                requestPlanning(settlement, type)
+                return true
+            }
+        }
+
+        // 2. Проверка лимитов для жилых домов (зависят от населения)
         val existingSmall = existingCounts["HOUSE_SMALL"] ?: 0
         val existingMedium = existingCounts["HOUSE_MEDIUM"] ?: 0
         val existingLarge = existingCounts["HOUSE_LARGE"] ?: 0
 
         val maxResidentialAllowed = maxOf(6, settlement.villagers.size)
-
         val allowedSmall = if (existingSmall < 2) 2 else if (existingLarge >= 2 && existingMedium >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
         val allowedLarge = if (existingLarge < 2) 2 else if (existingSmall >= 2 && existingMedium >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
         val allowedMedium = if (existingMedium < 2) 2 else if (existingSmall >= 2 && existingLarge >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
 
-        val totalBuildingsBuilt = records.size
-        val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(4)
-
-        val priorityList = listOf(
-            Pair(VanillaBuildingType.FARM, 2),
-            Pair(VanillaBuildingType.WOOD_FARM, 1),
-            Pair(VanillaBuildingType.MINE, 1),
-            Pair(VanillaBuildingType.SHEPHERD, 1),
+        val housePriority = listOf(
             Pair(VanillaBuildingType.HOUSE_SMALL, allowedSmall),
             Pair(VanillaBuildingType.HOUSE_LARGE, allowedLarge),
-            Pair(VanillaBuildingType.HOUSE_MEDIUM, allowedMedium),
-            Pair(VanillaBuildingType.MEETING_POINT, 1),
-            Pair(VanillaBuildingType.LAMP, maxLampsAllowed),
-            Pair(VanillaBuildingType.ANIMAL_PEN, 1),
-            Pair(VanillaBuildingType.STABLE, 1),
-            Pair(VanillaBuildingType.BLACKSMITH, 1),
-            Pair(VanillaBuildingType.BAKERY, 1),
-            Pair(VanillaBuildingType.LIBRARY, 1),
-            Pair(VanillaBuildingType.ARMORY, 1),
-            Pair(VanillaBuildingType.CARTOGRAPHER, 1),
-            Pair(VanillaBuildingType.TEMPLE, 1)
+            Pair(VanillaBuildingType.HOUSE_MEDIUM, allowedMedium)
         )
 
-        val houses = priorityList.filter { it.first.typeName.startsWith("HOUSE_") }
-        val nonHouses = priorityList.filter { !it.first.typeName.startsWith("HOUSE_") }
+        val canBuildHouse = housePriority.any { (existingCounts[it.first.typeName] ?: 0) < it.second }
 
-        val lastPlanned = records.lastOrNull()
-        val lastWasHouse = lastPlanned != null && lastPlanned.type.startsWith("HOUSE_")
+        // 3. Продвинутые функциональные здания (чередуются с домами)
+        val advancedFunctional = listOf(
+            VanillaBuildingType.BLACKSMITH,
+            VanillaBuildingType.BAKERY,
+            VanillaBuildingType.LIBRARY,
+            VanillaBuildingType.ARMORY,
+            VanillaBuildingType.CARTOGRAPHER,
+            VanillaBuildingType.STABLE,
+            VanillaBuildingType.ANIMAL_PEN,
+            VanillaBuildingType.TEMPLE
+        )
+
+        val unbuiltFunctional = advancedFunctional.filter { (existingCounts[it.typeName] ?: 0) < 1 }
+
+        val lastWasHouse = lastTypeName.startsWith("HOUSE_")
 
         if (lastWasHouse) {
-            for ((type, maxCount) in nonHouses) {
-                val currentCount = existingCounts[type.typeName] ?: 0
-                if (currentCount < maxCount) {
-                    requestPlanning(settlement, type)
-                    return true
-                }
-            }
-            for ((type, maxCount) in houses) {
-                val currentCount = existingCounts[type.typeName] ?: 0
-                if (currentCount < maxCount) {
-                    requestPlanning(settlement, type)
-                    return true
-                }
+            // После дома обязательно пытаемся построить функциональное здание
+            if (unbuiltFunctional.isNotEmpty()) {
+                requestPlanning(settlement, unbuiltFunctional.random())
+                return true
+            } else if (canBuildHouse) {
+                val nextHouse = housePriority.first { (existingCounts[it.first.typeName] ?: 0) < it.second }
+                requestPlanning(settlement, nextHouse.first)
+                return true
             }
         } else {
-            for ((type, maxCount) in priorityList) {
-                val currentCount = existingCounts[type.typeName] ?: 0
-                if (currentCount < maxCount) {
-                    requestPlanning(settlement, type)
-                    return true
-                }
+            // После функционального здания обязательно строим дом
+            if (canBuildHouse) {
+                val nextHouse = housePriority.first { (existingCounts[it.first.typeName] ?: 0) < it.second }
+                requestPlanning(settlement, nextHouse.first)
+                return true
+            } else if (unbuiltFunctional.isNotEmpty()) {
+                requestPlanning(settlement, unbuiltFunctional.random())
+                return true
             }
+        }
+
+        // 5. Декорации (когда дома и инфраструктура уперлись в лимиты)
+        val totalBuildingsBuilt = records.size
+        val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(4)
+        if ((existingCounts["LAMP"] ?: 0) < maxLampsAllowed) {
+            requestPlanning(settlement, VanillaBuildingType.LAMP)
+            return true
         }
 
         planningCooldowns[settlementId] = gameTime
@@ -893,6 +972,7 @@ class SettlementPlanner(val settlement: Settlement) {
     ): List<SchematicBuildJob> {
         val jobsList = mutableListOf<SchematicBuildJob>()
         val center = settlement.data.center
+        val airData = Material.AIR.createBlockData()
 
         val structureSize = VanillaStructureLoader.getStructureSize(type.vanillaPath)
         val rawWidth = structureSize.blockX
@@ -907,116 +987,131 @@ class SettlementPlanner(val settlement: Settlement) {
         val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
         val records = buildings[settlementId] ?: emptyList()
 
-        val pathPoints = mutableListOf<BlockPos>()
-        var currentX = center.blockX
-        var currentZ = center.blockZ
+        val isRoadEligible = type != VanillaBuildingType.IRON_GOLEM && type != VanillaBuildingType.LAMP
+        val halfW = width / 2 + 1
+        val halfL = length / 2 + 1
 
-        if (roads.isNotEmpty()) {
-            var minDistanceSq = Double.MAX_VALUE
-            for (pos in roads) {
-                val dx = pos.x - entrancePos.x
-                val dz = pos.z - entrancePos.z
-                val distSq = (dx * dx + dz * dz).toDouble()
-                if (distSq < minDistanceSq) {
-                    minDistanceSq = distSq
-                    currentX = pos.x
-                    currentZ = pos.z
+        if (isRoadEligible) {
+            val pathPoints = mutableListOf<BlockPos>()
+            var currentX = center.blockX
+            var currentZ = center.blockZ
+
+            if (roads.isNotEmpty()) {
+                var minDistanceSq = Double.MAX_VALUE
+                for (pos in roads) {
+                    val dx = pos.x - entrancePos.x
+                    val dz = pos.z - entrancePos.z
+                    val distSq = (dx * dx + dz * dz).toDouble()
+                    if (distSq < minDistanceSq) {
+                        minDistanceSq = distSq
+                        currentX = pos.x
+                        currentZ = pos.z
+                    }
                 }
             }
-        }
 
-        val dX = abs(entrancePos.x - currentX)
-        val dZ = abs(entrancePos.z - currentZ)
-        val sX = if (currentX < entrancePos.x) 1 else -1
-        val sZ = if (currentZ < entrancePos.z) 1 else -1
-        var err = dX - dZ
+            val dX = abs(entrancePos.x - currentX)
+            val dZ = abs(entrancePos.z - currentZ)
+            val sX = if (currentX < entrancePos.x) 1 else -1
+            val sZ = if (currentZ < entrancePos.z) 1 else -1
+            var err = dX - dZ
 
-        while (true) {
-            pathPoints.add(BlockPos(currentX, 0, currentZ))
+            while (true) {
+                pathPoints.add(BlockPos(currentX, 0, currentZ))
 
-            if (currentX == entrancePos.x && currentZ == entrancePos.z) break
-            val e2 = 2 * err
-            if (e2 > -dZ) {
-                err -= dZ
-                currentX += sX
+                if (currentX == entrancePos.x && currentZ == entrancePos.z) break
+                val e2 = 2 * err
+                if (e2 > -dZ) {
+                    err -= dZ
+                    currentX += sX
+                }
+                if (e2 < dX) {
+                    err += dX
+                    currentZ += sZ
+                }
             }
-            if (e2 < dX) {
-                err += dX
-                currentZ += sZ
+
+            val isWaterArray = BooleanArray(pathPoints.size)
+            val naturalYArray = DoubleArray(pathPoints.size)
+            val surfaceYArray = DoubleArray(pathPoints.size)
+
+            for (i in 0 until pathPoints.size) {
+                val px = pathPoints[i].x
+                val pz = pathPoints[i].z
+                val natY = getHighestGroundYAt(world, px, pz).toDouble()
+                val surfY = world.getHighestBlockYAt(px, pz).toDouble()
+                val surfBlock = world.getBlockAt(px, surfY.toInt(), pz)
+
+                isWaterArray[i] = surfBlock.type == Material.WATER || surfBlock.isLiquid
+                naturalYArray[i] = natY
+                surfaceYArray[i] = surfY
             }
-        }
 
-        val isWaterArray = BooleanArray(pathPoints.size)
-        val naturalYArray = DoubleArray(pathPoints.size)
-        val surfaceYArray = DoubleArray(pathPoints.size)
+            val heights = DoubleArray(pathPoints.size)
+            heights[0] = if (isWaterArray[0]) surfaceYArray[0] else naturalYArray[0]
 
-        for (i in 0 until pathPoints.size) {
-            val px = pathPoints[i].x
-            val pz = pathPoints[i].z
-            val natY = getHighestGroundYAt(world, px, pz).toDouble()
-            val surfY = world.getHighestBlockYAt(px, pz).toDouble()
-            val surfBlock = world.getBlockAt(px, surfY.toInt(), pz)
+            heights[pathPoints.size - 1] = (entrancePos.y - 1).toDouble()
 
-            isWaterArray[i] = surfBlock.type == Material.WATER || surfBlock.isLiquid
-            naturalYArray[i] = natY
-            surfaceYArray[i] = surfY
-        }
-
-        val heights = DoubleArray(pathPoints.size)
-        heights[0] = if (isWaterArray[0]) surfaceYArray[0] else naturalYArray[0]
-
-        heights[pathPoints.size - 1] = (entrancePos.y - 1).toDouble()
-
-        for (i in 1 until pathPoints.size - 1) {
-            heights[i] = if (isWaterArray[i]) surfaceYArray[i] else naturalYArray[i]
-        }
-
-        val isSuspendedArray = BooleanArray(pathPoints.size)
-
-        for (i in 0 until pathPoints.size) {
-            val isWater = isWaterArray[i]
-            val isTrench = !isWater && (surfaceYArray[i] < heights[i] - 1.5)
-            if (isTrench) {
-                isSuspendedArray[i] = true
+            for (i in 1 until pathPoints.size - 1) {
+                heights[i] = if (isWaterArray[i]) surfaceYArray[i] else naturalYArray[i]
             }
-        }
 
-        repeat(5) {
-            val nextHeights = heights.clone()
-            for (i in 1 until heights.size - 1) {
-                nextHeights[i] = (heights[i - 1] + heights[i] + heights[i + 1]) / 3.0
-            }
-            for (i in 1 until heights.size - 1) {
+            val isSuspendedArray = BooleanArray(pathPoints.size)
+
+            for (i in 0 until pathPoints.size) {
                 val isWater = isWaterArray[i]
-                val isBridge = isSuspendedArray[i]
-                val surfaceY = surfaceYArray[i]
-                val naturalY = naturalYArray[i]
-
-                val minAllowedY = when {
-                    isWater -> surfaceY
-                    isBridge -> heights[i] - 0.2
-                    else -> naturalY - 2.0
+                val isTrench = !isWater && (surfaceYArray[i] < heights[i] - 1.5)
+                if (isTrench) {
+                    isSuspendedArray[i] = true
                 }
-                val maxAllowedY = when {
-                    isWater -> surfaceY + 3.0
-                    isBridge -> heights[i] + 0.2
-                    else -> naturalY + 2.0
-                }
-
-                heights[i] = nextHeights[i].coerceIn(minAllowedY, maxAllowedY)
             }
-        }
 
-        var inGap = false
-        var gapStart = -1
-        for (i in 0 until pathPoints.size) {
-            val overCanyon = isSuspendedArray[i]
-            if (overCanyon && !inGap) {
-                inGap = true
-                gapStart = i
-            } else if (!overCanyon && inGap) {
-                inGap = false
-                val gapEnd = i - 1
+            repeat(5) {
+                val nextHeights = heights.clone()
+                for (i in 1 until heights.size - 1) {
+                    nextHeights[i] = (heights[i - 1] + heights[i] + heights[i + 1]) / 3.0
+                }
+                for (i in 1 until heights.size - 1) {
+                    val isWater = isWaterArray[i]
+                    val isBridge = isSuspendedArray[i]
+                    val surfaceY = surfaceYArray[i]
+                    val naturalY = naturalYArray[i]
+
+                    val minAllowedY = when {
+                        isWater -> surfaceY
+                        isBridge -> heights[i] - 0.2
+                        else -> naturalY - 2.0
+                    }
+                    val maxAllowedY = when {
+                        isWater -> surfaceY + 3.0
+                        isBridge -> heights[i] + 0.2
+                        else -> naturalY + 2.0
+                    }
+
+                    heights[i] = nextHeights[i].coerceIn(minAllowedY, maxAllowedY)
+                }
+            }
+
+            var inGap = false
+            var gapStart = -1
+            for (i in 0 until pathPoints.size) {
+                val overCanyon = isSuspendedArray[i]
+                if (overCanyon && !inGap) {
+                    inGap = true
+                    gapStart = i
+                } else if (!overCanyon && inGap) {
+                    inGap = false
+                    val gapEnd = i - 1
+                    val gapLength = gapEnd - gapStart + 1
+                    if (gapLength >= 3) {
+                        applySuspensionBridgeSag(gapStart, gapEnd, heights)
+                    } else {
+                        for (k in gapStart..gapEnd) isSuspendedArray[k] = false
+                    }
+                }
+            }
+            if (inGap) {
+                val gapEnd = pathPoints.size - 2
                 val gapLength = gapEnd - gapStart + 1
                 if (gapLength >= 3) {
                     applySuspensionBridgeSag(gapStart, gapEnd, heights)
@@ -1024,162 +1119,149 @@ class SettlementPlanner(val settlement: Settlement) {
                     for (k in gapStart..gapEnd) isSuspendedArray[k] = false
                 }
             }
-        }
-        if (inGap) {
-            val gapEnd = pathPoints.size - 2
-            val gapLength = gapEnd - gapStart + 1
-            if (gapLength >= 3) {
-                applySuspensionBridgeSag(gapStart, gapEnd, heights)
-            } else {
-                for (k in gapStart..gapEnd) isSuspendedArray[k] = false
+
+            val finalHeights = IntArray(pathPoints.size) { i ->
+                Math.round(heights[i]).toInt()
             }
-        }
 
-        val finalHeights = IntArray(pathPoints.size) { i ->
-            Math.round(heights[i]).toInt()
-        }
-
-        for (i in 1 until finalHeights.size) {
-            val diff = finalHeights[i] - finalHeights[i - 1]
-            if (abs(diff) > 1) {
-                finalHeights[i] = finalHeights[i - 1] + diff.coerceIn(-1, 1)
-            }
-        }
-
-        val roadBlockData = Material.DIRT_PATH.createBlockData()
-        val airData = Material.AIR.createBlockData()
-        val cobbleData = Material.COBBLESTONE.createBlockData()
-
-        val halfW = width / 2 + 1
-        val halfL = length / 2 + 1
-
-        val footprint2D = mutableMapOf<Pair<Int, Int>, Int>()
-        val isWaterMap = mutableMapOf<Pair<Int, Int>, Boolean>()
-        val isSuspendedMap = mutableMapOf<Pair<Int, Int>, Boolean>()
-
-        for (i in pathPoints.indices) {
-            val pt = pathPoints[i]
-            val pathX = pt.x
-            val pathZ = pt.z
-            val centerRoadY = finalHeights[i]
-            val isWaterAtCenter = isWaterArray[i]
-
-            val isMovingX = abs(dX) > abs(dZ)
-
-            val xMin = if (isWaterAtCenter) { if (isMovingX) -1 else -2 } else -1
-            val xMax = if (isWaterAtCenter) { if (isMovingX) 1 else 2 } else 1
-            val zMin = if (isWaterAtCenter) { if (isMovingX) -2 else -1 } else -1
-            val zMax = if (isWaterAtCenter) { if (isMovingX) 2 else 1 } else 1
-
-            for (wx in xMin..xMax) {
-                for (wz in zMin..zMax) {
-                    val px = pathX + wx
-                    val pz = pathZ + wz
-                    val key = Pair(px, pz)
-
-                    if (isWaterAtCenter || !isWaterMap.getOrDefault(key, false)) {
-                        footprint2D[key] = centerRoadY
-                        isWaterMap[key] = isWaterAtCenter
-                        isSuspendedMap[key] = isSuspendedArray[i]
-                    }
+            for (i in 1 until finalHeights.size) {
+                val diff = finalHeights[i] - finalHeights[i - 1]
+                if (abs(diff) > 1) {
+                    finalHeights[i] = finalHeights[i - 1] + diff.coerceIn(-1, 1)
                 }
             }
-        }
 
-        var currentRoadJob = SchematicBuildJob(world)
-        var blocksInJob = 0
-        val maxBlocksPerJob = 64
+            val roadBlockData = Material.DIRT_PATH.createBlockData()
+            val cobbleData = Material.COBBLESTONE.createBlockData()
 
-        for ((key, py) in footprint2D) {
-            val px = key.first
-            val pz = key.second
-            val isWaterAtCenter = isWaterMap[key] ?: false
-            val isSuspended = isSuspendedMap[key] ?: false
+            val footprint2D = mutableMapOf<Pair<Int, Int>, Int>()
+            val isWaterMap = mutableMapOf<Pair<Int, Int>, Boolean>()
+            val isSuspendedMap = mutableMapOf<Pair<Int, Int>, Boolean>()
 
-            if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
-            if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
+            for (i in pathPoints.indices) {
+                val pt = pathPoints[i]
+                val pathX = pt.x
+                val pathZ = pt.z
+                val centerRoadY = finalHeights[i]
+                val isWaterAtCenter = isWaterArray[i]
 
-            val isInsideAnyBuilding = records.any { record ->
-                val box = record.box
-                if (record.jobId == jobId) {
-                    px >= box.minX && px < box.maxX && pz >= box.minZ && pz < box.maxZ
-                } else {
-                    px >= (box.minX - 1.5) && px <= (box.maxX + 1.5) &&
-                            pz >= (box.minZ - 1.5) && pz <= (box.maxZ + 1.5)
-                }
-            }
-            if (isInsideAnyBuilding) continue
-
-            val naturalBlockY = getHighestGroundYAt(world, px, pz)
-            val currentBlock = world.getBlockAt(px, py, pz)
-
-            val clearStart = py + 1
-            val clearEnd = py + 3
-            for (y in clearStart..clearEnd) {
-                currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
-            }
-
-            if (isWaterAtCenter) {
-                var isEdge = false
-                val neighbors = arrayOf(Pair(px + 1, pz), Pair(px - 1, pz), Pair(px, pz + 1), Pair(px, pz - 1))
-                for (n in neighbors) {
-                    if (!footprint2D.containsKey(n)) {
-                        isEdge = true
-                        break
-                    }
-                }
-
-                if (isEdge) {
-                    currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_LOG.createBlockData(), isRoad = true)
-                    currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
-                } else {
-                    currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
-                    val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
-                    slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
-                    currentRoadJob.addBlock(BlockPos(px, py - 1, pz), slabData, isRoad = true)
-                }
-            } else if (isSuspended) {
                 val isMovingX = abs(dX) > abs(dZ)
-                val isEdge = if (isMovingX) {
-                    !footprint2D.containsKey(Pair(px, pz + 1)) || !footprint2D.containsKey(Pair(px, pz - 1))
-                } else {
-                    !footprint2D.containsKey(Pair(px + 1, pz)) || !footprint2D.containsKey(Pair(px - 1, pz))
-                }
 
-                if (isEdge) {
-                    currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
-                    currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
-                } else {
-                    val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
-                    slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
-                    currentRoadJob.addBlock(BlockPos(px, py, pz), slabData, isRoad = true)
-                }
-            } else {
-                for (y in naturalBlockY until py) {
-                    currentRoadJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
-                }
+                val xMin = if (isWaterAtCenter) { if (isMovingX) -1 else -2 } else -1
+                val xMax = if (isWaterAtCenter) { if (isMovingX) 1 else 2 } else 1
+                val zMin = if (isWaterAtCenter) { if (isMovingX) -2 else -1 } else -1
+                val zMax = if (isWaterAtCenter) { if (isMovingX) 2 else 1 } else 1
 
-                if (currentBlock.isLiquid) {
-                    currentRoadJob.addBlock(BlockPos(px, py, pz), cobbleData, isRoad = true)
-                } else {
-                    currentRoadJob.addBlock(BlockPos(px, py, pz), roadBlockData, isRoad = true)
+                for (wx in xMin..xMax) {
+                    for (wz in zMin..zMax) {
+                        val px = pathX + wx
+                        val pz = pathZ + wz
+                        val key = Pair(px, pz)
+
+                        if (isWaterAtCenter || !isWaterMap.getOrDefault(key, false)) {
+                            footprint2D[key] = centerRoadY
+                            isWaterMap[key] = isWaterAtCenter
+                            isSuspendedMap[key] = isSuspendedArray[i]
+                        }
+                    }
                 }
             }
 
-            roads.add(BlockPos(px, py, pz))
+            var currentRoadJob = SchematicBuildJob(world)
+            var blocksInJob = 0
+            val maxBlocksPerJob = 64
 
-            blocksInJob++
-            if (blocksInJob >= maxBlocksPerJob) {
-                if (currentRoadJob.getBlocks().isNotEmpty()) {
-                    jobsList.add(currentRoadJob)
-                    currentRoadJob = SchematicBuildJob(world)
+            for ((key, py) in footprint2D) {
+                val px = key.first
+                val pz = key.second
+                val isWaterAtCenter = isWaterMap[key] ?: false
+                val isSuspended = isSuspendedMap[key] ?: false
+
+                if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
+                if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
+
+                val isInsideAnyBuilding = records.any { record ->
+                    val box = record.box
+                    if (record.jobId == jobId) {
+                        px >= box.minX && px < box.maxX && pz >= box.minZ && pz < box.maxZ
+                    } else {
+                        px >= (box.minX - 1.5) && px <= (box.maxX + 1.5) &&
+                                pz >= (box.minZ - 1.5) && pz <= (box.maxZ + 1.5)
+                    }
                 }
-                blocksInJob = 0
-            }
-        }
+                if (isInsideAnyBuilding) continue
 
-        if (currentRoadJob.getBlocks().isNotEmpty()) {
-            jobsList.add(currentRoadJob)
+                val naturalBlockY = getHighestGroundYAt(world, px, pz)
+                val currentBlock = world.getBlockAt(px, py, pz)
+
+                val clearStart = py + 1
+                val clearEnd = py + 3
+                for (y in clearStart..clearEnd) {
+                    currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
+                }
+
+                if (isWaterAtCenter) {
+                    var isEdge = false
+                    val neighbors = arrayOf(Pair(px + 1, pz), Pair(px - 1, pz), Pair(px, pz + 1), Pair(px, pz - 1))
+                    for (n in neighbors) {
+                        if (!footprint2D.containsKey(n)) {
+                            isEdge = true
+                            break
+                        }
+                    }
+
+                    if (isEdge) {
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_LOG.createBlockData(), isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                    } else {
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
+                        val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
+                        slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
+                        currentRoadJob.addBlock(BlockPos(px, py - 1, pz), slabData, isRoad = true)
+                    }
+                } else if (isSuspended) {
+                    val isMovingX = abs(dX) > abs(dZ)
+                    val isEdge = if (isMovingX) {
+                        !footprint2D.containsKey(Pair(px, pz + 1)) || !footprint2D.containsKey(Pair(px, pz - 1))
+                    } else {
+                        !footprint2D.containsKey(Pair(px + 1, pz)) || !footprint2D.containsKey(Pair(px - 1, pz))
+                    }
+
+                    if (isEdge) {
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                    } else {
+                        val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
+                        slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), slabData, isRoad = true)
+                    }
+                } else {
+                    for (y in naturalBlockY until py) {
+                        currentRoadJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
+                    }
+
+                    if (currentBlock.isLiquid) {
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), cobbleData, isRoad = true)
+                    } else {
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), roadBlockData, isRoad = true)
+                    }
+                }
+
+                roads.add(BlockPos(px, py, pz))
+
+                blocksInJob++
+                if (blocksInJob >= maxBlocksPerJob) {
+                    if (currentRoadJob.getBlocks().isNotEmpty()) {
+                        jobsList.add(currentRoadJob)
+                        currentRoadJob = SchematicBuildJob(world)
+                    }
+                    blocksInJob = 0
+                }
+            }
+
+            if (currentRoadJob.getBlocks().isNotEmpty()) {
+                jobsList.add(currentRoadJob)
+            }
         }
 
         val rawRelativeBlocks = VanillaStructureLoader.loadVanillaStructure(vanillaPath)

@@ -21,15 +21,25 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
         }
     }
 
-    // Приоритеты установки блоков (чем меньше число, тем раньше ставится блок)
+    // ====================================================================================
+    // СТРОГИЕ ПРАВИЛА СТРОИТЕЛЬСТВА ФЕРМЫ (НЕ УДАЛЯТЬ И НЕ РЕДАКТИРОВАТЬ ПРИОРИТЕТЫ):
+    //
+    // ПРАВИЛО 1: Вода разливается в самую последнюю очередь (приоритет 16), после вспашки и посадки семян.
+    //            Это предотвращает смыв посевов и гарантирует сухое и аккуратное строительство чаши.
+    //
+    // ПРАВИЛО 2: Жители НЕ ставят пашню (FARMLAND) руками напрямую. Сначала они ставят обычную
+    //            землю (DIRT, приоритет 5), затем вспахивают её мотыгой (обработка в ConstructionBehavior).
+    // ====================================================================================
     private fun getPlacementPriority(material: Material): Int {
         val name = material.name
         return when {
             material == Material.AIR -> 1 // Сначала всегда вырезаем воздух/раскопки
             name.contains("DOOR") || name.contains("BED") -> 10 // Двери и кровати в конце основного этапа
+            material == Material.FARMLAND -> 12 // Вспахиваем землю в грядки
+            name.contains("SAPLING") || name.contains("SEEDS") || material == Material.WHEAT || material == Material.CARROTS || material == Material.POTATOES || material == Material.BEETROOTS || name.contains("STEM") || material == Material.SWEET_BERRY_BUSH || material == Material.COCOA -> 14 // Саженцы и семена
+            material == Material.WATER || material == Material.LAVA -> 16 // ПРАВИЛО 1: Вода и лава разливаются строго в самую последнюю очередь!
             name.contains("TORCH") || name.contains("LANTERN") || name.contains("CARPET") || name.contains("SIGN") -> 8 // Декор после стен
-            material == Material.WATER || material == Material.LAVA -> 15 // Жидкости заливаем в САМЫЙ последний момент, когда все чаши построены
-            else -> 5 // Обычные твердые блоки (стены, фундамент)
+            else -> 5 // Обычные твердые блоки (стены, фундамент, обычная земля)
         }
     }
 
@@ -49,7 +59,7 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
     private fun claimFromListOptimized(list: List<BlockToPlace>, npc: HumanoidVillager, npcPos: BlockPos): BlockToPlace? {
         if (list.isEmpty()) return null
 
-        // 1. Сначала обрабатываем блоки раскопок (цель — воздух/AIR) сверху вниз (от наибольшего Y к наименьшему)
+        // 1. Сначала обрабатываем blocks раскопок (цель — воздух/AIR) сверху вниз (от наибольшего Y к наименьшему)
         val excavationList = list.filter { it.blockData.material.isAir }
         if (excavationList.isNotEmpty()) {
             val yLevels = excavationList.map { it.pos.y }.distinct().sortedDescending()
@@ -95,6 +105,17 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
                     // Проверка на превращение тропинки лопатой
                     val isPathTransformation = currentType.isShovelable() && block.blockData.material == Material.DIRT_PATH
                     if (isPathTransformation) {
+                        candidates.add(block)
+                        continue
+                    }
+
+                    // ====================================================================================
+                    // ПРАВИЛО 2 (Проверка вспашки):
+                    // Если блок на ферме сейчас DIRT/GRASS (shovelable), а цель схемы FARMLAND,
+                    // мы расцениваем это как процесс вспашки (isFarmlandTransformation) и разрешаем работу.
+                    // ====================================================================================
+                    val isFarmlandTransformation = currentType.isShovelable() && block.blockData.material == Material.FARMLAND
+                    if (isFarmlandTransformation) {
                         candidates.add(block)
                         continue
                     }

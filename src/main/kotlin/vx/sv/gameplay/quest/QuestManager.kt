@@ -104,7 +104,10 @@ class QuestManager : Listener {
         val allowedQuests = mutableListOf(QuestType.PROFESSION_ITEM_GATHERING, QuestType.BOOZE, QuestType.MUSIC_DISC)
             .filter { it in allowedQuestTypes }.toMutableList()
 
-        val questType = if (villager.hunger <= plugin.gameplayManager.config.hunger.questThreshold && !villager.hasEdibleItem() && QuestType.FOOD_SEARCH in allowedQuestTypes) {
+        // Check combined storage (personal + settlement virtual inventory) for food
+        val hasEdible = villager.hasEdibleItem() || (villager.settlement?.villageInventory?.any { it.type.isEdible } == true)
+
+        val questType = if (villager.hunger <= plugin.gameplayManager.config.hunger.questThreshold && !hasEdible && QuestType.FOOD_SEARCH in allowedQuestTypes) {
             QuestType.FOOD_SEARCH
         } else {
             allowedQuests.apply {
@@ -443,6 +446,45 @@ class QuestManager : Listener {
             event.player.closeInventory()
             when (quest.type) {
                 QuestType.PROFESSION_ITEM_GATHERING, QuestType.SMITHING_TEMPLATE_ORDER, QuestType.ENCHANTED_BOOK_ORDER, QuestType.TREASURE_HUNT, QuestType.MESSAGE_DELIVERY -> {
+                    // Move received items to global virtual inventory if villager has a settlement
+                    val settlement = villager.settlement
+                    if (settlement != null) {
+                        val personalInv = villager.inventory
+                        val virtualInv = settlement.villageInventory
+
+                        val itemsToTransfer = personalInv.contents.filterNotNull().filter { item ->
+                            val type = item.type
+                            !type.name.contains("SWORD") && !type.name.contains("AXE") &&
+                                    !type.name.contains("PICKAXE") && !type.name.contains("HELMET") &&
+                                    !type.name.contains("CHESTPLATE") && !type.name.contains("LEGGINGS") &&
+                                    !type.name.contains("BOOTS")
+                        }
+
+                        for (item in itemsToTransfer) {
+                            personalInv.removeItem(item)
+                            val maxStack = item.type.maxStackSize
+                            var remaining = item.amount
+                            for (stored in virtualInv) {
+                                if (stored.isSimilar(item)) {
+                                    val space = maxStack - stored.amount
+                                    if (space > 0) {
+                                        val toAdd = minOf(space, remaining)
+                                        stored.amount += toAdd
+                                        remaining -= toAdd
+                                        if (remaining <= 0) break
+                                    }
+                                }
+                            }
+                            while (remaining > 0) {
+                                val copy = item.clone()
+                                val toAdd = minOf(maxStack, remaining)
+                                copy.amount = toAdd
+                                virtualInv.add(copy)
+                                remaining -= toAdd
+                            }
+                        }
+                        SettlementManager.saveSettlements(villager.world)
+                    }
                     this.finishQuest(event.player, villager, quest)
                 }
                 QuestType.MUSIC_DISC -> {
@@ -460,10 +502,36 @@ class QuestManager : Listener {
                         nearbyPlayers.forEach { it.playSound(sound, npc) }
                     }
                     playRecordFollowingNpc(villager, recordKey)
+
+                    // Transfer music disc to shared virtual storage
+                    val settlement = villager.settlement
+                    if (settlement != null) {
+                        val personalInv = villager.inventory
+                        val virtualInv = settlement.villageInventory
+                        val disc = quest.questItem.getItemStack()
+                        val found = personalInv.filterNotNull().find { it.isSimilar(disc) }
+                        if (found != null) {
+                            personalInv.removeItem(found)
+                            virtualInv.add(found)
+                            SettlementManager.saveSettlements(villager.world)
+                        }
+                    }
                     this.finishQuest(event.player, villager, quest)
                 }
                 QuestType.FOOD_SEARCH -> {
-                    villager.eat()
+                    val settlement = villager.settlement
+                    val edibleInVillage = settlement?.villageInventory?.find { it.type.isEdible }
+
+                    if (edibleInVillage != null) {
+                        villager.eat()
+                        edibleInVillage.amount -= 1
+                        if (edibleInVillage.amount <= 0) {
+                            settlement.villageInventory.remove(edibleInVillage)
+                        }
+                        SettlementManager.saveSettlements(villager.world)
+                    } else {
+                        villager.eat()
+                    }
                     this.finishQuest(event.player, villager, quest)
                 }
                 QuestType.BOOZE -> {
@@ -473,7 +541,7 @@ class QuestManager : Listener {
                         humanoid.consume(villager.world, potion, Sound.ENTITY_GENERIC_DRINK, 7, villager.location, 7) {
                             effect?.let { villager.addPotionEffect(it) }
 
-                            // Нативное списание предмета из инвентаря
+                            // Check and consume from combined inventory
                             val inv = villager.inventory
                             val found = inv.filterNotNull().find { it.isSimilar(potion) }
                             if (found != null) {
@@ -481,6 +549,17 @@ class QuestManager : Listener {
                                     inv.removeItem(found)
                                 } else {
                                     found.amount -= 1
+                                }
+                            } else {
+                                val settlement = villager.settlement
+                                val virtualInv = settlement?.villageInventory
+                                val virtualFound = virtualInv?.find { it.isSimilar(potion) }
+                                if (virtualFound != null) {
+                                    virtualFound.amount -= 1
+                                    if (virtualFound.amount <= 0) {
+                                        virtualInv.remove(virtualFound)
+                                    }
+                                    SettlementManager.saveSettlements(villager.world)
                                 }
                             }
                             this.finishQuest(event.player, villager, quest)
@@ -710,7 +789,7 @@ class QuestManager : Listener {
         """.trimIndent()
 
         val questItem = questType.strategy.get(questGiver)
-        val currency  = questGiver.race.normalCurrency.get() ?: throw NullPointerException("Can্্রt get race normal currency: ${questGiver.race.name}.")
+        val currency  = questGiver.race.normalCurrency.get() ?: throw NullPointerException("Can't get race normal currency: ${questGiver.race.name}.")
         val amount    = questItem.item.amount
         val score     = (if (questItem.score < currency.getBasicScore()) currency.getBasicScore() * 10 else questItem.score).toLong()
 
@@ -719,7 +798,7 @@ class QuestManager : Listener {
             it["seasonContextString"] = seasonContextString
             it["npcPersonality"]      = "${questGiver.getPersonality()}"
             it["npcName"]             = questGiver.customName.toString()
-            it["npcGender"]           = questGiver.gender.toString()
+            it["npcGender"]           = questGiver.gender.toString().lowercase()
             it["npcRace"]             = questGiver.race.name
             it["raceDescription"]     = questGiver.race.description
             it["currentBiome"]        = questGiver.location.block.biome.key.key

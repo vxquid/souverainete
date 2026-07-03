@@ -93,10 +93,6 @@ object VanillaStructureLoader {
                 }
             }
 
-            if (blockData.material == Material.FARMLAND) {
-                blockData = Material.DIRT.createBlockData()
-            }
-
             if (blockData is Ageable) {
                 val matName = blockData.material.name
                 if (matName.contains("WHEAT") ||
@@ -105,7 +101,6 @@ object VanillaStructureLoader {
                     matName.contains("BEETROOT") ||
                     matName.contains("SWEET_BERRY") ||
                     matName.contains("COCOA") ||
-                    matName.contains("NETHER_WART") ||
                     matName.contains("PUMPKIN_STEM") ||
                     matName.contains("MELON_STEM")
                 ) {

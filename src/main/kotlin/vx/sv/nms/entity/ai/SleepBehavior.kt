@@ -42,16 +42,18 @@ class SleepBehavior(
         if (time < 13000 || time > 23000) {
             if (villager.isSleeping) {
                 villager.stopSleeping()
-                releaseBed(villager.uuid)
             }
+            villager.pose = net.minecraft.world.entity.Pose.STANDING
+            releaseBed(villager.uuid)
             return false
         }
 
         if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
             if (villager.isSleeping) {
                 villager.stopSleeping()
-                releaseBed(villager.uuid)
             }
+            villager.pose = net.minecraft.world.entity.Pose.STANDING
+            releaseBed(villager.uuid)
             return false
         }
 
@@ -63,16 +65,18 @@ class SleepBehavior(
         if (timeOfDay < 13000 || timeOfDay > 23000) {
             if (villager.isSleeping) {
                 villager.stopSleeping()
-                releaseBed(villager.uuid)
             }
+            villager.pose = net.minecraft.world.entity.Pose.STANDING
+            releaseBed(villager.uuid)
             return false
         }
 
         if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
             if (villager.isSleeping) {
                 villager.stopSleeping()
-                releaseBed(villager.uuid)
             }
+            villager.pose = net.minecraft.world.entity.Pose.STANDING
+            releaseBed(villager.uuid)
             return false
         }
 
@@ -83,6 +87,7 @@ class SleepBehavior(
         if (villager.isSleeping) {
             if (villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)) {
                 villager.stopSleeping()
+                villager.pose = net.minecraft.world.entity.Pose.STANDING
                 releaseBed(villager.uuid)
                 return
             }
@@ -161,6 +166,7 @@ class SleepBehavior(
         if (villager.isSleeping) {
             villager.stopSleeping()
         }
+        villager.pose = net.minecraft.world.entity.Pose.STANDING
         releaseBed(villager.uuid)
         targetBedPos = null
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)

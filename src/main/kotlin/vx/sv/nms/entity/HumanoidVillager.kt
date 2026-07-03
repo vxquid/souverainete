@@ -69,6 +69,7 @@ import java.util.*
 import kotlin.math.atan2
 import kotlin.math.sqrt
 import vx.sv.nms.entity.ai.pathfinding.InteractFenceGateGoal
+import vx.sv.nms.entity.ai.profession.FishermanBehavior
 
 class HumanoidVillager(
     type: EntityType<out Villager>?,
@@ -208,6 +209,14 @@ class HumanoidVillager(
         }
 
         super.aiStep()
+
+        // ПРЕДОТВРАЩЕНИЕ ДВИЖЕНИЯ В ЛЕЖАЧЕЙ ПОЗЕ
+        if (this.pose == net.minecraft.world.entity.Pose.SLEEPING) {
+            val isMoving = this.deltaMovement.x * this.deltaMovement.x + this.deltaMovement.z * this.deltaMovement.z > 0.001
+            if (isMoving) {
+                this.pose = net.minecraft.world.entity.Pose.STANDING
+            }
+        }
 
         if (this.isInWater && this.wantsToSwim()) {
             if (this.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {
@@ -617,6 +626,7 @@ class HumanoidVillager(
             Pair.of(2, SleepBehavior(0.65f) as BehaviorControl<Villager>),
 
             Pair.of(2, FarmerBehavior(0.65f) as BehaviorControl<Villager>),
+            Pair.of(2, FishermanBehavior(0.65f) as BehaviorControl<Villager>),
 
             Pair.of(2, ConstructionBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ShepherdBehavior(0.65f) as BehaviorControl<Villager>),

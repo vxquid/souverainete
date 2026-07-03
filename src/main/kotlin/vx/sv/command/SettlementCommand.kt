@@ -1,6 +1,7 @@
 package vx.sv.command
 
 import co.aikar.commands.BaseCommand
+import co.aikar.commands.InvalidCommandArgument
 import co.aikar.commands.annotation.CommandAlias
 import co.aikar.commands.annotation.CommandCompletion
 import co.aikar.commands.annotation.CommandPermission
@@ -22,6 +23,36 @@ import vx.sv.persistent.LivingEntityExtend.settlement
 class SettlementCommand : BaseCommand() {
 
     init {
+        // Регистрация кастомного контекстного сопоставителя для Settlement.
+        // Он склеивает аргументы до нахождения точного совпадения названия поселения (поддерживает пробелы).
+        plugin.commandManager.commandContexts.registerContext(Settlement::class.java) { c ->
+            val argList = mutableListOf<String>()
+            var resolvedSettlement: Settlement? = null
+
+            // Исправлено: используем getFirstArg() != null для безопасной peek-проверки наличия аргументов
+            while (c.getFirstArg() != null) {
+                argList.add(c.popFirstArg())
+                val testName = argList.joinToString(" ")
+                val match = SettlementManager.getByName(testName)
+                if (match != null) {
+                    resolvedSettlement = match
+                    break
+                }
+            }
+
+            if (resolvedSettlement == null) {
+                val attemptedName = argList.joinToString(" ")
+                throw InvalidCommandArgument(
+                    plugin.language.getString(
+                        "info-messages.settlement-command.not-found",
+                        "§cSettlement {settlement} not found."
+                    )!!.replace("{settlement}", attemptedName),
+                    false
+                )
+            }
+            resolvedSettlement
+        }
+
         // Registering a custom completion that returns a list of all settlement names
         plugin.commandManager.commandCompletions.registerCompletion("settlements") {
             SettlementManager.settlements.values.flatten().map { it.data.settlementName }
@@ -31,16 +62,7 @@ class SettlementCommand : BaseCommand() {
     @Subcommand("teleport|tp")
     @CommandPermission("sv.settlement.teleport")
     @CommandCompletion("@settlements")
-    fun onTeleport(player: Player, settlementName: String) {
-        val settlement = SettlementManager.getByName(settlementName) ?: run {
-            val notFoundMsg = plugin.language.getString(
-                "info-messages.settlement-command.not-found",
-                "§cSettlement {settlement} not found."
-            )!!.replace("{settlement}", settlementName)
-            player.sendFormattedMessage(notFoundMsg)
-            return
-        }
-
+    fun onTeleport(player: Player, settlement: Settlement) {
         // Teleport player to the center of the settlement
         player.teleport(settlement.data.center)
 
@@ -54,16 +76,7 @@ class SettlementCommand : BaseCommand() {
     @Subcommand("reputation|rep")
     @CommandPermission("sv.settlement.reputation")
     @CommandCompletion("@settlements @players")
-    fun onReputation(player: Player, settlementName: String, targetPlayerName: String, amount: Int) {
-        val settlement = SettlementManager.getByName(settlementName) ?: run {
-            val notFoundMsg = plugin.language.getString(
-                "info-messages.settlement-command.not-found",
-                "§cSettlement {settlement} not found."
-            )!!.replace("{settlement}", settlementName)
-            player.sendFormattedMessage(notFoundMsg)
-            return
-        }
-
+    fun onReputation(player: Player, settlement: Settlement, targetPlayerName: String, amount: Int) {
         // Fetch offline player to allow changing reputation even if they are offline
         @Suppress("DEPRECATION")
         val targetPlayer = Bukkit.getOfflinePlayer(targetPlayerName)
@@ -94,28 +107,7 @@ class SettlementCommand : BaseCommand() {
     @Subcommand("relation|rel")
     @CommandPermission("sv.settlement.relation")
     @CommandCompletion("@settlements @settlements")
-    fun onRelation(player: Player, settlementNameA: String, settlementNameB: String, level: Settlement.RelationLevel) {
-        val settlementA = SettlementManager.getByName(settlementNameA)
-        val settlementB = SettlementManager.getByName(settlementNameB)
-
-        if (settlementA == null) {
-            val notFoundMsg = plugin.language.getString(
-                "info-messages.settlement-command.not-found",
-                "§cSettlement {settlement} not found."
-            )!!.replace("{settlement}", settlementNameA)
-            player.sendFormattedMessage(notFoundMsg)
-            return
-        }
-
-        if (settlementB == null) {
-            val notFoundMsg = plugin.language.getString(
-                "info-messages.settlement-command.not-found",
-                "§cSettlement {settlement} not found."
-            )!!.replace("{settlement}", settlementNameB)
-            player.sendFormattedMessage(notFoundMsg)
-            return
-        }
-
+    fun onRelation(player: Player, settlementA: Settlement, settlementB: Settlement, level: Settlement.RelationLevel) {
         if (settlementA.data.id == settlementB.data.id) {
             val sameSettlementMsg = plugin.language.getString(
                 "info-messages.settlement-command.same-settlement",
@@ -142,28 +134,7 @@ class SettlementCommand : BaseCommand() {
     @CommandAlias("raid")
     @CommandPermission("sv.settlement.raid")
     @CommandCompletion("@settlements @settlements")
-    fun onRaid(player: Player, attackerName: String, defenderName: String) {
-        val attacker = SettlementManager.getByName(attackerName)
-        val defender = SettlementManager.getByName(defenderName)
-
-        if (attacker == null) {
-            val notFoundMsg = plugin.language.getString(
-                "info-messages.settlement-command.not-found",
-                "§cSettlement {settlement} not found."
-            )!!.replace("{settlement}", attackerName)
-            player.sendFormattedMessage(notFoundMsg)
-            return
-        }
-
-        if (defender == null) {
-            val notFoundMsg = plugin.language.getString(
-                "info-messages.settlement-command.not-found",
-                "§cSettlement {settlement} not found."
-            )!!.replace("{settlement}", defenderName)
-            player.sendFormattedMessage(notFoundMsg)
-            return
-        }
-
+    fun onRaid(player: Player, attacker: Settlement, defender: Settlement) {
         if (attacker.data.id == defender.data.id) {
             val sameSettlementMsg = plugin.language.getString(
                 "info-messages.settlement-command.same-settlement-raid",

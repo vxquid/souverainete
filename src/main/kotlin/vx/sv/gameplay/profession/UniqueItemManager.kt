@@ -21,6 +21,7 @@ import vx.sv.gameplay.personality.PersonalityManager.Companion.getPersonality
 import vx.sv.gameplay.quest.QuestManager.Companion.replaceMap
 import vx.sv.persistent.LivingEntityExtend.professionLevelName
 import vx.sv.persistent.LivingEntityExtend.settlement
+import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.util.HexColorLib.color
 import java.util.*
 import kotlin.random.Random
@@ -400,8 +401,15 @@ class UniqueItemManager {
             meta.lore = formatLore(data.itemDescription)
             item.itemMeta = meta
 
-            // Give to villager
-            villager.inventory.addItem(item)
+            // Check if villager belongs to a settlement
+            val settlement = villager.settlement
+            if (settlement != null) {
+                settlement.villageInventory.add(item)
+                SettlementManager.saveSettlements(villager.world)
+            } else {
+                // Give to villager's personal inventory
+                villager.inventory.addItem(item)
+            }
         }
 
         private fun formatLore(description: String): MutableList<String> {

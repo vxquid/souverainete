@@ -353,6 +353,7 @@ class ConstructionBehavior(
     }
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
+        if (!plugin.gameplayConfig.general.enableConstruction) return false
         if (!world.world.isDayTime) return false
         if (world.gameTime < villager.nextBuildAvailableTime) return false
         if (world.gameTime < villager.buildBreakUntilTime) return false
@@ -408,6 +409,7 @@ class ConstructionBehavior(
     }
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
+        if (!plugin.gameplayConfig.general.enableConstruction) return false
         val job = villager.activeBuildJob ?: return false
         if (job.isFinished()) return false
 
@@ -424,13 +426,17 @@ class ConstructionBehavior(
 
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
 
-        val tool = if (!currentBlock.isIgnorableObstacle()) {
+        // Подготовка нужного инструмента
+        val isFarmlandTransformation = currentBlock.type.isShovelable() && assigned.blockData.material == Material.FARMLAND
+
+        val tool = if (!currentBlock.isIgnorableObstacle() && !isFarmlandTransformation) {
             if (currentBlock.type.isShovelable()) ItemStack(Material.STONE_SHOVEL) else ItemStack(Material.STONE_PICKAXE)
         } else if (assigned.material.isAir) {
             ItemStack(Material.BUCKET)
         } else {
             val isPathTransformation = currentBlock.type.isShovelable() && assigned.material == Material.DIRT_PATH
             val itemToHold = if (isPathTransformation) Material.STONE_SHOVEL
+            else if (isFarmlandTransformation) Material.STONE_HOE
             else if (assigned.blockData.material.isItem) assigned.blockData.material
             else assigned.material
             ItemStack(itemToHold)
@@ -521,6 +527,7 @@ class ConstructionBehavior(
 
         val material = assigned.material
         val isPathTransformation = block.type.isShovelable() && material == Material.DIRT_PATH
+        val isFarmlandTransformation = block.type.isShovelable() && assigned.blockData.material == Material.FARMLAND
 
         if (isWithinReach) {
             villager.stuckTicks = 0
@@ -540,7 +547,7 @@ class ConstructionBehavior(
             villager.xRot = (-Math.toDegrees(kotlin.math.atan2(dY, distance))).toFloat()
             villager.lookControl.setLookAt(blockPos.x + 0.5, blockPos.y + 0.5, blockPos.z + 0.5)
 
-            if (!block.isIgnorableObstacle() && !isPathTransformation) {
+            if (!block.isIgnorableObstacle() && !isPathTransformation && !isFarmlandTransformation) {
                 if (isLogBlock(block.type)) {
                     removeWholeTree(block, settlement)
 
@@ -617,23 +624,29 @@ class ConstructionBehavior(
                     return
                 }
 
-                if (assigned.blockData.material.isSolid) {
+                // ИСПРАВЛЕНИЕ ЗАСТРЕВАНИЯ В БЛОКАХ:
+                // Выталкиваем всех существ наверх, чтобы они не оказались замурованы в полу при установке
+                if (assigned.blockData.material.isSolid && !isFarmlandTransformation) {
                     val targetBox = BoundingBox(block.x.toDouble(), block.y.toDouble(), block.z.toDouble(), block.x + 1.0, block.y + 1.0, block.z + 1.0)
-                    val bukkitNpc = villager.bukkitEntity
-                    if (targetBox.overlaps(bukkitNpc.boundingBox)) {
-                        val blockCenter = block.location.add(0.5, 0.5, 0.5)
-                        val direction = bukkitNpc.location.subtract(blockCenter).toVector().setY(0.0)
-                        if (direction.lengthSquared() > 0.0) {
-                            direction.normalize().multiply(1.0)
-                            bukkitNpc.teleport(bukkitNpc.location.add(direction))
-                        } else {
-                            bukkitNpc.teleport(bukkitNpc.location.add(1.0, 0.0, 0.0))
+
+                    val blockCenter = block.location.clone().add(0.5, 0.5, 0.5)
+                    val nearbyEntities = bukkitWorld.getNearbyEntities(blockCenter, 1.0, 1.0, 1.0)
+
+                    for (entity in nearbyEntities) {
+                        if (entity is org.bukkit.entity.LivingEntity) {
+                            if (targetBox.overlaps(entity.boundingBox)) {
+                                val safeLoc = entity.location.clone()
+                                safeLoc.y = block.y.toDouble() + 1.05 // Ставим аккуратно поверх устанавливаемого блока
+                                entity.teleport(safeLoc)
+                            }
                         }
                     }
                 }
 
                 val itemToHold = if (isPathTransformation) {
                     Material.STONE_SHOVEL
+                } else if (isFarmlandTransformation) {
+                    Material.STONE_HOE
                 } else if (assigned.blockData.material.isItem) {
                     assigned.blockData.material
                 } else {
@@ -649,15 +662,30 @@ class ConstructionBehavior(
                 villager.buildTicks++
 
                 if (villager.buildTicks >= 10) {
-                    block.setBlockData(assigned.blockData, true)
+                    if (isFarmlandTransformation) {
+                        block.type = Material.FARMLAND
+                        bukkitWorld.playSound(block.location, Sound.ITEM_HOE_TILL, 1.0f, 1.0f)
 
-                    if (isPathTransformation) {
-                        bukkitWorld.playSound(block.location, Sound.ITEM_SHOVEL_FLATTEN, 1.0f, 1.0f)
+                        job.completeBlock(assigned)
+                    } else if (assigned.blockData.material == Material.FARMLAND) {
+                        // Житель ставит грязную землю из-за правила 2.
+                        // Блок не помечается как completedBlock.
+                        block.type = Material.DIRT
+                        bukkitWorld.playSound(block.location, Sound.BLOCK_GRASS_PLACE, 1.0f, 1.0f)
+
+                        job.unclaimBlock(assigned)
                     } else {
-                        bukkitWorld.playSound(block.location, assigned.blockData.soundGroup.placeSound, 1.0f, 1.0f)
+                        block.setBlockData(assigned.blockData, true)
+
+                        if (isPathTransformation) {
+                            bukkitWorld.playSound(block.location, Sound.ITEM_SHOVEL_FLATTEN, 1.0f, 1.0f)
+                        } else {
+                            bukkitWorld.playSound(block.location, assigned.blockData.soundGroup.placeSound, 1.0f, 1.0f)
+                        }
+
+                        job.completeBlock(assigned)
                     }
 
-                    job.completeBlock(assigned)
                     villager.assignedBlock = null
                     villager.buildTicks = 0
                     villager.nextBuildAvailableTime = world.gameTime + 2L

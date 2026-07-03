@@ -34,6 +34,12 @@ class GameplayConfiguration {
             "Enabling this means that all content coming from professions.yml will be disabled. Think twice."
         )
         val vanillaTrading: Boolean = false
+
+        @Comment(
+            "Whether custom villager construction is enabled.",
+            "If set to false, villagers will not construct new buildings or roads, and vanilla villages will generate normally."
+        )
+        val enableConstruction: Boolean = true
     }
 
     class WorldsConfig {

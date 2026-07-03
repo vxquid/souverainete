@@ -126,6 +126,11 @@ class VillageGenerationListener : Listener {
             return
         }
 
+        // Если кастомное строительство отключено, генерируем стандартную ванильную деревню
+        if (!plugin.gameplayConfig.general.enableConstruction) {
+            return
+        }
+
         val structure = event.structure
 
         if (structure.key.key.lowercase().contains("village")) {
