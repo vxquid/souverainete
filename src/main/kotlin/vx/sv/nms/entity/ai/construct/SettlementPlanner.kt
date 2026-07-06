@@ -71,7 +71,6 @@ class SettlementPlanner(val settlement: Settlement) {
         private val activeScans = ConcurrentHashMap.newKeySet<String>()
         private val scanCooldowns = ConcurrentHashMap<String, Long>()
 
-        // Хранит тип здания, который в ДАННЫЙ момент просчитывается асинхронно для конкретного поселения
         private val activePlanningRequests = ConcurrentHashMap<UUID, VanillaBuildingType>()
 
         private val planningQueue = ConcurrentLinkedQueue<PlanRequest>()
@@ -323,21 +322,30 @@ class SettlementPlanner(val settlement: Settlement) {
                         maxX.toDouble(), (finalBaseY + buildingHeight).toDouble(), maxZ.toDouble()
                     )
 
-                    val buffer = 5.0
+                    // ИСПРАВЛЕНИЕ: Динамический буфер коллизий.
+                    // Если новое здание ИЛИ существующее здание - это мелкий декор (Лампа или Голем),
+                    // мы уменьшаем дистанцию отчуждения с огромных 5.0 до 1.0 блока.
                     val isColliding2D = recordsListCopy.any { record ->
                         val other = record.box
-                        val xOverlap = minX.toDouble() < other.maxX + buffer && maxX.toDouble() > other.minX - buffer
-                        val zOverlap = minZ.toDouble() < other.maxZ + buffer && maxZ.toDouble() > other.minZ - buffer
+                        val currentBuffer = if (reqType == VanillaBuildingType.LAMP || reqType == VanillaBuildingType.IRON_GOLEM ||
+                            record.type.startsWith("LAMP") || record.type.startsWith("IRON_GOLEM")) 1.0 else 5.0
+
+                        val xOverlap = minX.toDouble() < other.maxX + currentBuffer && maxX.toDouble() > other.minX - currentBuffer
+                        val zOverlap = minZ.toDouble() < other.maxZ + currentBuffer && maxZ.toDouble() > other.minZ - currentBuffer
                         xOverlap && zOverlap
                     }
                     if (isColliding2D) return false
 
                     val settlementId = reqSettlement!!.data.id
                     val realRecordsList = buildings.computeIfAbsent(settlementId) { mutableListOf() }
+
                     val stillColliding = realRecordsList.any { record ->
                         val other = record.box
-                        val xOverlap = minX.toDouble() < other.maxX + buffer && maxX.toDouble() > other.minX - buffer
-                        val zOverlap = minZ.toDouble() < other.maxZ + buffer && maxZ.toDouble() > other.minZ - buffer
+                        val currentBuffer = if (reqType == VanillaBuildingType.LAMP || reqType == VanillaBuildingType.IRON_GOLEM ||
+                            record.type.startsWith("LAMP") || record.type.startsWith("IRON_GOLEM")) 1.0 else 5.0
+
+                        val xOverlap = minX.toDouble() < other.maxX + currentBuffer && maxX.toDouble() > other.minX - currentBuffer
+                        val zOverlap = minZ.toDouble() < other.maxZ + currentBuffer && maxZ.toDouble() > other.minZ - currentBuffer
                         xOverlap && zOverlap
                     }
                     if (stillColliding) return false
@@ -846,7 +854,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val allTypes = mutableListOf<String>()
 
-        // 1. Учитываем уже построенные здания
         records.forEach { record ->
             val typeName = record.type
             val baseName = if (typeName.contains("_") && typeName.substringAfterLast("_").toIntOrNull() != null) {
@@ -859,13 +866,11 @@ class SettlementPlanner(val settlement: Settlement) {
 
         var lastTypeName = allTypes.lastOrNull() ?: ""
 
-        // 2. Учитываем то, что прямо сейчас просчитывается в отдельном потоке планировщика
         activePlanningRequests[settlementId]?.let { type ->
             allTypes.add(type.typeName)
             lastTypeName = type.typeName
         }
 
-        // 3. Учитываем то, что ожидает расчетов в глобальной очереди планировщика
         planningQueue.filter { it.settlement.data.id == settlementId }.forEach { req ->
             val typeName = req.type.typeName
             allTypes.add(typeName)
@@ -873,10 +878,6 @@ class SettlementPlanner(val settlement: Settlement) {
         }
 
         val existingCounts = allTypes.groupingBy { it }.eachCount()
-
-        // =========================================================
-        // ЛОГИКА СТРОГОГО ЧЕРЕДОВАНИЯ
-        // =========================================================
 
         // 1. Базовые жизненно необходимые постройки (строятся первыми)
         val coreBuildings = listOf(
@@ -895,12 +896,21 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // 2. Проверка лимитов для жилых домов (зависят от населения)
+        // 2. Декорации (Лампы)
+        val totalBuildingsBuilt = allTypes.size
+        val maxLampsAllowed = totalBuildingsBuilt / 3
+        if ((existingCounts["LAMP"] ?: 0) < maxLampsAllowed && java.util.Random().nextDouble() < 0.4) {
+            requestPlanning(settlement, VanillaBuildingType.LAMP)
+            return true
+        }
+
+        // 3. Лимиты для жилых домов
         val existingSmall = existingCounts["HOUSE_SMALL"] ?: 0
         val existingMedium = existingCounts["HOUSE_MEDIUM"] ?: 0
         val existingLarge = existingCounts["HOUSE_LARGE"] ?: 0
 
         val maxResidentialAllowed = maxOf(6, settlement.villagers.size)
+
         val allowedSmall = if (existingSmall < 2) 2 else if (existingLarge >= 2 && existingMedium >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
         val allowedLarge = if (existingLarge < 2) 2 else if (existingSmall >= 2 && existingMedium >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
         val allowedMedium = if (existingMedium < 2) 2 else if (existingSmall >= 2 && existingLarge >= 2) maxOf(2, maxResidentialAllowed / 3) else 2
@@ -910,10 +920,9 @@ class SettlementPlanner(val settlement: Settlement) {
             Pair(VanillaBuildingType.HOUSE_LARGE, allowedLarge),
             Pair(VanillaBuildingType.HOUSE_MEDIUM, allowedMedium)
         )
-
         val canBuildHouse = housePriority.any { (existingCounts[it.first.typeName] ?: 0) < it.second }
 
-        // 3. Продвинутые функциональные здания (чередуются с домами)
+        // 4. Продвинутые функциональные здания
         val advancedFunctional = listOf(
             VanillaBuildingType.BLACKSMITH,
             VanillaBuildingType.BAKERY,
@@ -930,7 +939,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val lastWasHouse = lastTypeName.startsWith("HOUSE_")
 
         if (lastWasHouse) {
-            // После дома обязательно пытаемся построить функциональное здание
             if (unbuiltFunctional.isNotEmpty()) {
                 requestPlanning(settlement, unbuiltFunctional.random())
                 return true
@@ -940,7 +948,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 return true
             }
         } else {
-            // После функционального здания обязательно строим дом
             if (canBuildHouse) {
                 val nextHouse = housePriority.first { (existingCounts[it.first.typeName] ?: 0) < it.second }
                 requestPlanning(settlement, nextHouse.first)
@@ -949,14 +956,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 requestPlanning(settlement, unbuiltFunctional.random())
                 return true
             }
-        }
-
-        // 5. Декорации (когда дома и инфраструктура уперлись в лимиты)
-        val totalBuildingsBuilt = records.size
-        val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(4)
-        if ((existingCounts["LAMP"] ?: 0) < maxLampsAllowed) {
-            requestPlanning(settlement, VanillaBuildingType.LAMP)
-            return true
         }
 
         planningCooldowns[settlementId] = gameTime
