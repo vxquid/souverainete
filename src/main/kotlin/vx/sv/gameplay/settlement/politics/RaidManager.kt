@@ -1,9 +1,12 @@
 package vx.sv.gameplay.settlement.politics
 
+import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
+import org.bukkit.event.entity.EntityDeathEvent
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
+import vx.sv.persistent.LivingEntityExtend.settlement
 
 class RaidManager : Listener {
 
@@ -23,6 +26,33 @@ class RaidManager : Listener {
             val raidsSnapshot = activeRaids.toList()
             raidsSnapshot.forEach { it.tick() }
         }, 20L, 20L)
+    }
+
+    /**
+     * Обработчик гибели жителей.
+     * Если все жители поселения погибают вне рейда, поселение навсегда уничтожается.
+     */
+    @EventHandler
+    fun onVillagerDeath(event: EntityDeathEvent) {
+        val entity = event.entity
+        val settlement = entity.settlement ?: return
+
+        // Если во время смерти жителя в поселении идет активный рейд, пропускаем:
+        // В рейде используется собственная механика зачистки/захвата поселения (SettlementRaid.kt).
+        val activeRaid = settlement.data.activeRaid
+        if (activeRaid != null && activeRaid.status == Settlement.RaidStatus.ONGOING) {
+            return
+        }
+
+        // Проверяем, остались ли в живых другие жители в этом поселении
+        val hasAliveVillagers = settlement.villagers.any { villager ->
+            villager.uniqueId != entity.uniqueId && !villager.isDead && villager.isValid
+        }
+
+        if (!hasAliveVillagers) {
+            SettlementManager.destroySettlement(settlement)
+            plugin.logger.info("[Settlement] Settlement '${settlement.data.settlementName}' was permanently destroyed because all its villagers died.")
+        }
     }
 
     /**

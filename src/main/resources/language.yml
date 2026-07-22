@@ -65,6 +65,16 @@ settlement:
       cancelled: "§cCancelled."
       success: "§aSettlement renamed to: §6{name}"
 
+# Locate structure command override messages.
+locate-structure:
+  disabled-console: "§c[Souverainete] Vanilla village search is disabled. Use the search command in-game."
+  default-settlement-name: "Settlement"
+  not-found: "§cNo settlements found nearby."
+  hover-teleport: "Click to teleport"
+  found-prefix: "§aNearest settlement ("
+  found-middle: "§a) is located at "
+  found-suffix: " §a({distance} blocks away)"
+
 # Raid system messages.
 raid:
   bossbar:

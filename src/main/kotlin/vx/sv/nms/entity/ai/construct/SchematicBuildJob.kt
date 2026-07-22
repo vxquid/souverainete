@@ -16,9 +16,21 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
     private var sortedBlocksCache: List<BlockToPlace>? = null
     private val lock = Any()
 
-    fun addBlock(pos: BlockPos, blockData: BlockData, isRoad: Boolean = false, sequenceIndex: Int = 0) {
+    fun addBlock(
+        pos: BlockPos,
+        blockData: BlockData,
+        isRoad: Boolean = false,
+        sequenceIndex: Int = 0,
+        isPlaced: Boolean = false
+    ) {
         synchronized(lock) {
-            blocksMap[pos] = BlockToPlace(pos, blockData, isRoad = isRoad, priority = sequenceIndex)
+            blocksMap[pos] = BlockToPlace(
+                pos = pos,
+                blockData = blockData,
+                isPlaced = isPlaced,
+                isRoad = isRoad,
+                priority = sequenceIndex
+            )
             sortedBlocksCache = null
         }
     }

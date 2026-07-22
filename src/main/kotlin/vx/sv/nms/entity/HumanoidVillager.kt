@@ -54,12 +54,14 @@ import vx.sv.nms.VersionSpecificHumanoidEntityProvider.Companion.plugin
 import vx.sv.nms.entity.EntityProvider.Humanoid
 import vx.sv.nms.entity.ai.*
 import vx.sv.nms.entity.ai.construct.*
-import vx.sv.nms.entity.ai.pathfinding.HumanoidGroundNavigation
 import vx.sv.nms.entity.ai.fight.BowAttackBehavior
 import vx.sv.nms.entity.ai.fight.CrossbowAttackBehavior
 import vx.sv.nms.entity.ai.fight.FindEnemyBehavior
 import vx.sv.nms.entity.ai.fight.TacticalAttackBehavior
+import vx.sv.nms.entity.ai.pathfinding.HumanoidGroundNavigation
+import vx.sv.nms.entity.ai.pathfinding.InteractFenceGateGoal
 import vx.sv.nms.entity.ai.profession.ButcherBehavior
+import vx.sv.nms.entity.ai.profession.FishermanBehavior
 import vx.sv.nms.entity.ai.profession.MinerBehavior
 import vx.sv.nms.entity.ai.profession.ShepherdBehavior
 import vx.sv.persistent.LivingEntityExtend.settlement
@@ -68,8 +70,6 @@ import vx.sv.util.VillagerBridge
 import java.util.*
 import kotlin.math.atan2
 import kotlin.math.sqrt
-import vx.sv.nms.entity.ai.pathfinding.InteractFenceGateGoal
-import vx.sv.nms.entity.ai.profession.FishermanBehavior
 
 class HumanoidVillager(
     type: EntityType<out Villager>?,
@@ -621,17 +621,16 @@ class HumanoidVillager(
             Pair.of(1, BowAttackBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(1, TacticalAttackBehavior(0.65f, 15) as BehaviorControl<Villager>),
 
+            // Следование за лидером пати
+            Pair.of(1, FollowLeaderBehavior(0.75f, 3.5f, 20.0f) as BehaviorControl<Villager>),
+
             Pair.of(2, BuildBreakBehavior(0.6f) as BehaviorControl<Villager>),
-
             Pair.of(2, SleepBehavior(0.65f) as BehaviorControl<Villager>),
-
             Pair.of(2, FarmerBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, FishermanBehavior(0.65f) as BehaviorControl<Villager>),
-
             Pair.of(2, ConstructionBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ShepherdBehavior(0.65f) as BehaviorControl<Villager>),
             Pair.of(2, ButcherBehavior(0.65f) as BehaviorControl<Villager>),
-
             Pair.of(2, MinerBehavior(0.65f) as BehaviorControl<Villager>),
 
             Pair.of(3, FindEnemyBehavior(120.0) as BehaviorControl<Villager>),

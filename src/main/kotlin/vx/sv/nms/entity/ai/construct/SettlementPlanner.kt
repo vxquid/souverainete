@@ -37,7 +37,8 @@ data class BlockSaveData(
     val x: Int, val y: Int, val z: Int,
     val blockDataStr: String,
     val isPlaced: Boolean,
-    val isRoad: Boolean
+    val isRoad: Boolean,
+    val priority: Int = 0 // Сохраняем очередь строительства
 )
 
 data class SchematicJobSaveData(
@@ -604,7 +605,8 @@ class SettlementPlanner(val settlement: Settlement) {
                     block.pos.x, block.pos.y, block.pos.z,
                     block.blockData.asString,
                     block.isPlaced,
-                    block.isRoad
+                    block.isRoad,
+                    block.priority // Сохраняем очередность
                 )
             }
             return SchematicJobSaveData(job.jobId.toString(), blockSaves)
@@ -615,10 +617,14 @@ class SettlementPlanner(val settlement: Settlement) {
             saveData.blocks.forEach { bSave ->
                 val pos = BlockPos(bSave.x, bSave.y, bSave.z)
                 val blockData = Bukkit.createBlockData(bSave.blockDataStr)
-                job.addBlock(pos, blockData, bSave.isRoad)
-                if (bSave.isPlaced) {
-                    job.getBlocks().lastOrNull()?.isPlaced = true
-                }
+                // Быстрая O(1) запись без вызова тяжелых сортировок getBlocks()
+                job.addBlock(
+                    pos,
+                    blockData,
+                    isRoad = bSave.isRoad,
+                    sequenceIndex = bSave.priority,
+                    isPlaced = bSave.isPlaced
+                )
             }
             return job
         }
@@ -627,7 +633,8 @@ class SettlementPlanner(val settlement: Settlement) {
             val pdc = world.persistentDataContainer
             val saveData = mutableMapOf<String, SettlementPlannerSaveData>()
 
-            val worldSettlements = SettlementManager.settlements[world]?.toList() ?: return
+            val worldSettlements = SettlementManager.settlements[world]?.toList() ?: emptyList()
+
             worldSettlements.forEach { settlement ->
                 val settlementId = settlement.data.id
                 val records = buildings[settlementId]?.let { synchronized(it) { ArrayList(it) } } ?: emptyList()
@@ -656,23 +663,41 @@ class SettlementPlanner(val settlement: Settlement) {
                 )
             }
 
-            val processSave = {
+            // Если список поселений пуст, очищаем PDC в основном потоке
+            if (saveData.isEmpty()) {
+                if (Bukkit.isPrimaryThread()) {
+                    pdc.remove(worldBuildingsKey)
+                } else {
+                    Bukkit.getScheduler().runTask(plugin, Runnable { pdc.remove(worldBuildingsKey) })
+                }
+                return
+            }
+
+            // Создаем JSON снимка данных до ухода в фоновый поток
+            val jsonString = gson.toJson(saveData)
+
+            val executeSave = {
                 try {
-                    val compressedBytes = compress(gson.toJson(saveData))
-                    Bukkit.getScheduler().runTask(plugin, Runnable {
+                    val compressedBytes = compress(jsonString)
+                    // Во время выключения плагина (onDisable) пишем напрямую без BukkitScheduler
+                    if (Bukkit.isPrimaryThread() || !plugin.isEnabled) {
                         pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
-                    })
+                    } else {
+                        Bukkit.getScheduler().runTask(plugin, Runnable {
+                            pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+                        })
+                    }
                 } catch (e: Exception) {
                     plugin.logger.severe("Error saving building data for world ${world.name}: ${e.message}")
                 }
             }
 
-            if (Bukkit.isPrimaryThread()) {
+            if (Bukkit.isPrimaryThread() && plugin.isEnabled) {
                 Bukkit.getScheduler().runTaskAsynchronously(plugin, Runnable {
-                    processSave()
+                    executeSave()
                 })
             } else {
-                processSave()
+                executeSave()
             }
         }
 
@@ -685,8 +710,8 @@ class SettlementPlanner(val settlement: Settlement) {
             } else if (pdc.has(worldBuildingsKey, PersistentDataType.STRING)) {
                 val legacyJson = pdc.get(worldBuildingsKey, PersistentDataType.STRING) ?: return
                 val compressedBytes = compress(legacyJson)
+                // Записываем байтовый массив поверх строки без последующего удаления ключа
                 pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
-                pdc.remove(worldBuildingsKey)
                 legacyJson
             } else {
                 return
@@ -696,11 +721,11 @@ class SettlementPlanner(val settlement: Settlement) {
                 val typeToken = object : TypeToken<Map<String, SettlementPlannerSaveData>>() {}.type
                 val loadedData: Map<String, SettlementPlannerSaveData> = gson.fromJson(json, typeToken) ?: return
 
-                val worldSettlements = settlements[world]?.toList() ?: return
+                val worldSettlements = settlements[world]?.toList() ?: emptyList()
 
                 loadedData.forEach { (uuidStr, data) ->
                     val settlementId = UUID.fromString(uuidStr)
-                    val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
+                    val settlement = worldSettlements.find { it.data.id == settlementId }
 
                     val recordList = buildings.computeIfAbsent(settlementId) { Collections.synchronizedList(mutableListOf()) }
                     synchronized(recordList) {
@@ -723,11 +748,13 @@ class SettlementPlanner(val settlement: Settlement) {
                         list.add(deserializeJob(world, data.activeJob))
                     }
 
-                    val currentActive = list.firstOrNull()
-                    if (currentActive != null) {
-                        settlement.data.activeProjectId = currentActive.jobId
-                    } else {
-                        settlement.data.activeProjectId = null
+                    if (settlement != null) {
+                        val currentActive = list.firstOrNull()
+                        if (currentActive != null) {
+                            settlement.data.activeProjectId = currentActive.jobId
+                        } else {
+                            settlement.data.activeProjectId = null
+                        }
                     }
 
                     val queue = pendingJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }

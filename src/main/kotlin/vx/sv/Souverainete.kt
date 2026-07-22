@@ -18,6 +18,7 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
 import vx.sv.ai.ProviderManager
 import vx.sv.command.*
+import vx.sv.command.override.LocateCommandOverrideListener
 import vx.sv.config.lib.ConfigurationManager
 import vx.sv.config.lib.GameplayConfiguration
 import vx.sv.config.lib.TranslationManager
@@ -186,6 +187,7 @@ class Souverainete : JavaPlugin(), Listener {
             // build save and listeners
             server.pluginManager.registerEvents(WoodFarmManager(), this)
             server.pluginManager.registerEvents(BuilderSafetyListener(), this)
+            server.pluginManager.registerEvents(LocateCommandOverrideListener(), this)
         }
     }
 

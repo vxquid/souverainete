@@ -11,6 +11,7 @@ import net.minecraft.world.entity.ai.memory.MemoryStatus
 import net.minecraft.world.entity.ai.memory.WalkTarget
 import org.bukkit.Bukkit
 import org.bukkit.craftbukkit.entity.CraftPlayer
+import org.bukkit.entity.LivingEntity
 import vx.sv.gameplay.party.PartyManager
 import vx.sv.gameplay.party.PartyManager.Companion.partyLeaderUUID
 import vx.sv.gameplay.party.PartyManager.Companion.partyState
@@ -28,18 +29,18 @@ class FollowLeaderBehavior(
 ) {
 
     override fun checkExtraStartConditions(level: ServerLevel, villager: HumanoidVillager): Boolean {
-        val leader = getLeader(villager) ?: return false
+        val bukkitEntity = villager.bukkitEntity as? LivingEntity ?: return false
+        val leader = getLeader(bukkitEntity) ?: return false
 
         // Если приказано стоять — не двигаемся
-        if (villager.bukkitLivingEntity.partyState == PartyManager.PartyState.STAY) {
+        if (bukkitEntity.partyState == PartyManager.PartyState.STAY) {
             return false
         }
 
-        // Если деремся — не убегаем за лидером (если только лидер не улетел совсем далеко)
+        // Если деремся — не убегаем за лидером (если только лидер не ушел слишком далеко)
         val isFighting = villager.brain.hasMemoryValue(MemoryModuleType.ATTACK_TARGET)
         val distSqr = villager.distanceToSqr(leader)
 
-        // Если мы деремся, но лидер ушел ОЧЕНЬ далеко (> 25 блоков), то всё равно бежим за ним (или телепортируемся)
         if (isFighting && distSqr < 25.0 * 25.0) {
             return false
         }
@@ -52,7 +53,8 @@ class FollowLeaderBehavior(
     }
 
     override fun tick(level: ServerLevel, villager: HumanoidVillager, time: Long) {
-        val leader = getLeader(villager) ?: return
+        val bukkitEntity = villager.bukkitEntity as? LivingEntity ?: return
+        val leader = getLeader(bukkitEntity) ?: return
         val distanceSqr = villager.distanceToSqr(leader)
 
         villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, EntityTracker(leader, true))
@@ -72,10 +74,10 @@ class FollowLeaderBehavior(
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
     }
 
-    private fun getLeader(villager: HumanoidVillager): ServerPlayer? {
-        val uuid = villager.bukkitLivingEntity.partyLeaderUUID ?: return null
+    private fun getLeader(bukkitEntity: LivingEntity): ServerPlayer? {
+        val uuid = bukkitEntity.partyLeaderUUID ?: return null
         val bukkitPlayer = Bukkit.getPlayer(uuid) ?: return null
-        return (bukkitPlayer as CraftPlayer).handle
+        return (bukkitPlayer as? CraftPlayer)?.handle
     }
 
     private fun teleportToLeader(level: ServerLevel, villager: HumanoidVillager, leader: ServerPlayer) {
@@ -89,10 +91,8 @@ class FollowLeaderBehavior(
             val targetPos = leaderPos.offset(dx, dy, dz)
 
             if (canTeleportTo(level, targetPos)) {
-                // 1. Стоп
                 villager.navigation.stop()
 
-                // 2. Телепорт через Bukkit
                 val location = org.bukkit.Location(
                     level.world,
                     targetPos.x.toDouble() + 0.5,
@@ -103,7 +103,6 @@ class FollowLeaderBehavior(
                 )
                 villager.bukkitEntity.teleport(location)
 
-                // 3. Чистка памяти
                 villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
                 return
             }
