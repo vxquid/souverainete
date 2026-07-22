@@ -111,26 +111,39 @@ kotlin {
 }
 
 
-// --- ИСПРАВЛЕНИЕ: Вызываем независимый процесс (Exec) вместо таски GradleBuild ---
+// --- ИСПРАВЛЕНИЕ: Оптимизированный запуск независимых процессов для Windows и Linux ---
 
-// Находим правильный скрипт gradlew в зависимости от ОС (Windows или Linux/Mac)
 val isWindows = System.getProperty("os.name").lowercase().contains("windows")
-val gradlewPath = project.rootDir.resolve(if (isWindows) "gradlew.bat" else "gradlew").absolutePath
+val gradlewFile = project.rootDir.resolve(if (isWindows) "gradlew.bat" else "gradlew")
+
+// На Linux/macOS выдаем файлу gradlew права на выполнение программно
+if (!isWindows && gradlewFile.exists()) {
+  gradlewFile.setExecutable(true)
+}
+
+val gradlewPath = gradlewFile.absolutePath
 
 val buildPremium by tasks.registering(Exec::class) {
   group = "construct variants"
   description = "Build Premium plugin version."
 
-  // Изолированный запуск сборки
-  commandLine(gradlewPath, "shadowJar", "-Ppremium=true")
+  // На Linux запускаем скрипт через командный интерпретатор "sh", чтобы избежать ошибок доступа
+  if (isWindows) {
+    commandLine(gradlewPath, "shadowJar", "-Ppremium=true")
+  } else {
+    commandLine("sh", gradlewPath, "shadowJar", "-Ppremium=true")
+  }
 }
 
 val buildFree by tasks.registering(Exec::class) {
   group = "construct variants"
   description = "Build Free plugin version."
 
-  // Изолированный запуск сборки
-  commandLine(gradlewPath, "shadowJar", "-Ppremium=false")
+  if (isWindows) {
+    commandLine(gradlewPath, "shadowJar", "-Ppremium=false")
+  } else {
+    commandLine("sh", gradlewPath, "shadowJar", "-Ppremium=false")
+  }
 
   mustRunAfter(buildPremium) // Чтобы логи не перемешивались, запускаем по очереди
 }

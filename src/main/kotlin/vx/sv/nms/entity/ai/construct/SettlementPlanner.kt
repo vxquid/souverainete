@@ -71,7 +71,6 @@ class SettlementPlanner(val settlement: Settlement) {
         private val activeScans = ConcurrentHashMap.newKeySet<String>()
         private val scanCooldowns = ConcurrentHashMap<String, Long>()
 
-        // Хранит тип здания, который в ДАННЫЙ момент просчитывается асинхронно для конкретного поселения
         private val activePlanningRequests = ConcurrentHashMap<UUID, VanillaBuildingType>()
 
         private val planningQueue = ConcurrentLinkedQueue<PlanRequest>()
@@ -333,12 +332,14 @@ class SettlementPlanner(val settlement: Settlement) {
                     if (isColliding2D) return false
 
                     val settlementId = reqSettlement!!.data.id
-                    val realRecordsList = buildings.computeIfAbsent(settlementId) { mutableListOf() }
-                    val stillColliding = realRecordsList.any { record ->
-                        val other = record.box
-                        val xOverlap = minX.toDouble() < other.maxX + buffer && maxX.toDouble() > other.minX - buffer
-                        val zOverlap = minZ.toDouble() < other.maxZ + buffer && maxZ.toDouble() > other.minZ - buffer
-                        xOverlap && zOverlap
+                    val realRecordsList = buildings.computeIfAbsent(settlementId) { Collections.synchronizedList(mutableListOf()) }
+                    val stillColliding = synchronized(realRecordsList) {
+                        realRecordsList.any { record ->
+                            val other = record.box
+                            val xOverlap = minX.toDouble() < other.maxX + buffer && maxX.toDouble() > other.minX - buffer
+                            val zOverlap = minZ.toDouble() < other.maxZ + buffer && maxZ.toDouble() > other.minZ - buffer
+                            xOverlap && zOverlap
+                        }
                     }
                     if (stillColliding) return false
 
@@ -352,11 +353,9 @@ class SettlementPlanner(val settlement: Settlement) {
                     val buildJobsList = planner.startVanillaStructureConstruction(cx, finalBaseY, cz, absEntrancePos, reqType!!, bestRotation, jobId)
 
                     val queue = pendingJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
-                    synchronized(queue) {
-                        buildJobsList.forEach { queue.offer(it) }
-                    }
+                    buildJobsList.forEach { queue.offer(it) }
 
-                    SettlementManager.saveSettlements(world)
+                    // УБРАН СПАМ СОХРАНЕНИЕМ: данные держатся в памяти и запишутся при сохранении мира
                     return true
                 }
 
@@ -436,7 +435,7 @@ class SettlementPlanner(val settlement: Settlement) {
             }
 
             if (activeScans.add(key)) {
-                val records = buildings[s.data.id] ?: run { activeScans.remove(key); return null }
+                val records = buildings[s.data.id]?.toList() ?: run { activeScans.remove(key); return null }
                 val world = s.world
 
                 var found: BlockPos? = null
@@ -480,7 +479,9 @@ class SettlementPlanner(val settlement: Settlement) {
                     iterator.remove()
                     val records = buildings[settlementId]
                     if (records != null) {
-                        val golemRecord = records.find { it.jobId == job.jobId && it.type.startsWith("IRON_GOLEM") }
+                        val golemRecord = synchronized(records) {
+                            records.find { it.jobId == job.jobId && it.type.startsWith("IRON_GOLEM") }
+                        }
                         if (golemRecord != null) {
                             val loc = golemRecord.box.center.toLocation(settlement.world)
 
@@ -522,13 +523,11 @@ class SettlementPlanner(val settlement: Settlement) {
 
             val queue = pendingJobs[settlementId]
             if (queue != null && queue.isNotEmpty()) {
-                synchronized(queue) {
-                    val nextJob = queue.poll()
-                    if (nextJob != null) {
-                        activeList.add(nextJob)
-                        settlement.data.activeProjectId = nextJob.jobId
-                        return nextJob
-                    }
+                val nextJob = queue.poll()
+                if (nextJob != null) {
+                    activeList.add(nextJob)
+                    settlement.data.activeProjectId = nextJob.jobId
+                    return nextJob
                 }
             }
 
@@ -629,16 +628,16 @@ class SettlementPlanner(val settlement: Settlement) {
             val pdc = world.persistentDataContainer
             val saveData = mutableMapOf<String, SettlementPlannerSaveData>()
 
-            val worldSettlements = SettlementManager.settlements[world] ?: return
+            val worldSettlements = SettlementManager.settlements[world]?.toList() ?: return
             worldSettlements.forEach { settlement ->
                 val settlementId = settlement.data.id
-                val records = buildings[settlementId] ?: emptyList()
+                val records = buildings[settlementId]?.let { synchronized(it) { ArrayList(it) } } ?: emptyList()
 
-                val activeList = activeJobs[settlementId] ?: emptyList()
+                val activeList = activeJobs[settlementId]?.toList() ?: emptyList()
                 val activeSave = activeList.firstOrNull()?.let { serializeJob(it) }
                 val activeJobsListSaves = activeList.map { serializeJob(it) }
 
-                val queue = pendingJobs[settlementId] ?: emptyList()
+                val queue = pendingJobs[settlementId]?.toList() ?: emptyList()
                 val pendingSaves = queue.map { serializeJob(it) }
 
                 val plannerSaves = records.map { record ->
@@ -658,8 +657,24 @@ class SettlementPlanner(val settlement: Settlement) {
                 )
             }
 
-            val compressedBytes = compress(gson.toJson(saveData))
-            pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+            val processSave = {
+                try {
+                    val compressedBytes = compress(gson.toJson(saveData))
+                    Bukkit.getScheduler().runTask(plugin, Runnable {
+                        pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+                    })
+                } catch (e: Exception) {
+                    plugin.logger.severe("Error saving building data for world ${world.name}: ${e.message}")
+                }
+            }
+
+            if (Bukkit.isPrimaryThread()) {
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, Runnable {
+                    processSave()
+                })
+            } else {
+                processSave()
+            }
         }
 
         fun loadBuildingsFromWorld(world: World) {
@@ -682,18 +697,20 @@ class SettlementPlanner(val settlement: Settlement) {
                 val typeToken = object : TypeToken<Map<String, SettlementPlannerSaveData>>() {}.type
                 val loadedData: Map<String, SettlementPlannerSaveData> = gson.fromJson(json, typeToken) ?: return
 
-                val worldSettlements = settlements[world] ?: return
+                val worldSettlements = settlements[world]?.toList() ?: return
 
                 loadedData.forEach { (uuidStr, data) ->
                     val settlementId = UUID.fromString(uuidStr)
                     val settlement = worldSettlements.find { it.data.id == settlementId } ?: return@forEach
 
-                    val recordList = buildings.computeIfAbsent(settlementId) { mutableListOf() }
-                    recordList.clear()
-                    data.buildings.forEach { save ->
-                        val box = BoundingBox(save.minX, save.minY, save.minZ, save.maxX, save.maxY, save.maxZ)
-                        val jobId = try { UUID.fromString(save.jobId) } catch (e: Exception) { UUID.randomUUID() }
-                        recordList.add(BuildingRecord(save.type, box, jobId))
+                    val recordList = buildings.computeIfAbsent(settlementId) { Collections.synchronizedList(mutableListOf()) }
+                    synchronized(recordList) {
+                        recordList.clear()
+                        data.buildings.forEach { save ->
+                            val box = BoundingBox(save.minX, save.minY, save.minZ, save.maxX, save.maxY, save.maxZ)
+                            val jobId = try { UUID.fromString(save.jobId) } catch (e: Exception) { UUID.randomUUID() }
+                            recordList.add(BuildingRecord(save.type, box, jobId))
+                        }
                     }
 
                     val list = activeJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
@@ -800,10 +817,12 @@ class SettlementPlanner(val settlement: Settlement) {
             center.x - 6.0, center.y - 1.0, center.z - 6.0,
             center.x + 6.0, center.y + 6.0, center.z + 6.0
         )
-        val list = buildings.computeIfAbsent(settlement.data.id) { mutableListOf() }
+        val list = buildings.computeIfAbsent(settlement.data.id) { Collections.synchronizedList(mutableListOf()) }
 
-        if (list.none { it.type == "MEETING_POINT" }) {
-            list.add(BuildingRecord("MEETING_POINT", thBox, UUID.randomUUID()))
+        synchronized(list) {
+            if (list.none { it.type == "MEETING_POINT" }) {
+                list.add(BuildingRecord("MEETING_POINT", thBox, UUID.randomUUID()))
+            }
         }
     }
 
@@ -814,16 +833,14 @@ class SettlementPlanner(val settlement: Settlement) {
         val type = VanillaBuildingType.MEETING_POINT
         val baseY = center.blockY
 
-        val records = buildings[settlement.data.id] ?: emptyList()
+        val records = buildings[settlement.data.id]?.toList() ?: emptyList()
         val jobId = records.find { it.type == "MEETING_POINT" }?.jobId ?: UUID.randomUUID()
 
         val entrancePos = BlockPos(cx, baseY + 1, cz)
         val buildJobsList = startVanillaStructureConstruction(cx, baseY, cz, entrancePos, type, StructureRotation.NONE, jobId)
 
         val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
-        synchronized(queue) {
-            buildJobsList.forEach { queue.offer(it) }
-        }
+        buildJobsList.forEach { queue.offer(it) }
         return true
     }
 
@@ -842,11 +859,10 @@ class SettlementPlanner(val settlement: Settlement) {
             return false
         }
 
-        val records = buildings[settlementId] ?: mutableListOf()
+        val records = buildings[settlementId]?.toList() ?: emptyList()
 
         val allTypes = mutableListOf<String>()
 
-        // 1. Учитываем уже построенные здания
         records.forEach { record ->
             val typeName = record.type
             val baseName = if (typeName.contains("_") && typeName.substringAfterLast("_").toIntOrNull() != null) {
@@ -859,13 +875,11 @@ class SettlementPlanner(val settlement: Settlement) {
 
         var lastTypeName = allTypes.lastOrNull() ?: ""
 
-        // 2. Учитываем то, что прямо сейчас просчитывается в отдельном потоке планировщика
         activePlanningRequests[settlementId]?.let { type ->
             allTypes.add(type.typeName)
             lastTypeName = type.typeName
         }
 
-        // 3. Учитываем то, что ожидает расчетов в глобальной очереди планировщика
         planningQueue.filter { it.settlement.data.id == settlementId }.forEach { req ->
             val typeName = req.type.typeName
             allTypes.add(typeName)
@@ -874,11 +888,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val existingCounts = allTypes.groupingBy { it }.eachCount()
 
-        // =========================================================
-        // ЛОГИКА СТРОГОГО ЧЕРЕДОВАНИЯ
-        // =========================================================
-
-        // 1. Базовые жизненно необходимые постройки (строятся первыми)
         val coreBuildings = listOf(
             Pair(VanillaBuildingType.MEETING_POINT, 1),
             Pair(VanillaBuildingType.TOWN_HALL, 1),
@@ -895,7 +904,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // 2. Проверка лимитов для жилых домов (зависят от населения)
         val existingSmall = existingCounts["HOUSE_SMALL"] ?: 0
         val existingMedium = existingCounts["HOUSE_MEDIUM"] ?: 0
         val existingLarge = existingCounts["HOUSE_LARGE"] ?: 0
@@ -913,7 +921,6 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val canBuildHouse = housePriority.any { (existingCounts[it.first.typeName] ?: 0) < it.second }
 
-        // 3. Продвинутые функциональные здания (чередуются с домами)
         val advancedFunctional = listOf(
             VanillaBuildingType.BLACKSMITH,
             VanillaBuildingType.BAKERY,
@@ -930,7 +937,6 @@ class SettlementPlanner(val settlement: Settlement) {
         val lastWasHouse = lastTypeName.startsWith("HOUSE_")
 
         if (lastWasHouse) {
-            // После дома обязательно пытаемся построить функциональное здание
             if (unbuiltFunctional.isNotEmpty()) {
                 requestPlanning(settlement, unbuiltFunctional.random())
                 return true
@@ -940,7 +946,6 @@ class SettlementPlanner(val settlement: Settlement) {
                 return true
             }
         } else {
-            // После функционального здания обязательно строим дом
             if (canBuildHouse) {
                 val nextHouse = housePriority.first { (existingCounts[it.first.typeName] ?: 0) < it.second }
                 requestPlanning(settlement, nextHouse.first)
@@ -951,7 +956,6 @@ class SettlementPlanner(val settlement: Settlement) {
             }
         }
 
-        // 5. Декорации (когда дома и инфраструктура уперлись в лимиты)
         val totalBuildingsBuilt = records.size
         val maxLampsAllowed = (totalBuildingsBuilt / 3).coerceAtMost(4)
         if ((existingCounts["LAMP"] ?: 0) < maxLampsAllowed) {
@@ -985,7 +989,7 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val settlementId = settlement.data.id
         val roads = settlementRoads.computeIfAbsent(settlementId) { ConcurrentHashMap.newKeySet() }
-        val records = buildings[settlementId] ?: emptyList()
+        val records = buildings[settlementId]?.toList() ?: emptyList()
 
         val isRoadEligible = type != VanillaBuildingType.IRON_GOLEM && type != VanillaBuildingType.LAMP
         val halfW = width / 2 + 1

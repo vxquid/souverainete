@@ -29,6 +29,8 @@ import vx.sv.nms.entity.ai.construct.VanillaBuildingType
 import vx.sv.persistent.LivingEntityExtend.settlement
 import java.util.*
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArrayList
 
 class SettlementManager : Listener {
 
@@ -77,26 +79,27 @@ class SettlementManager : Listener {
         val maxStack = itemStack.type.maxStackSize
         var remaining = itemStack.amount
 
-        for (stored in virtualInv) {
-            if (stored.isSimilar(itemStack)) {
-                val space = maxStack - stored.amount
-                if (space > 0) {
-                    val toAdd = minOf(space, remaining)
-                    stored.amount += toAdd
-                    remaining -= toAdd
-                    if (remaining <= 0) break
+        synchronized(virtualInv) {
+            for (stored in virtualInv) {
+                if (stored.isSimilar(itemStack)) {
+                    val space = maxStack - stored.amount
+                    if (space > 0) {
+                        val toAdd = minOf(space, remaining)
+                        stored.amount += toAdd
+                        remaining -= toAdd
+                        if (remaining <= 0) break
+                    }
                 }
             }
-        }
 
-        while (remaining > 0) {
-            val copy = itemStack.clone()
-            val toAdd = minOf(maxStack, remaining)
-            copy.amount = toAdd
-            virtualInv.add(copy)
-            remaining -= toAdd
+            while (remaining > 0) {
+                val copy = itemStack.clone()
+                val toAdd = minOf(maxStack, remaining)
+                copy.amount = toAdd
+                virtualInv.add(copy)
+                remaining -= toAdd
+            }
         }
-
     }
 
     @EventHandler
@@ -107,19 +110,18 @@ class SettlementManager : Listener {
         settlement.villagers.remove(villager)
 
         val aliveCount = settlement.villagers.count { it.isValid && !it.isDead }
-        // Уничтожаем поселение только если в нем нет выживших жителей И нет активного рейда (защита от багов завоевания)
         if (aliveCount == 0 && settlement.data.activeRaid == null) {
             destroySettlement(settlement)
         }
     }
 
     fun handleWorldLoad(world: World) {
-        settlements[world] = mutableListOf()
+        settlements[world] = CopyOnWriteArrayList()
         this.loadSettlements(world)
 
         SettlementPlanner.loadBuildingsFromWorld(world)
 
-        val worldSettlements = settlements[world] ?: emptyList()
+        val worldSettlements = settlements[world]?.toList() ?: emptyList()
         plugin.gameplayManager.raidManager.restoreRaidsFromData(worldSettlements)
 
         this.startEnteringTick(world)
@@ -143,7 +145,7 @@ class SettlementManager : Listener {
 
     private fun handlePlayerMovement(player: Player, world: World, enterMsg: String, leaveMsg: String) {
         val playerLocationVector = player.location.toVector()
-        val currentWorldSettlements = settlements[world] ?: return
+        val currentWorldSettlements = settlements[world]?.toList() ?: return
 
         val activeSettlement = currentWorldSettlements.find { it.territory.contains(playerLocationVector) }
         val lastSettlementName = player.currentSettlement
@@ -200,7 +202,8 @@ class SettlementManager : Listener {
     private fun startSettlementDetectionTask(world: World) {
         plugin.server.scheduler.runTaskTimer(plugin, Runnable {
 
-            settlements[world]?.forEach { settlement ->
+            val listSnapshot = settlements[world]?.toList() ?: emptyList()
+            listSnapshot.forEach { settlement ->
                 if (settlement.villagers.isNotEmpty()) {
                     val hasActiveLeader = settlement.villagers.any {
                         it.uniqueId == settlement.data.leaderId && it.isValid
@@ -222,7 +225,7 @@ class SettlementManager : Listener {
                         val planner = SettlementPlanner(settlement)
 
                         if (golemCount == 0) {
-                            val records = SettlementPlanner.buildings[settlement.data.id] ?: emptyList()
+                            val records = SettlementPlanner.buildings[settlement.data.id]?.toList() ?: emptyList()
                             val alreadyPlanningGolem = records.any { it.type.startsWith("IRON_GOLEM") }
                             if (!alreadyPlanningGolem) {
                                 planner.planBuilding(VanillaBuildingType.IRON_GOLEM)
@@ -263,7 +266,7 @@ class SettlementManager : Listener {
                         System.currentTimeMillis(),
                         dominantRace.name
                     )
-                    this.generateSettlementName(Settlement(newData, potentialCitizens.toMutableSet()))
+                    this.generateSettlementName(Settlement(newData, potentialCitizens.toSet()))
                 }
                 break
             }
@@ -278,7 +281,8 @@ class SettlementManager : Listener {
         nearby.add(origin)
 
         val world = origin.world
-        settlements[world]?.forEach { settlement ->
+        val currentSettlements = settlements[world]?.toList() ?: emptyList()
+        currentSettlements.forEach { settlement ->
             val attractDistance = config.detectionDistance * 1.5
             nearby.forEach { villager ->
                 if (settlement.data.center.distance(villager.location) <= attractDistance) {
@@ -365,7 +369,7 @@ class SettlementManager : Listener {
         settlement.electLeader()
 
         val world = settlement.world
-        val worldSettlements = settlements.computeIfAbsent(world) { mutableListOf() }
+        val worldSettlements = settlements.computeIfAbsent(world) { CopyOnWriteArrayList() }
 
         worldSettlements.add(settlement)
         saveSettlements(world)
@@ -397,7 +401,7 @@ class SettlementManager : Listener {
         try {
             val loadedData: List<Settlement.SettlementData>? = gson.fromJson(json, typeToken)
             loadedData?.forEach { data ->
-                settlements.getOrPut(world) { mutableListOf() }.add(Settlement(data))
+                settlements.getOrPut(world) { CopyOnWriteArrayList() }.add(Settlement(data))
             }
         } catch (e: Exception) {
             plugin.logger.severe("Failed to load settlements: ${e.message}")
@@ -421,7 +425,7 @@ class SettlementManager : Listener {
         val world = block.world
         val blockVector = block.location.toVector()
 
-        val worldSettlements = settlements[world] ?: return
+        val worldSettlements = settlements[world]?.toList() ?: return
         val settlement = worldSettlements.find { it.territory.contains(blockVector) } ?: return
 
         val itemInHand = event.item
@@ -478,17 +482,15 @@ class SettlementManager : Listener {
     }
 
     companion object {
-        val settlements: MutableMap<World, MutableList<Settlement>> = mutableMapOf()
+        val settlements: ConcurrentHashMap<World, CopyOnWriteArrayList<Settlement>> = ConcurrentHashMap()
         val settlementsWorldKey = NamespacedKey(plugin, "SettlementList")
         val currentSettlementKey = NamespacedKey(plugin, "CurrentSettlement")
 
-        // Статический метод полного удаления поселения и зачистки ИИ-очередей
         fun destroySettlement(settlement: Settlement) {
             val world = settlement.world
             val worldSettlements = settlements[world] ?: return
             if (worldSettlements.remove(settlement)) {
 
-                // Зачистка всех очередей и планировщиков для ликвидированного поселения
                 SettlementPlanner.buildings.remove(settlement.data.id)
                 SettlementPlanner.pendingJobs.remove(settlement.data.id)
                 SettlementPlanner.activeJobs.remove(settlement.data.id)
@@ -496,7 +498,6 @@ class SettlementManager : Listener {
 
                 saveSettlements(world)
 
-                // Отправляем глобальное оповещение о падении поселения
                 val rawMsg = plugin.language.getString("settlement.destroyed-broadcast")
                     ?: "§4☠ §cThe settlement §6{settlementName} §chas been completely destroyed because its last citizen died!"
                 val formattedMsg = rawMsg.replace("{settlementName}", settlement.data.settlementName)
@@ -510,15 +511,32 @@ class SettlementManager : Listener {
         }
 
         fun saveSettlements(world: World) {
-            val list = settlements[world] ?: return
+            val list = settlements[world]?.toList() ?: return
+            if (list.isEmpty()) return
 
             list.forEach { it.syncToData() }
+            val dataSnapshot = list.map { it.data }
 
-            val data = list.map { it.data }
-            val json = gson.toJson(data)
+            val processSave = {
+                try {
+                    val json = gson.toJson(dataSnapshot)
+                    val compressedBytes = SettlementPlanner.compress(json)
 
-            val compressedBytes = SettlementPlanner.compress(json)
-            world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+                    Bukkit.getScheduler().runTask(plugin, Runnable {
+                        world.persistentDataContainer.set(settlementsWorldKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+                    })
+                } catch (e: Exception) {
+                    plugin.logger.severe("Error saving settlements for world ${world.name}: ${e.message}")
+                }
+            }
+
+            if (Bukkit.isPrimaryThread()) {
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, Runnable {
+                    processSave()
+                })
+            } else {
+                processSave()
+            }
 
             SettlementPlanner.saveBuildingsToWorld(world)
         }
@@ -555,16 +573,20 @@ class SettlementManager : Listener {
         fun recordDiplomaticEvent(settlementA: Settlement, settlementB: Settlement, event: String) {
             val maxRecords = 5
 
-            if (settlementA.data.diplomaticHistory == null) settlementA.data.diplomaticHistory = mutableMapOf()
-            if (settlementB.data.diplomaticHistory == null) settlementB.data.diplomaticHistory = mutableMapOf()
+            if (settlementA.data.diplomaticHistory == null) settlementA.data.diplomaticHistory = ConcurrentHashMap()
+            if (settlementB.data.diplomaticHistory == null) settlementB.data.diplomaticHistory = ConcurrentHashMap()
 
-            val historyA = settlementA.data.diplomaticHistory!!.getOrPut(settlementB.data.id) { mutableListOf() }
-            historyA.add(event)
-            if (historyA.size > maxRecords) historyA.removeAt(0)
+            val historyA = settlementA.data.diplomaticHistory!!.getOrPut(settlementB.data.id) { Collections.synchronizedList(mutableListOf()) }
+            synchronized(historyA) {
+                historyA.add(event)
+                if (historyA.size > maxRecords) historyA.removeAt(0)
+            }
 
-            val historyB = settlementB.data.diplomaticHistory!!.getOrPut(settlementA.data.id) { mutableListOf() }
-            historyB.add(event)
-            if (historyB.size > maxRecords) historyB.removeAt(0)
+            val historyB = settlementB.data.diplomaticHistory!!.getOrPut(settlementA.data.id) { Collections.synchronizedList(mutableListOf()) }
+            synchronized(historyB) {
+                historyB.add(event)
+                if (historyB.size > maxRecords) historyB.removeAt(0)
+            }
 
             saveSettlements(settlementA.world)
             if (settlementA.world != settlementB.world) {

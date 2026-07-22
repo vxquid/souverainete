@@ -10,8 +10,9 @@ import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.CopyOnWriteArraySet
 
-class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> = mutableSetOf()) {
+class Settlement(val data: SettlementData, villagersSet: Set<Villager> = emptySet()) {
 
     data class SettlementData(
         val id: UUID,
@@ -22,16 +23,15 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         var dominantRace: String,
         var leaderId: UUID? = null,
         var leaderName: String? = null,
-        val reputation: MutableMap<UUID, Int> = mutableMapOf(),
-        val relations: MutableMap<UUID, RelationLevel> = mutableMapOf(),
+        val reputation: ConcurrentHashMap<UUID, Int> = ConcurrentHashMap(),
+        val relations: ConcurrentHashMap<UUID, RelationLevel> = ConcurrentHashMap(),
 
-        var diplomaticHistory: MutableMap<UUID, MutableList<String>>? = null,
+        var diplomaticHistory: MutableMap<UUID, MutableList<String>>? = ConcurrentHashMap(),
         var activeRaid: RaidData? = null,
 
         var activeProjectId: UUID? = null,
 
-        // ПЕРСИСТЕНТНЫЙ СПИСОК СЕРИАЛИЗОВАННЫХ ПРЕДМЕТОВ В BASE64 (БЕЗОПАСНО ДЛЯ GSON)
-        val serializedInventory: MutableList<String> = mutableListOf()
+        val serializedInventory: MutableList<String> = Collections.synchronizedList(mutableListOf())
     )
 
     data class RaidData(
@@ -40,25 +40,24 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         var currentWave: Int = 0,
         val totalWaves: Int = 3,
         var totalRaidersInWave: Int = 0,
-        val aliveRaiders: MutableSet<UUID> = mutableSetOf(),
+        val aliveRaiders: MutableSet<UUID> = CopyOnWriteArraySet(),
         var activeTicks: Long = 0
     )
 
+    val villagers: MutableSet<Villager> = CopyOnWriteArraySet(villagersSet)
+
     val world = plugin.server.getWorld(data.worldUUID)!!
 
-    // ИСПРАВЛЕНО: Увеличен радиус территории деревни со 64.0 до 120.0 блоков во все стороны для простора
     var territory = BoundingBox.of(data.center, 126.0, 128.0, 126.0)
 
-    // РАКТИВНЫЙ РАНТАЙМ-ИНВЕНТАРЬ (ХРАНИТ РЕАЛЬНЫЕ ITEMSTACK В ПАМЯТИ)
-    val villageInventory: MutableList<ItemStack> = mutableListOf()
+    val villageInventory: MutableList<ItemStack> = Collections.synchronizedList(mutableListOf())
 
-    // КЭШ КРОВАТЕЙ ДЛЯ ОПТИМИЗАЦИИ ИИ СНА (BlockPos изголовья кровати)
     val cachedBeds = ConcurrentHashMap.newKeySet<BlockPos>()
 
     init {
-        // Десериализуем предметы из Base64 при инициализации поселения
         if (data.serializedInventory.isNotEmpty()) {
-            for (base64 in data.serializedInventory) {
+            val copyList = synchronized(data.serializedInventory) { ArrayList(data.serializedInventory) }
+            for (base64 in copyList) {
                 try {
                     val bytes = Base64.getDecoder().decode(base64)
                     val item = ItemStack.deserializeBytes(bytes)
@@ -69,18 +68,15 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
             }
         }
 
-        // Деревенский инвентарь не должен быть пустым с самого начала
         if (villageInventory.isEmpty()) {
             villageInventory.add(ItemStack(org.bukkit.Material.BREAD, 64))
             villageInventory.add(ItemStack(org.bukkit.Material.BREAD, 64))
             villageInventory.add(ItemStack(org.bukkit.Material.BAKED_POTATO, 64))
             villageInventory.add(ItemStack(org.bukkit.Material.BAKED_POTATO, 64))
-            // Сразу синхронизируем дефолтный инвентарь в персистентную структуру
             syncToData()
         }
     }
 
-    // Сканирование и обновление кэша кроватей (выполняется планировщиком)
     fun refreshCachedBeds() {
         cachedBeds.clear()
         val radius = plugin.gameplayManager.config.settlement.detectionDistance.toInt()
@@ -100,11 +96,9 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
                             val bedData = block.blockData as? org.bukkit.block.data.type.Bed ?: return@forEach
                             if (bedData.part == org.bukkit.block.data.type.Bed.Part.HEAD) {
                                 if (block.location.distanceSquared(center) <= radius * radius) {
-                                    // Валидация выживания (свет и потолок) прямо на этапе кэширования
                                     if (block.lightLevel < 5) return@forEach
                                     if (world.getHighestBlockYAt(block.x, block.z) < block.y) return@forEach
 
-                                    reservedBedsToBlockPos()
                                     cachedBeds.add(BlockPos(block.x, block.y, block.z))
                                 }
                             }
@@ -115,23 +109,22 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
         }
     }
 
-    private fun reservedBedsToBlockPos() {}
-
-    // Синхронизирует активные предметы в плоский Base64 список перед сохранением мира
     fun syncToData() {
-        data.serializedInventory.clear()
-        for (item in villageInventory) {
-            try {
-                // Ограничиваем размер стака до maxStackSize во избежание Mojang-ошибок range [1;99]
-                val maxStack = item.type.maxStackSize
-                if (item.amount > maxStack) {
-                    item.amount = maxStack
-                }
+        val itemsCopy = synchronized(villageInventory) { ArrayList(villageInventory) }
+        synchronized(data.serializedInventory) {
+            data.serializedInventory.clear()
+            for (item in itemsCopy) {
+                try {
+                    val maxStack = item.type.maxStackSize
+                    if (item.amount > maxStack) {
+                        item.amount = maxStack
+                    }
 
-                val base64 = Base64.getEncoder().encodeToString(item.serializeAsBytes())
-                data.serializedInventory.add(base64)
-            } catch (e: Exception) {
-                plugin.logger.warning("Failed to serialize item ${item.type} in settlement ${data.settlementName}: ${e.message}")
+                    val base64 = Base64.getEncoder().encodeToString(item.serializeAsBytes())
+                    data.serializedInventory.add(base64)
+                } catch (e: Exception) {
+                    plugin.logger.warning("Failed to serialize item ${item.type} in settlement ${data.settlementName}: ${e.message}")
+                }
             }
         }
     }
@@ -144,7 +137,7 @@ class Settlement(val data: SettlementData, val villagers: MutableSet<Villager> =
             oldLeader?.persistentDataContainer?.remove(LEADER_KEY)
         }
 
-        val newLeader = villagers.random()
+        val newLeader = villagers.randomOrNull() ?: return
         data.leaderId = newLeader.uniqueId
         data.leaderName = newLeader.customName ?: "Leader"
 
