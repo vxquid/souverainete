@@ -16,9 +16,9 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
     private var sortedBlocksCache: List<BlockToPlace>? = null
     private val lock = Any()
 
-    fun addBlock(pos: BlockPos, blockData: BlockData, isRoad: Boolean = false) {
+    fun addBlock(pos: BlockPos, blockData: BlockData, isRoad: Boolean = false, sequenceIndex: Int = 0) {
         synchronized(lock) {
-            blocksMap[pos] = BlockToPlace(pos, blockData, isRoad = isRoad)
+            blocksMap[pos] = BlockToPlace(pos, blockData, isRoad = isRoad, priority = sequenceIndex)
             sortedBlocksCache = null
         }
     }
@@ -41,6 +41,7 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
             if (sortedBlocksCache == null) {
                 sortedBlocksCache = ArrayList(blocksMap.values).sortedWith(
                     compareBy<BlockToPlace> { it.isRoad }
+                        .thenBy { it.priority }
                         .thenBy { it.pos.y }
                         .thenBy { getPlacementPriority(it.blockData.material) }
                 )
@@ -76,54 +77,77 @@ class SchematicBuildJob(val world: World, var jobId: UUID = UUID.randomUUID()) {
 
         val constructionList = list.filter { !it.blockData.material.isAir }
         if (constructionList.isNotEmpty()) {
-            val yLevels = constructionList.map { it.pos.y }.distinct().sorted()
-            for (y in yLevels) {
-                val activeLayer = constructionList.filter { it.pos.y == y }
+            val isRoadList = constructionList.all { it.isRoad }
 
-                val obstacles = mutableListOf<BlockToPlace>()
+            if (isRoadList) {
+                val minSeq = constructionList.minOf { it.priority }
+                val activeSeqBlocks = constructionList.filter { it.priority <= minSeq + 2 }
+
                 val candidates = mutableListOf<BlockToPlace>()
-
-                for (block in activeLayer) {
+                for (block in activeSeqBlocks) {
                     val currentBlock = world.getBlockAt(block.pos.x, block.pos.y, block.pos.z)
-                    val currentType = currentBlock.type
-
                     if (currentBlock.blockData == block.blockData) {
                         block.isPlaced = true
                         continue
                     }
-
-                    val isPathTransformation = currentType.isShovelable() && block.blockData.material == Material.DIRT_PATH
-                    if (isPathTransformation) {
-                        candidates.add(block)
-                        continue
-                    }
-
-                    val isFarmlandTransformation = currentType.isShovelable() && block.blockData.material == Material.FARMLAND
-                    if (isFarmlandTransformation) {
-                        candidates.add(block)
-                        continue
-                    }
-
-                    if (currentBlock.isIgnorableObstacle()) {
-                        candidates.add(block)
-                        continue
-                    }
-
-                    obstacles.add(block)
-                }
-
-                if (obstacles.isNotEmpty()) {
-                    val closest = obstacles.minByOrNull { it.pos.distSqr(npcPos) }
-                    closest?.claimedBy = npc
-                    return closest
+                    candidates.add(block)
                 }
 
                 if (candidates.isNotEmpty()) {
-                    val minPriority = candidates.minOf { getPlacementPriority(it.blockData.material) }
-                    val priorityBlocks = candidates.filter { getPlacementPriority(it.blockData.material) == minPriority }
-                    val closest = priorityBlocks.minByOrNull { it.pos.distSqr(npcPos) }
+                    val closest = candidates.minByOrNull { it.pos.distSqr(npcPos) }
                     closest?.claimedBy = npc
                     return closest
+                }
+            } else {
+                val yLevels = constructionList.map { it.pos.y }.distinct().sorted()
+                for (y in yLevels) {
+                    val activeLayer = constructionList.filter { it.pos.y == y }
+
+                    val obstacles = mutableListOf<BlockToPlace>()
+                    val candidates = mutableListOf<BlockToPlace>()
+
+                    for (block in activeLayer) {
+                        val currentBlock = world.getBlockAt(block.pos.x, block.pos.y, block.pos.z)
+                        val currentType = currentBlock.type
+
+                        if (currentBlock.blockData == block.blockData) {
+                            block.isPlaced = true
+                            continue
+                        }
+
+                        val isPathTransformation = currentType.isShovelable() && block.blockData.material == Material.DIRT_PATH
+                        if (isPathTransformation) {
+                            candidates.add(block)
+                            continue
+                        }
+
+                        val isFarmlandTransformation = currentType.isShovelable() && block.blockData.material == Material.FARMLAND
+                        if (isFarmlandTransformation) {
+                            candidates.add(block)
+                            continue
+                        }
+
+                        if (currentBlock.isIgnorableObstacle()) {
+                            candidates.add(block)
+                            continue
+                        }
+
+                        obstacles.add(block)
+                    }
+
+                    if (obstacles.isNotEmpty()) {
+                        val closest = obstacles.minByOrNull { it.pos.distSqr(npcPos) }
+                        closest?.claimedBy = npc
+                        return closest
+                    }
+
+                    if (candidates.isNotEmpty()) {
+                        val minPriority = candidates.minOf { getPlacementPriority(it.blockData.material) }
+                        val priorityBlocks = candidates.filter { getPlacementPriority(it.blockData.material) == minPriority }
+                        val closest = priorityBlocks.minByOrNull { it.pos.distSqr(npcPos) }
+                        closest?.claimedBy = npc
+                        return closest
+                    }
                 }
             }
         }

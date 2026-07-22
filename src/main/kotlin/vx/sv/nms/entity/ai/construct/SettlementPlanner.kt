@@ -355,7 +355,6 @@ class SettlementPlanner(val settlement: Settlement) {
                     val queue = pendingJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
                     buildJobsList.forEach { queue.offer(it) }
 
-                    // УБРАН СПАМ СОХРАНЕНИЕМ: данные держатся в памяти и запишутся при сохранении мира
                     return true
                 }
 
@@ -1141,6 +1140,7 @@ class SettlementPlanner(val settlement: Settlement) {
             val footprint2D = mutableMapOf<Pair<Int, Int>, Int>()
             val isWaterMap = mutableMapOf<Pair<Int, Int>, Boolean>()
             val isSuspendedMap = mutableMapOf<Pair<Int, Int>, Boolean>()
+            val sequenceMap = mutableMapOf<Pair<Int, Int>, Int>()
 
             for (i in pathPoints.indices) {
                 val pt = pathPoints[i]
@@ -1166,6 +1166,7 @@ class SettlementPlanner(val settlement: Settlement) {
                             footprint2D[key] = centerRoadY
                             isWaterMap[key] = isWaterAtCenter
                             isSuspendedMap[key] = isSuspendedArray[i]
+                            sequenceMap[key] = i
                         }
                     }
                 }
@@ -1175,11 +1176,14 @@ class SettlementPlanner(val settlement: Settlement) {
             var blocksInJob = 0
             val maxBlocksPerJob = 64
 
-            for ((key, py) in footprint2D) {
+            val sortedFootprint = footprint2D.toList().sortedBy { sequenceMap[it.first] ?: 0 }
+
+            for ((key, py) in sortedFootprint) {
                 val px = key.first
                 val pz = key.second
                 val isWaterAtCenter = isWaterMap[key] ?: false
                 val isSuspended = isSuspendedMap[key] ?: false
+                val seqIdx = sequenceMap[key] ?: 0
 
                 if (abs(px - center.blockX) <= 5 && abs(pz - center.blockZ) <= 5) continue
                 if (abs(px - cx) <= halfW - 1 && abs(pz - cz) <= halfL - 1) continue
@@ -1201,7 +1205,7 @@ class SettlementPlanner(val settlement: Settlement) {
                 val clearStart = py + 1
                 val clearEnd = py + 3
                 for (y in clearStart..clearEnd) {
-                    currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true)
+                    currentRoadJob.addBlock(BlockPos(px, y, pz), airData, isRoad = true, sequenceIndex = seqIdx)
                 }
 
                 if (isWaterAtCenter) {
@@ -1215,13 +1219,13 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
 
                     if (isEdge) {
-                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_LOG.createBlockData(), isRoad = true)
-                        currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_LOG.createBlockData(), isRoad = true, sequenceIndex = seqIdx)
+                        currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true, sequenceIndex = seqIdx)
                     } else {
-                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true, sequenceIndex = seqIdx)
                         val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
                         slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
-                        currentRoadJob.addBlock(BlockPos(px, py - 1, pz), slabData, isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py - 1, pz), slabData, isRoad = true, sequenceIndex = seqIdx)
                     }
                 } else if (isSuspended) {
                     val isMovingX = abs(dX) > abs(dZ)
@@ -1232,22 +1236,22 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
 
                     if (isEdge) {
-                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true)
-                        currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), Material.OAK_PLANKS.createBlockData(), isRoad = true, sequenceIndex = seqIdx)
+                        currentRoadJob.addBlock(BlockPos(px, py + 1, pz), Material.OAK_FENCE.createBlockData(), isRoad = true, sequenceIndex = seqIdx)
                     } else {
                         val slabData = Material.OAK_SLAB.createBlockData() as org.bukkit.block.data.type.Slab
                         slabData.type = org.bukkit.block.data.type.Slab.Type.TOP
-                        currentRoadJob.addBlock(BlockPos(px, py, pz), slabData, isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), slabData, isRoad = true, sequenceIndex = seqIdx)
                     }
                 } else {
                     for (y in naturalBlockY until py) {
-                        currentRoadJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, y, pz), Material.DIRT.createBlockData(), isRoad = true, sequenceIndex = seqIdx)
                     }
 
                     if (currentBlock.isLiquid) {
-                        currentRoadJob.addBlock(BlockPos(px, py, pz), cobbleData, isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), cobbleData, isRoad = true, sequenceIndex = seqIdx)
                     } else {
-                        currentRoadJob.addBlock(BlockPos(px, py, pz), roadBlockData, isRoad = true)
+                        currentRoadJob.addBlock(BlockPos(px, py, pz), roadBlockData, isRoad = true, sequenceIndex = seqIdx)
                     }
                 }
 

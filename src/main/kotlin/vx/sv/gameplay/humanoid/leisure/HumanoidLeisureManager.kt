@@ -25,27 +25,14 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.abs
 import kotlin.random.Random
 
-/**
- * Manages leisure activities for Humanoid NPCs, allowing them to dynamically search for
- * seating areas (benches, sofas), socialize with friends, and consume food or drinks.
- */
 class HumanoidLeisureManager : Listener {
 
     private val config get() = plugin.gameplayManager.config.leisure
 
-    /**
-     * Represents the current phase of the NPC's leisure activity.
-     */
     enum class LeisureState { PATHING, SITTING }
 
-    /**
-     * Represents the NPC's desired environment for their leisure activity.
-     */
     enum class Preference { INDOOR, OUTDOOR }
 
-    /**
-     * Data class holding the properties of an ongoing leisure session.
-     */
     data class LeisureSession(
         val villager: Villager,
         val targetSeat: Location,
@@ -61,13 +48,12 @@ class HumanoidLeisureManager : Listener {
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
 
-        // ТИКЕР 1: Обычный дневной досуг (работает только днем, по одному кандидату, соблюдая лимиты)
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
             if (activeSessions.size > config.maxActiveSessions) return@runTaskTimer
 
             val candidate = plugin.server.worlds
                 .filter { plugin.gameplayManager.allowedWorlds.contains(it) }
-                .filter { !isNightTime(it.time) } // Только днем
+                .filter { !isNightTime(it.time) }
                 .flatMap { it.entities }
                 .filterIsInstance<Villager>()
                 .filter {
@@ -88,17 +74,14 @@ class HumanoidLeisureManager : Listener {
             startLeisureSearch(candidate)
         }, 200L, config.globalTickerInterval)
 
-        // ТИКЕР 2: Форсированный ночной сбор бездомных у костра (вопрос выживания)
-        // Срабатывает каждые 5 секунд, игнорирует лимиты сессий и отправляет ВСЕХ бездомных к костру одновременно
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
             plugin.server.worlds
                 .filter { plugin.gameplayManager.allowedWorlds.contains(it) }
-                .filter { isNightTime(it.time) } // Только ночью
+                .filter { isNightTime(it.time) }
                 .forEach { world ->
                     val homelessList = world.getEntitiesByClass(Villager::class.java).filter { villager ->
                         val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager ?: return@filter false
 
-                        // ИСПРАВЛЕНО: Проверка HOME заменена на высокопроизводительное локальное сканирование тайлов кроватей
                         val hasBed = hasNearbyBed(villager)
 
                         !hasBed &&
@@ -113,12 +96,10 @@ class HumanoidLeisureManager : Listener {
                                 nmsVillager.activeBuildJob == null
                     }
 
-                    // Отправляем всех бездомных к костру одновременно
                     homelessList.forEach { startLeisureSearch(it) }
                 }
-        }, 60L, 100L) // Быстрый запуск (через 3 сек), повтор каждые 5 сек
+        }, 60L, 100L)
 
-        // Session control ticker: manages pathfinding, session timeouts, and eating/drinking chances.
         plugin.server.scheduler.runTaskTimer(plugin, { _ ->
             val iterator = activeSessions.values.iterator()
             val time = System.currentTimeMillis()
@@ -136,7 +117,6 @@ class HumanoidLeisureManager : Listener {
 
                 val isNight = isNightTime(npc.world.time)
                 if (isNight && session.preference == Preference.OUTDOOR) {
-                    // ИСПРАВЛЕНО: Проверка HOME заменена на локальное сканирование тайлов кроватей
                     val hasBed = hasNearbyBed(npc)
                     if (hasBed) {
                         standUp(npc, session)
@@ -168,17 +148,11 @@ class HumanoidLeisureManager : Listener {
         }, 20L, config.sessionTickerInterval)
     }
 
-    // =======================================================================================
-    // CORE LOGIC
-    // =======================================================================================
-
-    // ИСПРАВЛЕНО: Быстрый поиск кровати по загруженным тайлам в чанке (работает за доли микросекунды)
     private fun hasNearbyBed(villager: Villager): Boolean {
         val loc = villager.location
         val world = villager.world
         val centerChunk = loc.chunk
 
-        // Проверяем чанк жителя и 8 смежных чанков вокруг него
         for (dx in -1..1) {
             for (dz in -1..1) {
                 val cx = centerChunk.x + dx
@@ -188,7 +162,6 @@ class HumanoidLeisureManager : Listener {
                     for (tile in chunk.tileEntities) {
                         if (tile.type.name.endsWith("_BED")) {
                             val tileLoc = tile.location
-                            // Дополнительно страхуем расстояние до 24 блоков
                             if (tileLoc.distanceSquared(loc) <= 576.0) {
                                 return true
                             }
@@ -547,7 +520,7 @@ class HumanoidLeisureManager : Listener {
                             val frontBlockUp = frontBlock.getRelative(BlockFace.UP)
 
                             if (frontBlock.type.isSolid || frontBlockUp.type.isSolid) {
-                                { isSeat = false }
+                                isSeat = false
                             }
                         }
                     }
@@ -592,9 +565,6 @@ class HumanoidLeisureManager : Listener {
         return seats
     }
 
-    // =======================================================================================
-    // EVENTS
-    // =======================================================================================
     @EventHandler
     fun onPluginDisable(event: PluginDisableEvent) {
         if (event.plugin == plugin) {
