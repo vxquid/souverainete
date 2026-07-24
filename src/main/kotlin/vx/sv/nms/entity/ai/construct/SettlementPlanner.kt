@@ -38,7 +38,7 @@ data class BlockSaveData(
     val blockDataStr: String,
     val isPlaced: Boolean,
     val isRoad: Boolean,
-    val priority: Int = 0 // Сохраняем очередь строительства
+    val priority: Int = 0
 )
 
 data class SchematicJobSaveData(
@@ -428,7 +428,8 @@ class SettlementPlanner(val settlement: Settlement) {
             val cached = workstationCache[key]
 
             if (cached != null) {
-                if (s.world.getBlockAt(cached.x, cached.y, cached.z).type == targetMaterial) {
+                if (s.world.isChunkLoaded(cached.x shr 4, cached.z shr 4) &&
+                    s.world.getBlockAt(cached.x, cached.y, cached.z).type == targetMaterial) {
                     return cached
                 }
                 workstationCache.remove(key)
@@ -437,19 +438,30 @@ class SettlementPlanner(val settlement: Settlement) {
             if (activeScans.add(key)) {
                 val records = buildings[s.data.id]?.toList() ?: run { activeScans.remove(key); return null }
                 val world = s.world
+                val nmsLevel = (world as org.bukkit.craftbukkit.CraftWorld).handle
+                val mutablePos = BlockPos.MutableBlockPos()
 
                 var found: BlockPos? = null
 
                 scan@ for (record in records) {
                     val box = record.box
-                    for (x in box.minX.toInt()..box.maxX.toInt()) {
-                        for (z in box.minZ.toInt()..box.maxZ.toInt()) {
+                    val minX = box.minX.toInt()
+                    val maxX = box.maxX.toInt()
+                    val minZ = box.minZ.toInt()
+                    val maxZ = box.maxZ.toInt()
+                    val searchMinY = box.minY.toInt() - 3
+                    val searchMaxY = box.maxY.toInt()
+
+                    for (x in minX..maxX) {
+                        for (z in minZ..maxZ) {
                             if (!world.isChunkLoaded(x shr 4, z shr 4)) continue
 
-                            val searchMinY = box.minY.toInt() - 3
-                            val searchMaxY = box.maxY.toInt()
                             for (y in searchMinY..searchMaxY) {
-                                if (world.getBlockAt(x, y, z).type == targetMaterial) {
+                                mutablePos.set(x, y, z)
+                                val blockState = nmsLevel.getBlockState(mutablePos)
+                                val mat = org.bukkit.craftbukkit.util.CraftMagicNumbers.getMaterial(blockState.block)
+
+                                if (mat == targetMaterial) {
                                     found = BlockPos(x, y, z)
                                     break@scan
                                 }
@@ -562,7 +574,12 @@ class SettlementPlanner(val settlement: Settlement) {
             return false
         }
 
+        // ЗАЩИТА ОТ ФОРСЛОАДА ЧАНКОВ
+        // БЕЗОПАСНАЯ ПРОВЕРКА ВЫСОТЫ БЕЗ ФОРСЛОАДА ЧАНКОВ
         fun getHighestGroundYAt(world: World, x: Int, z: Int): Int {
+            if (!world.isChunkLoaded(x shr 4, z shr 4)) {
+                return -999 // Возвращаем маркер незагруженного чанка
+            }
             val nmsLevel = (world as org.bukkit.craftbukkit.CraftWorld).handle
             var y = world.getHighestBlockYAt(x, z)
 
@@ -606,7 +623,7 @@ class SettlementPlanner(val settlement: Settlement) {
                     block.blockData.asString,
                     block.isPlaced,
                     block.isRoad,
-                    block.priority // Сохраняем очередность
+                    block.priority
                 )
             }
             return SchematicJobSaveData(job.jobId.toString(), blockSaves)
@@ -617,7 +634,6 @@ class SettlementPlanner(val settlement: Settlement) {
             saveData.blocks.forEach { bSave ->
                 val pos = BlockPos(bSave.x, bSave.y, bSave.z)
                 val blockData = Bukkit.createBlockData(bSave.blockDataStr)
-                // Быстрая O(1) запись без вызова тяжелых сортировок getBlocks()
                 job.addBlock(
                     pos,
                     blockData,
@@ -631,9 +647,15 @@ class SettlementPlanner(val settlement: Settlement) {
 
         fun saveBuildingsToWorld(world: World) {
             val pdc = world.persistentDataContainer
-            val saveData = mutableMapOf<String, SettlementPlannerSaveData>()
-
             val worldSettlements = SettlementManager.settlements[world]?.toList() ?: emptyList()
+
+            if (worldSettlements.isEmpty()) {
+                val clearTask = Runnable { pdc.remove(worldBuildingsKey) }
+                if (Bukkit.isPrimaryThread()) clearTask.run() else Bukkit.getScheduler().runTask(plugin, clearTask)
+                return
+            }
+
+            val saveData = mutableMapOf<String, SettlementPlannerSaveData>()
 
             worldSettlements.forEach { settlement ->
                 val settlementId = settlement.data.id
@@ -663,41 +685,29 @@ class SettlementPlanner(val settlement: Settlement) {
                 )
             }
 
-            // Если список поселений пуст, очищаем PDC в основном потоке
-            if (saveData.isEmpty()) {
-                if (Bukkit.isPrimaryThread()) {
-                    pdc.remove(worldBuildingsKey)
-                } else {
-                    Bukkit.getScheduler().runTask(plugin, Runnable { pdc.remove(worldBuildingsKey) })
-                }
-                return
-            }
-
-            // Создаем JSON снимка данных до ухода в фоновый поток
-            val jsonString = gson.toJson(saveData)
-
-            val executeSave = {
+            val executeSaveTask = Runnable {
                 try {
+                    val jsonString = gson.toJson(saveData)
                     val compressedBytes = compress(jsonString)
-                    // Во время выключения плагина (onDisable) пишем напрямую без BukkitScheduler
-                    if (Bukkit.isPrimaryThread() || !plugin.isEnabled) {
+
+                    val applyToPdcTask = Runnable {
                         pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+                    }
+
+                    if (Bukkit.isPrimaryThread()) {
+                        applyToPdcTask.run()
                     } else {
-                        Bukkit.getScheduler().runTask(plugin, Runnable {
-                            pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
-                        })
+                        Bukkit.getScheduler().runTask(plugin, applyToPdcTask)
                     }
                 } catch (e: Exception) {
                     plugin.logger.severe("Error saving building data for world ${world.name}: ${e.message}")
                 }
             }
 
-            if (Bukkit.isPrimaryThread() && plugin.isEnabled) {
-                Bukkit.getScheduler().runTaskAsynchronously(plugin, Runnable {
-                    executeSave()
-                })
+            if (plugin.isEnabled) {
+                Bukkit.getScheduler().runTaskAsynchronously(plugin, executeSaveTask)
             } else {
-                executeSave()
+                executeSaveTask.run()
             }
         }
 
@@ -710,7 +720,6 @@ class SettlementPlanner(val settlement: Settlement) {
             } else if (pdc.has(worldBuildingsKey, PersistentDataType.STRING)) {
                 val legacyJson = pdc.get(worldBuildingsKey, PersistentDataType.STRING) ?: return
                 val compressedBytes = compress(legacyJson)
-                // Записываем байтовый массив поверх строки без последующего удаления ключа
                 pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
                 legacyJson
             } else {
@@ -1068,6 +1077,8 @@ class SettlementPlanner(val settlement: Settlement) {
             for (i in 0 until pathPoints.size) {
                 val px = pathPoints[i].x
                 val pz = pathPoints[i].z
+                if (!world.isChunkLoaded(px shr 4, pz shr 4)) continue
+
                 val natY = getHighestGroundYAt(world, px, pz).toDouble()
                 val surfY = world.getHighestBlockYAt(px, pz).toDouble()
                 val surfBlock = world.getBlockAt(px, surfY.toInt(), pz)
@@ -1225,6 +1236,8 @@ class SettlementPlanner(val settlement: Settlement) {
                     }
                 }
                 if (isInsideAnyBuilding) continue
+
+                if (!world.isChunkLoaded(px shr 4, pz shr 4)) continue
 
                 val naturalBlockY = getHighestGroundYAt(world, px, pz)
                 val currentBlock = world.getBlockAt(px, py, pz)
@@ -1385,6 +1398,8 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 val absX = cx - width / 2 + x
                 val absZ = cz - length / 2 + z
+                if (!world.isChunkLoaded(absX shr 4, absZ shr 4)) continue
+
                 val highest = getCachedHighest(absX, absZ, x, z)
                 val blockType = world.getBlockAt(absX, highest, absZ).type
 

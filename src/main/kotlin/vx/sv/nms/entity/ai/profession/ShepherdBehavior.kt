@@ -226,8 +226,8 @@ class ShepherdBehavior(
             villager.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
             cachedTargetSheep = null
 
-            // ИСПРАВЛЕНО: Если овец нет — ИИ засыпает на 10 секунд и даёт жителю пойти поработать строителем
-            noWorkUntil = gameTime + 200L
+            // РАЗМЫТИЕ ТАЙМАУТА ДЛЯ ПРЕДОТВРАЩЕНИЯ ОДНОВРЕМЕННЫХ СПАЙКОВ (8-12 сек)
+            noWorkUntil = gameTime + 160L + world.random.nextInt(80)
         }
     }
 

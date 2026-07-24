@@ -92,8 +92,8 @@ class ButcherBehavior(
             villager.setItemInHand(InteractionHand.MAIN_HAND, net.minecraft.world.item.ItemStack.EMPTY)
             cachedTargetSheep = null
 
-            // ИСПРАВЛЕНО: Если овец для забоя нет — ИИ засыпает на 10 секунд и дает жителю пойти строить дома
-            noWorkUntil = gameTime + 200L
+            // РАЗМЫТИЕ ТАЙМАУТА ДЛЯ ПРЕДОТВРАЩЕНИЯ ОДНОВРЕМЕННЫХ СПАЙКОВ (8-12 сек)
+            noWorkUntil = gameTime + 160L + world.random.nextInt(80)
         }
     }
 

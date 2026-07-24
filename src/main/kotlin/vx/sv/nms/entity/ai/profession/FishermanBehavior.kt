@@ -143,6 +143,10 @@ class FishermanBehavior(
                 var foundShore: BlockPos? = null
                 val r = 16
 
+                val nmsLevel = (bukkitWorld as org.bukkit.craftbukkit.CraftWorld).handle
+                val mutablePos = BlockPos.MutableBlockPos()
+                val mutableNeighborPos = BlockPos.MutableBlockPos()
+
                 waterScan@ for (wx in -r..r) {
                     for (wz in -r..r) {
                         if (wx == 0 && wz == 0) continue
@@ -170,10 +174,11 @@ class FishermanBehavior(
                         }
                         if (isWaterTooClose) continue
 
-                        val block = bukkitWorld.getBlockAt(px, highestY, pz)
-                        val blockType = block.type
+                        mutablePos.set(px, highestY, pz)
+                        val blockState = nmsLevel.getBlockState(mutablePos)
+                        val blockType = org.bukkit.craftbukkit.util.CraftMagicNumbers.getMaterial(blockState.block)
 
-                        if (blockType == Material.WATER || block.isLiquid) {
+                        if (blockType == Material.WATER) {
                             var isLargeWaterBody = true
                             checkWaterBody@ for (dx in -2..2) {
                                 for (dz in -2..2) {
@@ -184,7 +189,8 @@ class FishermanBehavior(
                                         break@checkWaterBody
                                     }
                                     val hY = bukkitWorld.getHighestBlockYAt(sx, sz)
-                                    val bType = bukkitWorld.getBlockAt(sx, hY, sz).type
+                                    mutableNeighborPos.set(sx, hY, sz)
+                                    val bType = org.bukkit.craftbukkit.util.CraftMagicNumbers.getMaterial(nmsLevel.getBlockState(mutableNeighborPos).block)
 
                                     if (bType != Material.WATER && bType != Material.KELP &&
                                         bType != Material.SEAGRASS && bType != Material.TALL_SEAGRASS &&
@@ -221,12 +227,12 @@ class FishermanBehavior(
                                         if (isTooCloseToAnotherFisher) continue@shoreScan
 
                                         val sY = bukkitWorld.getHighestBlockYAt(tx, tz)
-                                        val sBlock = bukkitWorld.getBlockAt(tx, sY, tz)
-                                        val sType = sBlock.type
+                                        mutableNeighborPos.set(tx, sY, tz)
+                                        val sType = org.bukkit.craftbukkit.util.CraftMagicNumbers.getMaterial(nmsLevel.getBlockState(mutableNeighborPos).block)
 
                                         if (sType.isSolid && sType != Material.WATER && sType != Material.LAVA) {
-                                            val feetBlock = sBlock.getRelative(BlockFace.UP)
-                                            val headBlock = feetBlock.getRelative(BlockFace.UP)
+                                            val feetBlock = bukkitWorld.getBlockAt(tx, sY + 1, tz)
+                                            val headBlock = bukkitWorld.getBlockAt(tx, sY + 2, tz)
                                             if (feetBlock.type == Material.AIR && headBlock.type == Material.AIR) {
                                                 foundWater = waterSpot
                                                 foundShore = BlockPos(tx, sY, tz)

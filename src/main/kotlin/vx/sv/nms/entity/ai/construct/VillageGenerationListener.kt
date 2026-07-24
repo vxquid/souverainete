@@ -31,7 +31,6 @@ class VillageGenerationListener : Listener {
     private val dormantSites = ConcurrentHashMap<UUID, MutableSet<DormantSite>>()
 
     init {
-        // Фоновая проверка спящих деревень каждые 40 тиков (2 секунды)
         object : org.bukkit.scheduler.BukkitRunnable() {
             override fun run() {
                 for (world in Bukkit.getWorlds()) {
@@ -44,27 +43,29 @@ class VillageGenerationListener : Listener {
                     val sites = loadDormantSites(world)
                     if (sites.isEmpty()) continue
 
-                    val sitesToActivate = mutableListOf<DormantSite>()
+                    val sitesToTry = mutableListOf<DormantSite>()
 
                     synchronized(sites) {
                         val iterator = sites.iterator()
                         while (iterator.hasNext()) {
                             val site = iterator.next()
                             val siteLoc = Location(world, site.x.toDouble(), 64.0, site.z.toDouble())
-                            // Активируем, если игрок подошел ближе 160 блоков
                             val hasPlayer = players.any { p -> p.location.distanceSquared(siteLoc) <= 25600.0 }
                             if (hasPlayer) {
-                                sitesToActivate.add(site)
-                                iterator.remove()
+                                sitesToTry.add(site)
                             }
                         }
                     }
 
-                    if (sitesToActivate.isNotEmpty()) {
-                        saveDormantSites(world)
-                        for (site in sitesToActivate) {
-                            plugin.logger.info("[Souverainete] Activating dormant village at (${site.x}, ${site.z}) as player came nearby.")
-                            generateVillageAt(world, site.x, site.z)
+                    for (site in sitesToTry) {
+                        generateVillageAt(world, site.x, site.z) { success ->
+                            if (success) {
+                                synchronized(sites) {
+                                    sites.remove(site)
+                                }
+                                saveDormantSites(world)
+                                plugin.logger.info("[Souverainete] Activated dormant village at (${site.x}, ${site.z}).")
+                            }
                         }
                     }
                 }
@@ -137,8 +138,11 @@ class VillageGenerationListener : Listener {
             val distance = 4.0 + random.nextDouble() * 4.0
             val spawnLoc = center.clone().add(Math.cos(angle) * distance, 1.0, Math.sin(angle) * distance)
 
+            if (!world.isChunkLoaded(spawnLoc.blockX shr 4, spawnLoc.blockZ shr 4)) continue
+
             val groundY = SettlementPlanner.getHighestGroundYAt(world, spawnLoc.blockX, spawnLoc.blockZ)
-            spawnLoc.y = groundY.toDouble() + 1.0
+            val finalY = if (groundY != -999) groundY else center.blockY
+            spawnLoc.y = finalY.toDouble() + 1.0
 
             world.spawn(spawnLoc, org.bukkit.entity.Sheep::class.java) { sheep ->
                 sheep.persistentDataContainer.set(
@@ -154,8 +158,11 @@ class VillageGenerationListener : Listener {
             val distance = 2.0 + random.nextDouble() * 3.0
             val spawnLoc = center.clone().add(Math.cos(angle) * distance, 1.0, Math.sin(angle) * distance)
 
+            if (!world.isChunkLoaded(spawnLoc.blockX shr 4, spawnLoc.blockZ shr 4)) continue
+
             val groundY = SettlementPlanner.getHighestGroundYAt(world, spawnLoc.blockX, spawnLoc.blockZ)
-            spawnLoc.y = groundY.toDouble() + 1.0
+            val finalY = if (groundY != -999) groundY else center.blockY
+            spawnLoc.y = finalY.toDouble() + 1.0
 
             world.spawn(spawnLoc, org.bukkit.entity.Cat::class.java) { cat ->
                 cat.persistentDataContainer.set(
@@ -236,7 +243,7 @@ class VillageGenerationListener : Listener {
             Bukkit.getScheduler().runTask(plugin, Runnable {
                 val centerApprox = Location(world, centerX.toDouble(), 64.0, centerZ.toDouble())
                 val hasNearbyPlayer = world.players.any { player ->
-                    player.location.distanceSquared(centerApprox) <= 65536.0 // 256 блоков
+                    player.location.distanceSquared(centerApprox) <= 65536.0
                 }
 
                 if (hasNearbyPlayer) {
@@ -249,121 +256,141 @@ class VillageGenerationListener : Listener {
         }
     }
 
-    private fun generateVillageAt(world: World, centerX: Int, centerZ: Int) {
-        if (!world.worldFolder.exists()) return
-
-        val worldSettlements = SettlementManager.settlements[world] ?: emptyList()
-        val approxLoc = Location(world, centerX.toDouble(), 64.0, centerZ.toDouble())
-        if (worldSettlements.any { it.data.center.distanceSquared(approxLoc) < 10000.0 }) {
+    private fun generateVillageAt(world: World, centerX: Int, centerZ: Int, onComplete: ((Boolean) -> Unit)? = null) {
+        if (!world.worldFolder.exists()) {
+            onComplete?.invoke(false)
             return
         }
 
-        var bestX = centerX
-        var bestZ = centerZ
-        var bestY = world.getHighestBlockYAt(bestX, bestZ)
-        var minHeightDifference = Int.MAX_VALUE
-        var highestElevationOfFlattest = Int.MIN_VALUE
-        var foundDryLand = false
+        val chunkX = centerX shr 4
+        val chunkZ = centerZ shr 4
 
-        for (ox in -12..12) {
-            for (oz in -12..12) {
-                val cx = centerX + ox
-                val cz = centerZ + oz
+        // Подгружаем чанк асинхронно через Paper API
+        world.getChunkAtAsync(chunkX, chunkZ).thenAccept { _ ->
+            Bukkit.getScheduler().runTask(plugin, Runnable {
+                val worldSettlements = SettlementManager.settlements[world] ?: emptyList()
+                val approxLoc = Location(world, centerX.toDouble(), 64.0, centerZ.toDouble())
+                if (worldSettlements.any { it.data.center.distanceSquared(approxLoc) < 10000.0 }) {
+                    onComplete?.invoke(false)
+                    return@Runnable
+                }
 
-                var minY = Int.MAX_VALUE
-                var maxY = Int.MIN_VALUE
-                var hasWater = false
+                var bestX = centerX
+                var bestZ = centerZ
+                var bestY = world.getHighestBlockYAt(bestX, bestZ)
+                var minHeightDifference = Int.MAX_VALUE
+                var highestElevationOfFlattest = Int.MIN_VALUE
+                var foundDryLand = false
 
-                for (px in -5..5) {
-                    for (pz in -5..5) {
-                        val absX = cx + px
-                        val absZ = cz + pz
+                for (ox in -12..12) {
+                    for (oz in -12..12) {
+                        val cx = centerX + ox
+                        val cz = centerZ + oz
 
-                        val highestY = world.getHighestBlockYAt(absX, absZ)
-                        val surfaceBlock = world.getBlockAt(absX, highestY, absZ)
+                        if (!world.isChunkLoaded(cx shr 4, cz shr 4)) continue
 
-                        if (surfaceBlock.isLiquid || surfaceBlock.type == Material.WATER || surfaceBlock.type.name.contains("ICE") || surfaceBlock.type.name.contains("WATER")) {
-                            hasWater = true
-                            break
+                        var minY = Int.MAX_VALUE
+                        var maxY = Int.MIN_VALUE
+                        var hasWater = false
+
+                        for (px in -5..5) {
+                            for (pz in -5..5) {
+                                val absX = cx + px
+                                val absZ = cz + pz
+
+                                if (!world.isChunkLoaded(absX shr 4, absZ shr 4)) continue
+
+                                val highestY = world.getHighestBlockYAt(absX, absZ)
+                                val surfaceBlock = world.getBlockAt(absX, highestY, absZ)
+
+                                if (surfaceBlock.isLiquid || surfaceBlock.type == Material.WATER || surfaceBlock.type.name.contains("ICE") || surfaceBlock.type.name.contains("WATER")) {
+                                    hasWater = true
+                                    break
+                                }
+
+                                val hy = SettlementPlanner.getHighestGroundYAt(world, absX, absZ)
+                                if (hy == -999) continue
+
+                                if (hy < minY) minY = hy
+                                if (hy > maxY) maxY = hy
+                            }
+                            if (hasWater) break
                         }
 
-                        val hy = SettlementPlanner.getHighestGroundYAt(world, absX, absZ)
-                        if (hy < minY) minY = hy
-                        if (hy > maxY) maxY = hy
+                        if (hasWater || minY == Int.MAX_VALUE || maxY == Int.MIN_VALUE) continue
+
+                        foundDryLand = true
+                        val diff = maxY - minY
+
+                        if (diff < minHeightDifference || (diff == minHeightDifference && maxY > highestElevationOfFlattest)) {
+                            minHeightDifference = diff
+                            highestElevationOfFlattest = maxY
+                            bestX = cx
+                            bestZ = cz
+                            bestY = maxY
+                        }
                     }
-                    if (hasWater) break
                 }
 
-                if (hasWater) continue
-
-                foundDryLand = true
-                val diff = maxY - minY
-
-                if (diff < minHeightDifference || (diff == minHeightDifference && maxY > highestElevationOfFlattest)) {
-                    minHeightDifference = diff
-                    highestElevationOfFlattest = maxY
-                    bestX = cx
-                    bestZ = cz
-                    bestY = maxY
+                if (!foundDryLand) {
+                    plugin.logger.info("[Souverainete] Spawn of the settlement is cancelled: suitable land is absent in the generation area.")
+                    onComplete?.invoke(false)
+                    return@Runnable
                 }
-            }
+
+                val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
+
+                val groundY = SettlementPlanner.getHighestGroundYAt(world, bestX + 4, bestZ)
+                val safeCampfireLoc = Location(world, bestX.toDouble() + 4.0, (if (groundY != -999) groundY else bestY).toDouble() + 1.0, bestZ.toDouble())
+                safeCampfireLoc.block.type = Material.CAMPFIRE
+
+                val citizens = mutableSetOf<BukkitVillager>()
+                for (i in 0 until 15) {
+                    val spawnLoc = centerLoc.clone().add(1.5, 1.0, 1.5)
+                    val v = world.spawn(spawnLoc, BukkitVillager::class.java) { villager ->
+                        villager.profession = BukkitVillager.Profession.NONE
+                        villager.villagerLevel = 1
+                    }
+                    citizens.add(v)
+                }
+
+                val newData = Settlement.SettlementData(
+                    UUID.randomUUID(),
+                    world.uid,
+                    "Settlement",
+                    centerLoc,
+                    System.currentTimeMillis(),
+                    "VILLAGER_RACE"
+                )
+
+                val settlement = Settlement(newData, citizens)
+
+                val manager = SettlementManager()
+                manager.generateSettlementName(settlement)
+
+                val planner = SettlementPlanner(settlement)
+
+                spawnVillageAnimals(centerLoc)
+
+                planner.planBuilding(VanillaBuildingType.FARM)
+                planner.planBuilding(VanillaBuildingType.WOOD_FARM)
+                planner.planBuilding(VanillaBuildingType.MINE)
+                planner.planBuilding(VanillaBuildingType.SHEPHERD)
+                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)
+                planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)
+                planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)
+                planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)
+
+                planner.planBuilding(VanillaBuildingType.TOWN_HALL)
+                planner.planMeetingPointAtCenter()
+
+                repeat(10) {
+                    planner.planNextPriorityBuilding()
+                }
+
+                SettlementManager.saveSettlements(world)
+                onComplete?.invoke(true)
+            })
         }
-
-        if (!foundDryLand) {
-            plugin.logger.info("[Souverainete] Spawn of the settlement is cancelled: suitable land is absent in the generation area.")
-            return
-        }
-
-        val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
-
-        val groundY = SettlementPlanner.getHighestGroundYAt(world, bestX + 4, bestZ)
-        val safeCampfireLoc = Location(world, bestX.toDouble() + 4.0, groundY.toDouble() + 1.0, bestZ.toDouble())
-        safeCampfireLoc.block.type = Material.CAMPFIRE
-
-        val citizens = mutableSetOf<BukkitVillager>()
-        for (i in 0 until 15) {
-            val spawnLoc = centerLoc.clone().add(1.5, 1.0, 1.5)
-            val v = world.spawn(spawnLoc, BukkitVillager::class.java) { villager ->
-                villager.profession = BukkitVillager.Profession.NONE
-                villager.villagerLevel = 1
-            }
-            citizens.add(v)
-        }
-
-        val newData = Settlement.SettlementData(
-            UUID.randomUUID(),
-            world.uid,
-            "Settlement",
-            centerLoc,
-            System.currentTimeMillis(),
-            "VILLAGER_RACE"
-        )
-
-        val settlement = Settlement(newData, citizens)
-
-        val manager = SettlementManager()
-        manager.generateSettlementName(settlement)
-
-        val planner = SettlementPlanner(settlement)
-
-        spawnVillageAnimals(centerLoc)
-
-        planner.planBuilding(VanillaBuildingType.FARM)
-        planner.planBuilding(VanillaBuildingType.WOOD_FARM)
-        planner.planBuilding(VanillaBuildingType.MINE)
-        planner.planBuilding(VanillaBuildingType.SHEPHERD)
-        planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)
-        planner.planBuilding(VanillaBuildingType.HOUSE_SMALL)
-        planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)
-        planner.planBuilding(VanillaBuildingType.HOUSE_LARGE)
-
-        planner.planBuilding(VanillaBuildingType.TOWN_HALL)
-        planner.planMeetingPointAtCenter()
-
-        repeat(10) {
-            planner.planNextPriorityBuilding()
-        }
-
-        SettlementManager.saveSettlements(world)
     }
 }

@@ -111,17 +111,32 @@ class FarmerBehavior(
             var foundTill: BlockPos? = null
             var foundBoneMeal: BlockPos? = null
 
+            val nmsLevel = (bukkitWorld as org.bukkit.craftbukkit.CraftWorld).handle
+            val mutablePos = BlockPos.MutableBlockPos()
+            val mutablePosAbove = BlockPos.MutableBlockPos()
+
             scanCrops@ for (box in farmBoxes) {
-                for (x in box.minX.toInt() until box.maxX.toInt()) {
-                    for (z in box.minZ.toInt() until box.maxZ.toInt()) {
+                val minX = box.minX.toInt()
+                val maxX = box.maxX.toInt()
+                val minZ = box.minZ.toInt()
+                val maxZ = box.maxZ.toInt()
+                val minY = box.minY.toInt()
+                val maxY = box.maxY.toInt()
+
+                for (x in minX until maxX) {
+                    for (z in minZ until maxZ) {
                         if (!bukkitWorld.isChunkLoaded(x shr 4, z shr 4)) continue
 
-                        for (y in box.minY.toInt()..box.maxY.toInt()) {
-                            val block = bukkitWorld.getBlockAt(x, y, z)
-                            val type = block.type
-                            val typeAbove = block.getRelative(BlockFace.UP).type
+                        for (y in minY..maxY) {
+                            mutablePos.set(x, y, z)
+                            mutablePosAbove.set(x, y + 1, z)
+
+                            val state = nmsLevel.getBlockState(mutablePos)
+                            val type = org.bukkit.craftbukkit.util.CraftMagicNumbers.getMaterial(state.block)
+                            val typeAbove = org.bukkit.craftbukkit.util.CraftMagicNumbers.getMaterial(nmsLevel.getBlockState(mutablePosAbove).block)
 
                             if (type == Material.WHEAT || type == Material.CARROTS || type == Material.POTATOES || type == Material.BEETROOTS) {
+                                val block = bukkitWorld.getBlockAt(x, y, z)
                                 val data = block.blockData as? Ageable
                                 if (data != null) {
                                     if (data.age == data.maximumAge) {
