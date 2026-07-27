@@ -574,11 +574,9 @@ class SettlementPlanner(val settlement: Settlement) {
             return false
         }
 
-        // ЗАЩИТА ОТ ФОРСЛОАДА ЧАНКОВ
-        // БЕЗОПАСНАЯ ПРОВЕРКА ВЫСОТЫ БЕЗ ФОРСЛОАДА ЧАНКОВ
         fun getHighestGroundYAt(world: World, x: Int, z: Int): Int {
             if (!world.isChunkLoaded(x shr 4, z shr 4)) {
-                return -999 // Возвращаем маркер незагруженного чанка
+                return -999
             }
             val nmsLevel = (world as org.bukkit.craftbukkit.CraftWorld).handle
             var y = world.getHighestBlockYAt(x, z)
@@ -852,7 +850,11 @@ class SettlementPlanner(val settlement: Settlement) {
             center.x - 6.0, center.y - 1.0, center.z - 6.0,
             center.x + 6.0, center.y + 6.0, center.z + 6.0
         )
-        val list = buildings.computeIfAbsent(settlement.data.id) { Collections.synchronizedList(mutableListOf()) }
+        val list = buildings[settlement.data.id] ?: run {
+            val newList = Collections.synchronizedList(mutableListOf<BuildingRecord>())
+            buildings[settlement.data.id] = newList
+            newList
+        }
 
         synchronized(list) {
             if (list.none { it.type == "MEETING_POINT" }) {
@@ -967,26 +969,43 @@ class SettlementPlanner(val settlement: Settlement) {
             VanillaBuildingType.TEMPLE
         )
 
-        val unbuiltFunctional = advancedFunctional.filter { (existingCounts[it.typeName] ?: 0) < 1 }
+        // Подсчёт общего количества жилых домов и рабочих мест для поддержания идеального баланса 50/50
+        val residentialTypes = setOf("HOUSE_SMALL", "HOUSE_MEDIUM", "HOUSE_LARGE")
+        val functionalTypes = setOf(
+            "TOWN_HALL", "BLACKSMITH", "BAKERY", "FARM", "LIBRARY", "ARMORY",
+            "SHEPHERD", "TEMPLE", "WOOD_FARM", "STABLE", "ANIMAL_PEN", "CARTOGRAPHER", "MINE"
+        )
+
+        val totalResidential = allTypes.count { it in residentialTypes }
+        val totalFunctional = allTypes.count { it in functionalTypes }
 
         val lastWasHouse = lastTypeName.startsWith("HOUSE_")
 
-        if (lastWasHouse) {
-            if (unbuiltFunctional.isNotEmpty()) {
-                requestPlanning(settlement, unbuiltFunctional.random())
-                return true
-            } else if (canBuildHouse) {
-                val nextHouse = housePriority.first { (existingCounts[it.first.typeName] ?: 0) < it.second }
+        // Вычисляем, что строить следующим для строгого чередования и поддержания баланса
+        val buildHouseNext = when {
+            totalFunctional > totalResidential -> true
+            totalResidential > totalFunctional -> false
+            else -> !lastWasHouse // Если количество равно, чередуем на основе последней постройки
+        }
+
+        if (buildHouseNext && canBuildHouse) {
+            val nextHouse = housePriority.firstOrNull { (existingCounts[it.first.typeName] ?: 0) < it.second }
+            if (nextHouse != null) {
                 requestPlanning(settlement, nextHouse.first)
                 return true
             }
         } else {
-            if (canBuildHouse) {
-                val nextHouse = housePriority.first { (existingCounts[it.first.typeName] ?: 0) < it.second }
-                requestPlanning(settlement, nextHouse.first)
-                return true
-            } else if (unbuiltFunctional.isNotEmpty()) {
-                requestPlanning(settlement, unbuiltFunctional.random())
+            // Строим рабочее/функциональное здание
+            val unbuilt = advancedFunctional.filter { (existingCounts[it.typeName] ?: 0) < 1 }
+            val nextFunc = if (unbuilt.isNotEmpty()) {
+                unbuilt.random()
+            } else {
+                // Если все построены хотя бы один раз, выбираем то, у которого меньше всего копий в поселении
+                advancedFunctional.minByOrNull { existingCounts[it.typeName] ?: 0 }
+            }
+
+            if (nextFunc != null) {
+                requestPlanning(settlement, nextFunc)
                 return true
             }
         }
