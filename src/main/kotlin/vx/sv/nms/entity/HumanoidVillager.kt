@@ -877,4 +877,8 @@ class HumanoidVillager(
         }
     }
 
+    override fun getMaxFallDistance(): Int {
+        return 10
+    }
+
 }

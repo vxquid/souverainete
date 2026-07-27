@@ -175,6 +175,40 @@ class ConstructionBehavior(
     }
 
     private fun removeWholeTree(startBlock: Block, settlement: Settlement?) {
+        val settlementId = settlement?.data?.id
+        val protectedBlocks = mutableSetOf<BlockPos>()
+        val completedBoxes = mutableListOf<BoundingBox>()
+
+        if (settlementId != null) {
+            val activeList = SettlementPlanner.activeJobs[settlementId]?.toList() ?: emptyList()
+            val pendingList = SettlementPlanner.pendingJobs[settlementId]?.toList() ?: emptyList()
+
+            // 1. Собираем все координаты блоков из строящихся и запланированных схем
+            for (job in activeList) {
+                job.getBlocks().forEach { block ->
+                    if (!block.blockData.material.isAir) {
+                        protectedBlocks.add(block.pos)
+                    }
+                }
+            }
+            for (job in pendingList) {
+                job.getBlocks().forEach { block ->
+                    if (!block.blockData.material.isAir) {
+                        protectedBlocks.add(block.pos)
+                    }
+                }
+            }
+
+            // 2. Собираем коробки уже построенных зданий (у которых нет активных задач)
+            val records = SettlementPlanner.buildings[settlementId]?.toList() ?: emptyList()
+            for (record in records) {
+                val isUnderConstruction = activeList.any { it.jobId == record.jobId } || pendingList.any { it.jobId == record.jobId }
+                if (!isUnderConstruction) {
+                    completedBoxes.add(record.box)
+                }
+            }
+        }
+
         val farmBoxes = settlement?.let { s ->
             SettlementPlanner.buildings[s.data.id]?.filter { it.type.startsWith("FARM") }?.map { it.box }
         } ?: emptyList()
@@ -192,7 +226,20 @@ class ConstructionBehavior(
                     for (dz in -1..1) {
                         if (dx == 0 && dy == 0 && dz == 0) continue
                         val neighbor = current.getRelative(dx, dy, dz)
+                        val neighborPos = BlockPos(neighbor.x, neighbor.y, neighbor.z)
+
                         if (isLogBlock(neighbor.type) && !targetLogs.contains(neighbor)) {
+                            // Защищаем блоки строящихся зданий
+                            if (protectedBlocks.contains(neighborPos)) continue
+
+                            // Защищаем блоки построенных зданий
+                            val inCompletedBuilding = completedBoxes.any { box ->
+                                neighbor.x >= box.minX && neighbor.x <= box.maxX &&
+                                        neighbor.y >= box.minY && neighbor.y <= box.maxY &&
+                                        neighbor.z >= box.minZ && neighbor.z <= box.maxZ
+                            }
+                            if (inCompletedBuilding) continue
+
                             val inFarm = farmBoxes.any { box ->
                                 neighbor.x >= box.minX && neighbor.x <= box.maxX &&
                                         neighbor.y >= box.minY && neighbor.y <= box.maxY &&
@@ -308,6 +355,38 @@ class ConstructionBehavior(
     }
 
     private fun findConnectedTrunk(startBlock: Block, settlement: Settlement?): Block? {
+        val settlementId = settlement?.data?.id
+        val protectedBlocks = mutableSetOf<BlockPos>()
+        val completedBoxes = mutableListOf<BoundingBox>()
+
+        if (settlementId != null) {
+            val activeList = SettlementPlanner.activeJobs[settlementId]?.toList() ?: emptyList()
+            val pendingList = SettlementPlanner.pendingJobs[settlementId]?.toList() ?: emptyList()
+
+            for (job in activeList) {
+                job.getBlocks().forEach { block ->
+                    if (!block.blockData.material.isAir) {
+                        protectedBlocks.add(block.pos)
+                    }
+                }
+            }
+            for (job in pendingList) {
+                job.getBlocks().forEach { block ->
+                    if (!block.blockData.material.isAir) {
+                        protectedBlocks.add(block.pos)
+                    }
+                }
+            }
+
+            val records = SettlementPlanner.buildings[settlementId]?.toList() ?: emptyList()
+            for (record in records) {
+                val isUnderConstruction = activeList.any { it.jobId == record.jobId } || pendingList.any { it.jobId == record.jobId }
+                if (!isUnderConstruction) {
+                    completedBoxes.add(record.box)
+                }
+            }
+        }
+
         val farmBoxes = settlement?.let { s ->
             SettlementPlanner.buildings[s.data.id]?.filter { it.type.startsWith("FARM") }?.map { it.box }
         } ?: emptyList()
@@ -320,8 +399,18 @@ class ConstructionBehavior(
         var processedCount = 0
         while (queue.isNotEmpty() && processedCount++ < 150) {
             val current = queue.removeFirst()
+            val currentPos = BlockPos(current.x, current.y, current.z)
 
             if (isLogBlock(current.type)) {
+                if (protectedBlocks.contains(currentPos)) continue
+
+                val inCompletedBuilding = completedBoxes.any { box ->
+                    current.x >= box.minX && current.x <= box.maxX &&
+                            current.y >= box.minY && current.y <= box.maxY &&
+                            current.z >= box.minZ && current.z <= box.maxZ
+                }
+                if (inCompletedBuilding) continue
+
                 val inFarm = farmBoxes.any { box ->
                     current.x >= box.minX && current.x <= box.maxX &&
                             current.y >= box.minY && current.y <= box.maxY &&

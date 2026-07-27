@@ -36,16 +36,14 @@ class TacticalAttackBehavior(
     private var strafeTime: Int = 0
     private var strafeClockwise: Boolean = true
     private var lastTargetPos: Vec3? = null
+    private var unseenTicks: Int = 0
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
-
         val tactic = (villager as Villager).bukkitLivingEntity.combatTactic
         if (tactic == PartyManager.CombatTactic.RANGED) {
             return false
         }
 
-        // --- ГЛАВНОЕ ИСПРАВЛЕНИЕ ---
-        // Если в руках стрелковое оружие — мы НЕ должны использовать тактику ближнего боя.
         if (villager.isHolding { it.`is`(Items.BOW) || it.`is`(Items.CROSSBOW) }) {
             return false
         }
@@ -66,8 +64,9 @@ class TacticalAttackBehavior(
         attackCooldown = 0
         retreatCooldown = 0
         strafeTime = 0
+        unseenTicks = 0
         strafeClockwise = Random.nextBoolean()
-        villager.isAggressive = true // Поднимает руки, если нет предмета (визуально)
+        villager.isAggressive = true
     }
 
     override fun stop(world: ServerLevel, villager: HumanoidVillager, time: Long) {
@@ -75,7 +74,7 @@ class TacticalAttackBehavior(
         val target = getAttackTarget(villager)
 
         villager.isAggressive = false
-        villager.stopUsingItem() // Опускаем щит при конце боя
+        villager.stopUsingItem()
 
         if (target == null || !target.isAlive) {
             brain.eraseMemory(MemoryModuleType.ATTACK_TARGET)
@@ -88,36 +87,42 @@ class TacticalAttackBehavior(
         val target = getAttackTarget(villager) ?: return
         val brain = villager.brain
 
+        val canSee = villager.sensing.hasLineOfSight(target)
+        if (!canSee) {
+            unseenTicks++
+            if (unseenTicks > 120) {
+                brain.eraseMemory(MemoryModuleType.ATTACK_TARGET)
+                stop(world, villager, time)
+                return
+            }
+        } else {
+            unseenTicks = 0
+        }
+
         brain.setMemory(MemoryModuleType.LOOK_TARGET, EntityTracker(target, true))
 
-        // --- 1. ЛОГИКА НИЗКОГО HP (ESCAPE) ---
         if (villager.health < villager.maxHealth * 0.30) {
             handleLowHealthFlee(villager, target)
             return
         }
 
-        // --- 2. ЛОГИКА ЩИТА ---
         handleShield(villager, target)
 
         val distanceSqr = villager.distanceToSqr(target)
         val reachSqr = getAttackReachSqr(villager, target)
 
-        // --- 3. ДВИЖЕНИЕ ---
-        // Если используем щит, скорость сильно падает
         val currentSpeed = if (villager.isBlocking) speedModifier * 0.5f else speedModifier
-        updateMovement(villager, target, distanceSqr, reachSqr, currentSpeed)
+        updateMovement(villager, target, distanceSqr, reachSqr, currentSpeed, canSee)
 
-        // --- 4. АТАКА ---
         if (attackCooldown > 0) attackCooldown--
         if (retreatCooldown > 0) retreatCooldown--
 
-        // Бьем, если достаем и кд прошел
-        if (distanceSqr <= reachSqr && attackCooldown <= 0 && retreatCooldown <= 5) {
-            // Если держали щит — опускаем на секунду для удара
+        // Ударяем только при видимости и досягаемости
+        if (canSee && distanceSqr <= reachSqr && attackCooldown <= 0 && retreatCooldown <= 5) {
             if (villager.isBlocking) villager.stopUsingItem()
 
             attackCooldown = attackDelay
-            retreatCooldown = 15 // Отскок после удара
+            retreatCooldown = 15
 
             villager.swing(InteractionHand.MAIN_HAND)
             villager.doHurtTarget(villager.level() as ServerLevel, target)
@@ -125,11 +130,10 @@ class TacticalAttackBehavior(
     }
 
     private fun handleLowHealthFlee(villager: HumanoidVillager, target: LivingEntity) {
-        villager.stopUsingItem() // Нельзя бежать с щитом быстро
+        villager.stopUsingItem()
 
-        // Вектор ОТ врага
         val fleeDir = villager.position().subtract(target.position()).normalize()
-        val fleePos = villager.position().add(fleeDir.scale(8.0)) // Бежим на 8 блоков от него
+        val fleePos = villager.position().add(fleeDir.scale(8.0))
 
         villager.brain.setMemory(
             MemoryModuleType.WALK_TARGET,
@@ -138,14 +142,10 @@ class TacticalAttackBehavior(
     }
 
     private fun handleShield(villager: HumanoidVillager, target: LivingEntity) {
-        // Проверяем, есть ли щит
         val hasShield = villager.mainHandItem.item is ShieldItem || villager.offhandItem.item is ShieldItem
         if (!hasShield) return
 
         val distanceSqr = villager.distanceToSqr(target)
-
-        // Логика блокирования:
-        // Блокируем, если враг близко (< 5 блоков) ИЛИ если кулдаун атаки еще не прошел (ждем в блоке)
         val shouldBlock = (distanceSqr < 25.0 || attackCooldown > 5) && !villager.isBlocking
 
         if (shouldBlock) {
@@ -154,9 +154,15 @@ class TacticalAttackBehavior(
         }
     }
 
-    private fun updateMovement(villager: HumanoidVillager, target: LivingEntity, distanceSqr: Double, reachSqr: Double, speed: Float) {
+    private fun updateMovement(
+        villager: HumanoidVillager,
+        target: LivingEntity,
+        distanceSqr: Double,
+        reachSqr: Double,
+        speed: Float,
+        canSee: Boolean
+    ) {
         if (retreatCooldown > 0) {
-            // Быстрый отход назад (не работает, если поднят щит, см. currentSpeed выше)
             val retreatDir = villager.position().subtract(target.position()).normalize()
             val retreatPos = villager.position().add(retreatDir.scale(4.0))
             villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(BlockPosTracker(BlockPos.containing(retreatPos)), speed * 1.2f, 0))
@@ -169,10 +175,10 @@ class TacticalAttackBehavior(
         }
 
         val chaseThreshold = (reachSqr + 3.5)
-        if (distanceSqr > chaseThreshold) {
+        if (distanceSqr > chaseThreshold || !canSee) {
+            // Если не видим цель — сближаемся напрямик по пути навигатора
             villager.brain.setMemory(MemoryModuleType.WALK_TARGET, WalkTarget(EntityTracker(target, false), speed, 0))
         } else {
-            // Стрейф
             if (lastTargetPos == null || lastTargetPos!!.distanceToSqr(target.position()) > 1.0 || strafeTime % 5 == 0) {
                 lastTargetPos = target.position()
                 val strafePos = getStrafePosition(villager, target)

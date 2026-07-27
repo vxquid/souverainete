@@ -31,9 +31,9 @@ class CrossbowAttackBehavior(
 
     private var state = CrossbowState.UNCHARGED
     private var attackDelay = 0
+    private var unseenTicks = 0
 
     override fun checkExtraStartConditions(level: ServerLevel, villager: HumanoidVillager): Boolean {
-        // Получаем Bukkit сущность для проверки PDC
         val bukkitVillager = villager.bukkitEntity as? Villager ?: return false
 
         val tactic = bukkitVillager.combatTactic
@@ -44,22 +44,20 @@ class CrossbowAttackBehavior(
         return villager.isHolding { it.`is`(Items.CROSSBOW) } && getTarget(villager) != null
     }
 
-    // --- ВАЖНЕЙШЕЕ ИСПРАВЛЕНИЕ ---
-    // Без этого метода поведение сбрасывается каждый тик, прерывая зарядку и ходьбу.
     override fun canStillUse(level: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
         return checkExtraStartConditions(level, villager)
     }
-    // -----------------------------
 
     override fun start(level: ServerLevel, villager: HumanoidVillager, time: Long) {
         villager.isAggressive = true
         state = CrossbowState.UNCHARGED
+        unseenTicks = 0
     }
 
     override fun stop(level: ServerLevel, villager: HumanoidVillager, time: Long) {
         villager.isAggressive = false
         villager.stopUsingItem()
-        villager.setChargingCrossbow(false) // Визуально опускаем руки
+        villager.setChargingCrossbow(false)
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
     }
@@ -67,6 +65,19 @@ class CrossbowAttackBehavior(
     override fun tick(level: ServerLevel, villager: HumanoidVillager, time: Long) {
         val target = getTarget(villager) ?: return
         val brain = villager.brain
+
+        val canSee = villager.sensing.hasLineOfSight(target)
+        if (!canSee) {
+            unseenTicks++
+            // Если не видим цель более 6 секунд — сбрасываем таргет
+            if (unseenTicks > 120) {
+                brain.eraseMemory(MemoryModuleType.ATTACK_TARGET)
+                stop(level, villager, time)
+                return
+            }
+        } else {
+            unseenTicks = 0
+        }
 
         brain.setMemory(MemoryModuleType.LOOK_TARGET, EntityTracker(target, true))
 
@@ -86,10 +97,9 @@ class CrossbowAttackBehavior(
             if (!villager.isUsingItem) {
                 state = CrossbowState.UNCHARGED
             }
-            // getChargeDuration возвращает время в тиках (25 по дефолту, меньше с Quick Charge)
             val chargeDuration = CrossbowItem.getChargeDuration(itemStack, villager)
             if (villager.ticksUsingItem >= chargeDuration) {
-                villager.releaseUsingItem() // Этот метод ставит компонент CHARGED
+                villager.releaseUsingItem()
                 state = CrossbowState.CHARGED
                 attackDelay = 20 + villager.random.nextInt(20)
                 villager.setChargingCrossbow(false)
@@ -99,15 +109,16 @@ class CrossbowAttackBehavior(
                 state = CrossbowState.READY_TO_ATTACK
             }
         } else if (state == CrossbowState.READY_TO_ATTACK) {
-            // Огонь!
-            villager.performRangedAttack(target, 1.0f)
-            state = CrossbowState.UNCHARGED
+            // Стреляем ТОЛЬКО если есть прямая видимость цели
+            if (canSee) {
+                villager.performRangedAttack(target, 1.0f)
+                state = CrossbowState.UNCHARGED
+            }
         }
 
-        // --- 2. ДВИЖЕНИЕ (БЕЗОПАСНОСТЬ) ---
+        // --- 2. ДВИЖЕНИЕ И ПОИСК ЛИНИИ ОГОНЯ ---
         val distSqr = villager.distanceToSqr(target)
 
-        // Дистанции
         val retreatDistCharging = 14.0 * 14.0
         val retreatDistCharged = 8.0 * 8.0
         val approachDist = 25.0 * 25.0
@@ -121,23 +132,21 @@ class CrossbowAttackBehavior(
         }
 
         if (shouldRetreat) {
-            // Бежим назад
             val awayDir = villager.position().subtract(target.position()).normalize()
             val fleePos = villager.position().add(awayDir.scale(5.0))
 
-            // Если заряжаем - мы медленные, компенсируем скоростью 1.15f
             brain.setMemory(
                 MemoryModuleType.WALK_TARGET,
                 WalkTarget(BlockPosTracker(BlockPos.containing(fleePos)), speedModifier * 1.15f, 0)
             )
-        } else if (distSqr > approachDist) {
-            // Подходим
+        } else if (distSqr > approachDist || !canSee) {
+            // Если цель далеко ИЛИ за блоком — подходим/обходим блоки, чтобы увидеть цель
             brain.setMemory(
                 MemoryModuleType.WALK_TARGET,
                 WalkTarget(EntityTracker(target, false), speedModifier, 0)
             )
         } else {
-            // Стоим и стреляем
+            // Стоим и стреляем только когда видим цель
             brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         }
     }

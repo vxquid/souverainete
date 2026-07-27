@@ -25,8 +25,13 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
 
     override fun checkExtraStartConditions(world: ServerLevel, villager: HumanoidVillager): Boolean {
         val currentTarget = villager.brain.getMemory(MemoryModuleType.ATTACK_TARGET).orElse(null)
-        if (currentTarget != null && currentTarget.isAlive) {
-            return false
+        if (currentTarget != null && currentTarget.isAlive && !currentTarget.isRemoved) {
+            // Если цель валидна — продолжаем бой с ней
+            if (isValidTarget(villager, currentTarget)) {
+                return false
+            }
+            // Если цель стала невалидной — сбрасываем её
+            villager.brain.eraseMemory(MemoryModuleType.ATTACK_TARGET)
         }
         return true
     }
@@ -43,8 +48,7 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
             nearestVisible.findAll { entity -> isValidTarget(villager, entity) }.forEach { targetsList.add(it) }
         }
 
-        // 2. Если житель спит или ничего не видит глазами (из-за темноты или стен),
-        // задействуем тактильно-слуховой радар в радиусе 12 блоков
+        // 2. Слуховой/тактильный радар, НО с обязательной проверкой прямой видимости!
         if (targetsList.isEmpty()) {
             val npcLoc = villager.bukkitEntity.location
             val nearby = npcLoc.getNearbyEntities(12.0, 6.0, 12.0)
@@ -52,13 +56,15 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
                 if (entity is org.bukkit.entity.LivingEntity) {
                     val nmsEntity = (entity as? org.bukkit.craftbukkit.entity.CraftLivingEntity)?.handle
                     if (nmsEntity != null && isValidTarget(villager, nmsEntity)) {
-                        targetsList.add(nmsEntity)
+                        // Не захватываем цели за блоками/стенами
+                        if (villager.sensing.hasLineOfSight(nmsEntity)) {
+                            targetsList.add(nmsEntity)
+                        }
                     }
                 }
             }
         }
 
-        // Находим ближайшую валидную цель из всех обнаруженных
         val target = targetsList.minByOrNull { it.distanceToSqr(villager) }
 
         if (target != null) {
@@ -70,7 +76,7 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
                 Bukkit.getPluginManager().callEvent(event)
 
                 if (event.isCancelled) {
-                    return // Ивент отменен, прерываем установку цели
+                    return
                 }
             }
 
@@ -81,7 +87,7 @@ class FindEnemyBehavior(private val rangeSqr: Double = 144.0) :
 
     private fun isValidTarget(attacker: HumanoidVillager, target: LivingEntity): Boolean {
         if (target == attacker) return false
-        if (!target.isAlive) return false
+        if (!target.isAlive || target.isRemoved) return false
 
         if (target is Monster) {
             if (target.target == attacker) return true

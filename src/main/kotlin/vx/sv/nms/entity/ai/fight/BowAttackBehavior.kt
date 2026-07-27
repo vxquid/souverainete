@@ -33,9 +33,9 @@ class BowAttackBehavior(
     private var strafingTime = -1
     private var strafingClockwise = true
     private var strafingBackwards = true
+    private var unseenTicks = 0
 
     override fun checkExtraStartConditions(level: ServerLevel, villager: HumanoidVillager): Boolean {
-
         val tactic = (villager as Villager).bukkitLivingEntity.combatTactic
         if (tactic == PartyManager.CombatTactic.MELEE) {
             return false
@@ -50,6 +50,9 @@ class BowAttackBehavior(
 
     override fun start(level: ServerLevel, entity: HumanoidVillager, time: Long) {
         entity.isAggressive = true
+        attackTime = -1
+        strafingTime = -1
+        unseenTicks = 0
     }
 
     override fun stop(level: ServerLevel, entity: HumanoidVillager, time: Long) {
@@ -64,28 +67,34 @@ class BowAttackBehavior(
         val distSqr = villager.distanceToSqr(target)
         val canSee = villager.sensing.hasLineOfSight(target)
 
+        if (!canSee) {
+            unseenTicks++
+            if (unseenTicks > 120) {
+                villager.brain.eraseMemory(MemoryModuleType.ATTACK_TARGET)
+                stop(level, villager, time)
+                return
+            }
+        } else {
+            unseenTicks = 0
+        }
+
         villager.brain.setMemory(MemoryModuleType.LOOK_TARGET, EntityTracker(target, true))
 
-        // --- НОВАЯ ЛОГИКА ДВИЖЕНИЯ (АГРЕССИВНЫЙ КАЙТ) ---
-
-        val safeDistanceSqr = 10.0 * 10.0 // 10 блоков - безопасная зона
-        val optimalDistanceSqr = 20.0 * 20.0 // До 20 блоков - можно стрелять
+        val safeDistanceSqr = 10.0 * 10.0
+        val optimalDistanceSqr = 20.0 * 20.0
 
         if (distSqr <= safeDistanceSqr) {
-            // ВРАГ СЛИШКОМ БЛИЗКО! ОТСТУПАЕМ!
             val awayDir = villager.position().subtract(target.position()).normalize()
-            val fleePos = villager.position().add(awayDir.scale(6.0)) // Бежим на 6 блоков назад
+            val fleePos = villager.position().add(awayDir.scale(6.0))
 
-            // Если мы натягиваем лук, мы медленные. Пытаемся бежать быстрее (speed * 1.3), чтобы компенсировать
             villager.brain.setMemory(
                 MemoryModuleType.WALK_TARGET,
                 WalkTarget(BlockPosTracker(BlockPos.containing(fleePos)), speedModifier * 1.15f, 0)
             )
         } else if (distSqr <= optimalDistanceSqr && canSee) {
-            // Мы в идеальной позиции. Стираем цель ходьбы, чтобы включился стрейф (MoveControl)
             villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         } else {
-            // Слишком далеко, подходим
+            // Если далеко ИЛИ не видим врага за стеной — обходим/подходим
             villager.brain.setMemory(
                 MemoryModuleType.WALK_TARGET,
                 WalkTarget(EntityTracker(target, false), speedModifier, 0)
@@ -94,11 +103,12 @@ class BowAttackBehavior(
 
         updateStrafing(villager, target, distSqr, canSee)
 
-        // Логика стрельбы
+        // Исправленная логика стрельбы
         if (villager.isUsingItem) {
-            if (!canSee && attackTime < -60) {
+            if (!canSee) {
+                // Прерываем натягивание лука, если потеряли видимость
                 villager.stopUsingItem()
-            } else if (canSee) {
+            } else {
                 val chargeTicks = villager.ticksUsingItem
                 if (chargeTicks >= 20) {
                     villager.performRangedAttack(target, BowItem.getPowerForTime(chargeTicks))
@@ -106,8 +116,11 @@ class BowAttackBehavior(
                     attackTime = attackIntervalMin
                 }
             }
-        } else if (--attackTime <= 0 && canSee) {
-            villager.startUsingItem(ProjectileUtil.getWeaponHoldingHand(villager, Items.BOW))
+        } else {
+            if (attackTime > 0) attackTime--
+            if (attackTime <= 0 && canSee) {
+                villager.startUsingItem(ProjectileUtil.getWeaponHoldingHand(villager, Items.BOW))
+            }
         }
     }
 
@@ -118,7 +131,6 @@ class BowAttackBehavior(
             strafingBackwards = villager.random.nextBoolean()
         }
 
-        // Стрейфим, если мы в боевой зоне (между 8 и 25 блоками)
         if (canSee && distSqr >= 64.0 && distSqr <= 625.0) {
             val strafeSpeed = if (villager.isUsingItem) speedModifier * 0.5f else speedModifier
             villager.moveControl.strafe(

@@ -72,8 +72,19 @@ class FarmerBehavior(
         val timeOfDay = bukkitWorld.time
 
         val isBoneMealTime = timeOfDay in 6000..8000
+        val settlementId = settlement.data.id
 
-        val farmBoxes = SettlementPlanner.buildings[settlement.data.id]?.filter { it.type.startsWith("FARM") }?.map { it.box } ?: emptyList()
+        // Фильтруем фермерские зоны — берём только те, у которых завершено строительство
+        val farmBoxes = SettlementPlanner.buildings[settlementId]?.filter { record ->
+            if (!record.type.startsWith("FARM")) return@filter false
+
+            // Проверяем, нет ли этой фермы среди отложенных или выполняющихся задач застройки
+            val isPending = SettlementPlanner.pendingJobs[settlementId]?.any { it.jobId == record.jobId } ?: false
+            val isActive = SettlementPlanner.activeJobs[settlementId]?.any { it.jobId == record.jobId } ?: false
+
+            !isPending && !isActive
+        }?.map { it.box } ?: emptyList()
+
         if (farmBoxes.isEmpty()) {
             val center = settlement.data.center
             val targetPos = BlockPos(center.blockX, center.blockY, center.blockZ)
