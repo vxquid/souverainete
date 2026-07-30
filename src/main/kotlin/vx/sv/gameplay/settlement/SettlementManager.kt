@@ -495,6 +495,7 @@ class SettlementManager : Listener {
                 SettlementPlanner.pendingJobs.remove(settlement.data.id)
                 SettlementPlanner.activeJobs.remove(settlement.data.id)
                 SettlementPlanner.settlementRoads.remove(settlement.data.id)
+                SettlementPlanner.removeFromBuildingQueue(settlement)
 
                 saveSettlements(world)
 

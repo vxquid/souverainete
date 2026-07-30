@@ -15,7 +15,7 @@ val buildSuffix = if (isPremiumBuild) "premium" else "free"
 val javaVersion = 25
 
 group = "souverainete"
-version = "1.0.6"
+version = "1.0.7"
 description = "The definitive overhaul of villager intelligence and society."
 
 buildConfig {

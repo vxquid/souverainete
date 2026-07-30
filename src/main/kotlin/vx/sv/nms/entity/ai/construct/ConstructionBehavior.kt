@@ -183,7 +183,6 @@ class ConstructionBehavior(
             val activeList = SettlementPlanner.activeJobs[settlementId]?.toList() ?: emptyList()
             val pendingList = SettlementPlanner.pendingJobs[settlementId]?.toList() ?: emptyList()
 
-            // 1. Собираем все координаты блоков из строящихся и запланированных схем
             for (job in activeList) {
                 job.getBlocks().forEach { block ->
                     if (!block.blockData.material.isAir) {
@@ -199,7 +198,6 @@ class ConstructionBehavior(
                 }
             }
 
-            // 2. Собираем коробки уже построенных зданий (у которых нет активных задач)
             val records = SettlementPlanner.buildings[settlementId]?.toList() ?: emptyList()
             for (record in records) {
                 val isUnderConstruction = activeList.any { it.jobId == record.jobId } || pendingList.any { it.jobId == record.jobId }
@@ -229,10 +227,8 @@ class ConstructionBehavior(
                         val neighborPos = BlockPos(neighbor.x, neighbor.y, neighbor.z)
 
                         if (isLogBlock(neighbor.type) && !targetLogs.contains(neighbor)) {
-                            // Защищаем блоки строящихся зданий
                             if (protectedBlocks.contains(neighborPos)) continue
 
-                            // Защищаем блоки построенных зданий
                             val inCompletedBuilding = completedBoxes.any { box ->
                                 neighbor.x >= box.minX && neighbor.x <= box.maxX &&
                                         neighbor.y >= box.minY && neighbor.y <= box.maxY &&
@@ -457,6 +453,8 @@ class ConstructionBehavior(
 
         val settlement = villager.settlement ?: return false
 
+        if (!SettlementPlanner.isSettlementAllowedToBuild(settlement)) return false
+
         if (villager.brain.hasMemoryValue(MemoryModuleType.INTERACTION_TARGET)) {
             villager.brain.eraseMemory(MemoryModuleType.INTERACTION_TARGET)
         }
@@ -499,6 +497,9 @@ class ConstructionBehavior(
 
     override fun canStillUse(world: ServerLevel, villager: HumanoidVillager, time: Long): Boolean {
         if (!plugin.gameplayConfig.general.enableConstruction) return false
+        val settlement = villager.settlement ?: return false
+        if (!SettlementPlanner.isSettlementAllowedToBuild(settlement)) return false
+
         val job = villager.activeBuildJob ?: return false
         if (job.isFinished()) return false
 
@@ -515,7 +516,6 @@ class ConstructionBehavior(
 
         val currentBlock = world.world.getBlockAt(assigned.pos.x, assigned.pos.y, assigned.pos.z)
 
-        // Подготовка нужного инструмента
         val isFarmlandTransformation = currentBlock.type.isShovelable() && assigned.blockData.material == Material.FARMLAND
 
         val tool = if (!currentBlock.isIgnorableObstacle() && !isFarmlandTransformation) {
@@ -713,8 +713,6 @@ class ConstructionBehavior(
                     return
                 }
 
-                // ИСПРАВЛЕНИЕ ЗАСТРЕВАНИЯ В БЛОКАХ:
-                // Выталкиваем всех существ наверх, чтобы они не оказались замурованы в полу при установке
                 if (assigned.blockData.material.isSolid && !isFarmlandTransformation) {
                     val targetBox = BoundingBox(block.x.toDouble(), block.y.toDouble(), block.z.toDouble(), block.x + 1.0, block.y + 1.0, block.z + 1.0)
 
@@ -725,7 +723,7 @@ class ConstructionBehavior(
                         if (entity is org.bukkit.entity.LivingEntity) {
                             if (targetBox.overlaps(entity.boundingBox)) {
                                 val safeLoc = entity.location.clone()
-                                safeLoc.y = block.y.toDouble() + 1.05 // Ставим аккуратно поверх устанавливаемого блока
+                                safeLoc.y = block.y.toDouble() + 1.05
                                 entity.teleport(safeLoc)
                             }
                         }
@@ -757,8 +755,6 @@ class ConstructionBehavior(
 
                         job.completeBlock(assigned)
                     } else if (assigned.blockData.material == Material.FARMLAND) {
-                        // Житель ставит грязную землю из-за правила 2.
-                        // Блок не помечается как completedBlock.
                         block.type = Material.DIRT
                         bukkitWorld.playSound(block.location, Sound.BLOCK_GRASS_PLACE, 1.0f, 1.0f)
 
@@ -819,6 +815,10 @@ class ConstructionBehavior(
             val pdc = (villager.bukkitEntity as BukkitVillager).persistentDataContainer
             pdc.remove(NamespacedKey(plugin, "active_build_job_uuid"))
             villager.savedJobId = null
+
+            villager.settlement?.let { settlement ->
+                SettlementPlanner.onSettlementFinishedJob(settlement, job)
+            }
         }
 
         villager.digTicks = 0

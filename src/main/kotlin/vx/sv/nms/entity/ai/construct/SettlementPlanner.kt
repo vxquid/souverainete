@@ -53,6 +53,11 @@ data class SettlementPlannerSaveData(
     val activeJobsList: List<SchematicJobSaveData>? = null
 )
 
+data class BuildingQueueSaveData(
+    val activeSettlementIds: List<String>,
+    val queueSettlementIds: List<String>
+)
+
 data class PlanRequest(val settlement: Settlement, val type: VanillaBuildingType)
 
 class SettlementPlanner(val settlement: Settlement) {
@@ -65,7 +70,12 @@ class SettlementPlanner(val settlement: Settlement) {
         val activeJobs = ConcurrentHashMap<UUID, ConcurrentLinkedQueue<SchematicBuildJob>>()
         val settlementRoads = ConcurrentHashMap<UUID, MutableSet<BlockPos>>()
 
+        val activeBuildingSettlements = ConcurrentHashMap<UUID, MutableSet<UUID>>()
+        val buildingQueues = ConcurrentHashMap<UUID, ConcurrentLinkedQueue<UUID>>()
+
         private val worldBuildingsKey = NamespacedKey(plugin, "settlement_buildings_data")
+        private val buildingQueueKey = NamespacedKey(plugin, "settlement_building_queue")
+
         private val planningCooldowns = ConcurrentHashMap<UUID, Long>()
 
         private val workstationCache = ConcurrentHashMap<String, BlockPos>()
@@ -77,7 +87,102 @@ class SettlementPlanner(val settlement: Settlement) {
         private val planningQueue = ConcurrentLinkedQueue<PlanRequest>()
         private var isGlobalPlannerRunning = false
 
+        fun isSettlementAllowedToBuild(settlement: Settlement): Boolean {
+            val maxAllowed = plugin.gameplayConfig.settlement.maxActiveBuildingSettlements
+            if (maxAllowed <= 0) return true
+
+            val worldId = settlement.world.uid
+            val settlementId = settlement.data.id
+
+            val activeSet = activeBuildingSettlements.computeIfAbsent(worldId) { ConcurrentHashMap.newKeySet() }
+            if (activeSet.contains(settlementId)) return true
+
+            updateBuildingQueue(settlement.world)
+            return activeSet.contains(settlementId)
+        }
+
+        fun registerSettlementForBuilding(settlement: Settlement) {
+            val maxAllowed = plugin.gameplayConfig.settlement.maxActiveBuildingSettlements
+            if (maxAllowed <= 0) return
+
+            val worldId = settlement.world.uid
+            val settlementId = settlement.data.id
+
+            val activeSet = activeBuildingSettlements.computeIfAbsent(worldId) { ConcurrentHashMap.newKeySet() }
+            val queue = buildingQueues.computeIfAbsent(worldId) { ConcurrentLinkedQueue() }
+
+            if (!activeSet.contains(settlementId) && !queue.contains(settlementId)) {
+                queue.offer(settlementId)
+                updateBuildingQueue(settlement.world)
+            }
+        }
+
+        fun updateBuildingQueue(world: World) {
+            val maxAllowed = plugin.gameplayConfig.settlement.maxActiveBuildingSettlements
+            if (maxAllowed <= 0) return
+
+            val worldId = world.uid
+            val activeSet = activeBuildingSettlements.computeIfAbsent(worldId) { ConcurrentHashMap.newKeySet() }
+            val queue = buildingQueues.computeIfAbsent(worldId) { ConcurrentLinkedQueue() }
+
+            var updated = false
+
+            activeSet.removeIf { id ->
+                val hasPending = pendingJobs[id]?.isNotEmpty() == true
+                val hasActive = activeJobs[id]?.any { !it.isFinished() } == true
+                !hasPending && !hasActive
+            }
+
+            while (activeSet.size < maxAllowed && queue.isNotEmpty()) {
+                val nextSettlementId = queue.poll() ?: break
+                val hasPending = pendingJobs[nextSettlementId]?.isNotEmpty() == true
+                val hasActive = activeJobs[nextSettlementId]?.any { !it.isFinished() } == true
+
+                if (hasPending || hasActive) {
+                    activeSet.add(nextSettlementId)
+                    updated = true
+                }
+            }
+
+            if (updated) {
+                saveBuildingsToWorld(world)
+            }
+        }
+
+        fun onSettlementFinishedJob(settlement: Settlement, job: SchematicBuildJob) {
+            val settlementId = settlement.data.id
+            val world = settlement.world
+            val worldId = world.uid
+
+            val hasRemainingJobs = (pendingJobs[settlementId]?.isNotEmpty() == true) ||
+                    (activeJobs[settlementId]?.any { !it.isFinished() } == true)
+
+            val maxAllowed = plugin.gameplayConfig.settlement.maxActiveBuildingSettlements
+            if (maxAllowed > 0) {
+                val activeSet = activeBuildingSettlements[worldId]
+                val queue = buildingQueues[worldId]
+
+                if (activeSet != null && activeSet.contains(settlementId)) {
+                    activeSet.remove(settlementId)
+                    if (hasRemainingJobs && queue != null && !queue.contains(settlementId)) {
+                        queue.offer(settlementId)
+                    }
+                    updateBuildingQueue(world)
+                }
+            }
+        }
+
+        fun removeFromBuildingQueue(settlement: Settlement) {
+            val worldId = settlement.world.uid
+            val settlementId = settlement.data.id
+
+            activeBuildingSettlements[worldId]?.remove(settlementId)
+            buildingQueues[worldId]?.remove(settlementId)
+            updateBuildingQueue(settlement.world)
+        }
+
         fun requestPlanning(settlement: Settlement, type: VanillaBuildingType) {
+            registerSettlementForBuilding(settlement)
             planningQueue.offer(PlanRequest(settlement, type))
             startGlobalPlanner()
         }
@@ -356,6 +461,8 @@ class SettlementPlanner(val settlement: Settlement) {
                     val queue = pendingJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
                     buildJobsList.forEach { queue.offer(it) }
 
+                    registerSettlementForBuilding(reqSettlement!!)
+
                     return true
                 }
 
@@ -481,6 +588,10 @@ class SettlementPlanner(val settlement: Settlement) {
         }
 
         fun getActiveOrNextJob(settlement: Settlement): SchematicBuildJob? {
+            if (!isSettlementAllowedToBuild(settlement)) {
+                return null
+            }
+
             val settlementId = settlement.data.id
             val activeList = activeJobs.computeIfAbsent(settlementId) { ConcurrentLinkedQueue() }
 
@@ -514,6 +625,8 @@ class SettlementPlanner(val settlement: Settlement) {
                             records.remove(golemRecord)
                         }
                     }
+
+                    onSettlementFinishedJob(settlement, job)
                 }
             }
 
@@ -648,7 +761,10 @@ class SettlementPlanner(val settlement: Settlement) {
             val worldSettlements = SettlementManager.settlements[world]?.toList() ?: emptyList()
 
             if (worldSettlements.isEmpty()) {
-                val clearTask = Runnable { pdc.remove(worldBuildingsKey) }
+                val clearTask = Runnable {
+                    pdc.remove(worldBuildingsKey)
+                    pdc.remove(buildingQueueKey)
+                }
                 if (Bukkit.isPrimaryThread()) clearTask.run() else Bukkit.getScheduler().runTask(plugin, clearTask)
                 return
             }
@@ -683,13 +799,22 @@ class SettlementPlanner(val settlement: Settlement) {
                 )
             }
 
+            val worldId = world.uid
+            val activeIds = activeBuildingSettlements[worldId]?.map { it.toString() } ?: emptyList()
+            val queueIds = buildingQueues[worldId]?.map { it.toString() } ?: emptyList()
+            val queueSaveData = BuildingQueueSaveData(activeIds, queueIds)
+
             val executeSaveTask = Runnable {
                 try {
                     val jsonString = gson.toJson(saveData)
                     val compressedBytes = compress(jsonString)
 
+                    val queueJson = gson.toJson(queueSaveData)
+                    val compressedQueueBytes = compress(queueJson)
+
                     val applyToPdcTask = Runnable {
                         pdc.set(worldBuildingsKey, PersistentDataType.BYTE_ARRAY, compressedBytes)
+                        pdc.set(buildingQueueKey, PersistentDataType.BYTE_ARRAY, compressedQueueBytes)
                     }
 
                     if (Bukkit.isPrimaryThread()) {
@@ -770,6 +895,33 @@ class SettlementPlanner(val settlement: Settlement) {
                         queue.offer(deserializeJob(world, jobSave))
                     }
                 }
+
+                if (pdc.has(buildingQueueKey, PersistentDataType.BYTE_ARRAY)) {
+                    try {
+                        val qBytes = pdc.get(buildingQueueKey, PersistentDataType.BYTE_ARRAY)
+                        if (qBytes != null) {
+                            val qJson = decompress(qBytes)
+                            val queueType = object : TypeToken<BuildingQueueSaveData>() {}.type
+                            val qData: BuildingQueueSaveData? = gson.fromJson(qJson, queueType)
+                            if (qData != null) {
+                                val worldId = world.uid
+                                val activeSet = activeBuildingSettlements.computeIfAbsent(worldId) { ConcurrentHashMap.newKeySet() }
+                                val queue = buildingQueues.computeIfAbsent(worldId) { ConcurrentLinkedQueue() }
+
+                                activeSet.clear()
+                                queue.clear()
+
+                                qData.activeSettlementIds.forEach { activeSet.add(UUID.fromString(it)) }
+                                qData.queueSettlementIds.forEach { queue.offer(UUID.fromString(it)) }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        plugin.logger.warning("[SettlementPlanner] Failed to load building queue from PDC for world ${world.name}: ${e.message}")
+                    }
+                }
+
+                updateBuildingQueue(world)
+
                 plugin.logger.info("[SettlementPlanner] Successfully loaded buildings from world PDC: ${buildings.values.sumOf { it.size }}")
             } catch (e: Exception) {
                 plugin.logger.severe("[SettlementPlanner] Error loading buildings from PDC:")
@@ -878,6 +1030,8 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
         buildJobsList.forEach { queue.offer(it) }
+
+        registerSettlementForBuilding(settlement)
         return true
     }
 
@@ -969,7 +1123,6 @@ class SettlementPlanner(val settlement: Settlement) {
             VanillaBuildingType.TEMPLE
         )
 
-        // Подсчёт общего количества жилых домов и рабочих мест для поддержания идеального баланса 50/50
         val residentialTypes = setOf("HOUSE_SMALL", "HOUSE_MEDIUM", "HOUSE_LARGE")
         val functionalTypes = setOf(
             "TOWN_HALL", "BLACKSMITH", "BAKERY", "FARM", "LIBRARY", "ARMORY",
@@ -981,11 +1134,10 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val lastWasHouse = lastTypeName.startsWith("HOUSE_")
 
-        // Вычисляем, что строить следующим для строгого чередования и поддержания баланса
         val buildHouseNext = when {
             totalFunctional > totalResidential -> true
             totalResidential > totalFunctional -> false
-            else -> !lastWasHouse // Если количество равно, чередуем на основе последней постройки
+            else -> !lastWasHouse
         }
 
         if (buildHouseNext && canBuildHouse) {
@@ -995,12 +1147,10 @@ class SettlementPlanner(val settlement: Settlement) {
                 return true
             }
         } else {
-            // Строим рабочее/функциональное здание
             val unbuilt = advancedFunctional.filter { (existingCounts[it.typeName] ?: 0) < 1 }
             val nextFunc = if (unbuilt.isNotEmpty()) {
                 unbuilt.random()
             } else {
-                // Если все построены хотя бы один раз, выбираем то, у которого меньше всего копий в поселении
                 advancedFunctional.minByOrNull { existingCounts[it.typeName] ?: 0 }
             }
 

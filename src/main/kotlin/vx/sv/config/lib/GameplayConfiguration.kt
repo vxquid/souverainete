@@ -146,6 +146,12 @@ class GameplayConfiguration {
         val titleFadeIn: Int = 20
         val titleStay: Int = 40
         val titleFadeOut: Int = 20
+
+        @Comment(
+            "Maximum number of settlements allowed to build simultaneously in a world.",
+            "Set to 0 for unlimited simultaneous construction."
+        )
+        var maxActiveBuildingSettlements: Int = 5
     }
 
     class RaidConfig {
