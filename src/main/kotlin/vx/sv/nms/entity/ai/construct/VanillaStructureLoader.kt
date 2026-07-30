@@ -23,6 +23,9 @@ object VanillaStructureLoader {
         if (structurePath == "custom/iron_golem") {
             return BlockVector(3, 3, 3)
         }
+        if (structurePath == "custom/rent_foundation") {
+            return BlockVector(10, 4, 10)
+        }
         val key = NamespacedKey.minecraft(structurePath)
         val structureManager = Bukkit.getStructureManager()
         val structure = structureManager.getStructure(key)
@@ -37,6 +40,9 @@ object VanillaStructureLoader {
         }
         if (structurePath == "custom/iron_golem") {
             return generateCustomIronGolem()
+        }
+        if (structurePath == "custom/rent_foundation") {
+            return generateCustomRentFoundation()
         }
 
         val key = NamespacedKey.minecraft(structurePath)
@@ -114,16 +120,42 @@ object VanillaStructureLoader {
         return relativeBlocks
     }
 
+    private fun generateCustomRentFoundation(): List<RelativeBlock> {
+        val blocks = mutableListOf<RelativeBlock>()
+        val stoneBricks = Material.STONE_BRICKS.createBlockData()
+        val cobble = Material.COBBLESTONE.createBlockData()
+        val air = Material.AIR.createBlockData()
+
+        val width = 10
+        val length = 10
+        val height = 4
+
+        for (x in 0 until width) {
+            for (z in 0 until length) {
+                val isBorder = x == 0 || x == width - 1 || z == 0 || z == length - 1
+                val floorData = if (isBorder) stoneBricks else cobble
+
+                blocks.add(RelativeBlock(BlockPos(x, 0, z), floorData))
+
+                for (y in 1 until height) {
+                    blocks.add(RelativeBlock(BlockPos(x, y, z), air))
+                }
+            }
+        }
+
+        return blocks
+    }
+
     private fun generateCustomIronGolem(): List<RelativeBlock> {
         val blocks = mutableListOf<RelativeBlock>()
         val iron = Material.IRON_BLOCK.createBlockData()
         val pumpkin = Material.CARVED_PUMPKIN.createBlockData()
 
-        blocks.add(RelativeBlock(BlockPos(1, 0, 1), iron)) // Ноги
-        blocks.add(RelativeBlock(BlockPos(1, 1, 1), iron)) // Тело
-        blocks.add(RelativeBlock(BlockPos(0, 1, 1), iron)) // Рука 1
-        blocks.add(RelativeBlock(BlockPos(2, 1, 1), iron)) // Рука 2
-        blocks.add(RelativeBlock(BlockPos(1, 2, 1), pumpkin)) // Голова
+        blocks.add(RelativeBlock(BlockPos(1, 0, 1), iron))
+        blocks.add(RelativeBlock(BlockPos(1, 1, 1), iron))
+        blocks.add(RelativeBlock(BlockPos(0, 1, 1), iron))
+        blocks.add(RelativeBlock(BlockPos(2, 1, 1), iron))
+        blocks.add(RelativeBlock(BlockPos(1, 2, 1), pumpkin))
 
         return blocks
     }
@@ -209,6 +241,9 @@ object VanillaStructureLoader {
         }
         if (structurePath == "custom/iron_golem") {
             return listOf(EntranceCandidate(BlockPos(1, 0, 0), BlockFace.NORTH, 100.0))
+        }
+        if (structurePath == "custom/rent_foundation") {
+            return listOf(EntranceCandidate(BlockPos(5, 0, 0), BlockFace.NORTH, 100.0))
         }
 
         val key = NamespacedKey.minecraft(structurePath)

@@ -5,6 +5,8 @@ import net.minecraft.core.BlockPos
 import org.bukkit.*
 import org.bukkit.block.structure.StructureRotation
 import org.bukkit.craftbukkit.entity.CraftVillager
+import org.bukkit.entity.Display
+import org.bukkit.entity.TextDisplay
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.gson
@@ -87,6 +89,18 @@ class SettlementPlanner(val settlement: Settlement) {
         private val planningQueue = ConcurrentLinkedQueue<PlanRequest>()
         private var isGlobalPlannerRunning = false
 
+        private fun isSettlementLoadedAndActive(settlementId: UUID): Boolean {
+            val settlement = SettlementManager.getById(settlementId) ?: return false
+            val center = settlement.data.center
+            val world = center.world ?: return false
+
+            val chunkX = center.blockX shr 4
+            val chunkZ = center.blockZ shr 4
+            if (!world.isChunkLoaded(chunkX, chunkZ)) return false
+
+            return world.players.any { p -> p.location.distanceSquared(center) <= 65536.0 }
+        }
+
         fun isSettlementAllowedToBuild(settlement: Settlement): Boolean {
             val maxAllowed = plugin.gameplayConfig.settlement.maxActiveBuildingSettlements
             if (maxAllowed <= 0) return true
@@ -130,19 +144,37 @@ class SettlementPlanner(val settlement: Settlement) {
             activeSet.removeIf { id ->
                 val hasPending = pendingJobs[id]?.isNotEmpty() == true
                 val hasActive = activeJobs[id]?.any { !it.isFinished() } == true
-                !hasPending && !hasActive
+                val isLoaded = isSettlementLoadedAndActive(id)
+
+                if (hasPending || hasActive) {
+                    if (!isLoaded) {
+                        if (!queue.contains(id)) queue.offer(id)
+                        true
+                    } else {
+                        false
+                    }
+                } else {
+                    true
+                }
             }
 
+            val skippedIds = mutableListOf<UUID>()
             while (activeSet.size < maxAllowed && queue.isNotEmpty()) {
                 val nextSettlementId = queue.poll() ?: break
                 val hasPending = pendingJobs[nextSettlementId]?.isNotEmpty() == true
                 val hasActive = activeJobs[nextSettlementId]?.any { !it.isFinished() } == true
 
                 if (hasPending || hasActive) {
-                    activeSet.add(nextSettlementId)
-                    updated = true
+                    if (isSettlementLoadedAndActive(nextSettlementId)) {
+                        activeSet.add(nextSettlementId)
+                        updated = true
+                    } else {
+                        skippedIds.add(nextSettlementId)
+                    }
                 }
             }
+
+            skippedIds.forEach { queue.offer(it) }
 
             if (updated) {
                 saveBuildingsToWorld(world)
@@ -688,8 +720,10 @@ class SettlementPlanner(val settlement: Settlement) {
         }
 
         fun getHighestGroundYAt(world: World, x: Int, z: Int): Int {
-            if (!world.isChunkLoaded(x shr 4, z shr 4)) {
-                return -999
+            val chunkX = x shr 4
+            val chunkZ = z shr 4
+            if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                world.getChunkAt(chunkX, chunkZ)
             }
             val nmsLevel = (world as org.bukkit.craftbukkit.CraftWorld).handle
             var y = world.getHighestBlockYAt(x, z)
@@ -1020,12 +1054,44 @@ class SettlementPlanner(val settlement: Settlement) {
         val cx = center.blockX
         val cz = center.blockZ
         val type = VanillaBuildingType.MEETING_POINT
-        val baseY = center.blockY
+
+        val chunkX = cx shr 4
+        val chunkZ = cz shr 4
+        if (!world.isChunkLoaded(chunkX, chunkZ)) {
+            world.getChunkAt(chunkX, chunkZ)
+        }
+
+        var groundY = getHighestGroundYAt(world, cx, cz)
+
+        if (groundY <= world.minHeight + 5 || groundY == -999) {
+            groundY = world.getHighestBlockYAt(cx, cz)
+            if (groundY <= world.minHeight + 5) {
+                groundY = 64
+            }
+        }
+        val baseY = groundY
+
+        if (abs(center.blockY - baseY) > 2) {
+            center.y = baseY.toDouble()
+        }
 
         val records = buildings[settlement.data.id]?.toList() ?: emptyList()
-        val jobId = records.find { it.type == "MEETING_POINT" }?.jobId ?: UUID.randomUUID()
+        val existingRecord = records.find { it.type == "MEETING_POINT" }
+        val jobId = existingRecord?.jobId ?: UUID.randomUUID()
+
+        if (existingRecord != null) {
+            buildings[settlement.data.id]?.remove(existingRecord)
+        }
 
         val entrancePos = BlockPos(cx, baseY + 1, cz)
+        val thBox = BoundingBox(
+            cx - 6.0, baseY.toDouble() - 2.0, cz - 6.0,
+            cx + 6.0, (baseY + 8).toDouble(), cz + 6.0
+        )
+
+        buildings.computeIfAbsent(settlement.data.id) { Collections.synchronizedList(mutableListOf()) }
+            .add(BuildingRecord("MEETING_POINT", thBox, jobId))
+
         val buildJobsList = startVanillaStructureConstruction(cx, baseY, cz, entrancePos, type, StructureRotation.NONE, jobId)
 
         val queue = pendingJobs.computeIfAbsent(settlement.data.id) { ConcurrentLinkedQueue() }
@@ -1079,13 +1145,16 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val existingCounts = allTypes.groupingBy { it }.eachCount()
 
+        val maxRent = plugin.gameplayConfig.settlement.maxRentFoundations
+
         val coreBuildings = listOf(
             Pair(VanillaBuildingType.MEETING_POINT, 1),
             Pair(VanillaBuildingType.TOWN_HALL, 1),
             Pair(VanillaBuildingType.FARM, 2),
             Pair(VanillaBuildingType.WOOD_FARM, 1),
             Pair(VanillaBuildingType.MINE, 1),
-            Pair(VanillaBuildingType.SHEPHERD, 1)
+            Pair(VanillaBuildingType.SHEPHERD, 1),
+            Pair(VanillaBuildingType.RENT_FOUNDATION, maxRent)
         )
 
         for ((type, maxCount) in coreBuildings) {
@@ -1123,7 +1192,7 @@ class SettlementPlanner(val settlement: Settlement) {
             VanillaBuildingType.TEMPLE
         )
 
-        val residentialTypes = setOf("HOUSE_SMALL", "HOUSE_MEDIUM", "HOUSE_LARGE")
+        val residentialTypes = setOf("HOUSE_SMALL", "HOUSE_MEDIUM", "HOUSE_LARGE", "RENT_FOUNDATION")
         val functionalTypes = setOf(
             "TOWN_HALL", "BLACKSMITH", "BAKERY", "FARM", "LIBRARY", "ARMORY",
             "SHEPHERD", "TEMPLE", "WOOD_FARM", "STABLE", "ANIMAL_PEN", "CARTOGRAPHER", "MINE"
@@ -1132,7 +1201,7 @@ class SettlementPlanner(val settlement: Settlement) {
         val totalResidential = allTypes.count { it in residentialTypes }
         val totalFunctional = allTypes.count { it in functionalTypes }
 
-        val lastWasHouse = lastTypeName.startsWith("HOUSE_")
+        val lastWasHouse = lastTypeName.startsWith("HOUSE_") || lastTypeName.startsWith("RENT_")
 
         val buildHouseNext = when {
             totalFunctional > totalResidential -> true
@@ -1246,7 +1315,11 @@ class SettlementPlanner(val settlement: Settlement) {
             for (i in 0 until pathPoints.size) {
                 val px = pathPoints[i].x
                 val pz = pathPoints[i].z
-                if (!world.isChunkLoaded(px shr 4, pz shr 4)) continue
+                val chunkX = px shr 4
+                val chunkZ = pz shr 4
+                if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                    world.getChunkAt(chunkX, chunkZ)
+                }
 
                 val natY = getHighestGroundYAt(world, px, pz).toDouble()
                 val surfY = world.getHighestBlockYAt(px, pz).toDouble()
@@ -1406,7 +1479,11 @@ class SettlementPlanner(val settlement: Settlement) {
                 }
                 if (isInsideAnyBuilding) continue
 
-                if (!world.isChunkLoaded(px shr 4, pz shr 4)) continue
+                val chunkX = px shr 4
+                val chunkZ = pz shr 4
+                if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                    world.getChunkAt(chunkX, chunkZ)
+                }
 
                 val naturalBlockY = getHighestGroundYAt(world, px, pz)
                 val currentBlock = world.getBlockAt(px, py, pz)
@@ -1555,7 +1632,16 @@ class SettlementPlanner(val settlement: Settlement) {
         val highestYMap = HashMap<Pair<Int, Int>, Int>()
         fun getCachedHighest(absX: Int, absZ: Int, x: Int, z: Int): Int {
             return highestYMap.getOrPut(Pair(x, z)) {
-                getHighestGroundYAt(world, absX, absZ)
+                val chunkX = absX shr 4
+                val chunkZ = absZ shr 4
+                if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                    world.getChunkAt(chunkX, chunkZ)
+                }
+                var hy = getHighestGroundYAt(world, absX, absZ)
+                if (hy <= world.minHeight + 2 || hy == -999) {
+                    hy = baseY
+                }
+                hy
             }
         }
 
@@ -1567,7 +1653,11 @@ class SettlementPlanner(val settlement: Settlement) {
 
                 val absX = cx - width / 2 + x
                 val absZ = cz - length / 2 + z
-                if (!world.isChunkLoaded(absX shr 4, absZ shr 4)) continue
+                val chunkX = absX shr 4
+                val chunkZ = absZ shr 4
+                if (!world.isChunkLoaded(chunkX, chunkZ)) {
+                    world.getChunkAt(chunkX, chunkZ)
+                }
 
                 val highest = getCachedHighest(absX, absZ, x, z)
                 val blockType = world.getBlockAt(absX, highest, absZ).type

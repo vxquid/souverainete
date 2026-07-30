@@ -68,6 +68,9 @@ class GameplayConfiguration {
 
         @Comment("The ID of the race to use when oneRaceMode is enabled (default is 'human'). Make sure this race exists in races.yml.")
         var globalRace: String = "human"
+
+        @Comment("Whether humanoid villagers have collisions with other entities (can push/be pushed). Default is true.")
+        var villagerCollisions: Boolean = true
     }
 
     class ReputationConfig {
@@ -151,7 +154,16 @@ class GameplayConfiguration {
             "Maximum number of settlements allowed to build simultaneously in a world.",
             "Set to 0 for unlimited simultaneous construction."
         )
-        var maxActiveBuildingSettlements: Int = 5
+        var maxActiveBuildingSettlements: Int = 3
+
+        @Comment("Maximum number of rent foundation plots allowed per settlement.")
+        var maxRentFoundations: Int = 3
+
+        @Comment("Rent duration in Minecraft in-game days (1 day = 24000 ticks). Default 30 days = 720000 ticks.")
+        var rentDurationDays: Long = 30L
+
+        @Comment("Amount of racial currency required to pay for rent.")
+        var rentCurrencyCost: Int = 64
     }
 
     class RaidConfig {

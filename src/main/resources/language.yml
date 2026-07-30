@@ -16,6 +16,7 @@ settlement:
   leaving: "You are leaving a settlement."
   created: "§eA new settlement has been founded: §6{settlementName}§e."
   destroyed-broadcast: "§cThe settlement §6{settlementName} §chas been completely destroyed!"
+  rent-foundation-text: "§e[Free Plot for Construction]\n§fPurchase from the settlement mayor"
 
   size:
     underdeveloped: "Underdeveloped"
@@ -64,6 +65,17 @@ settlement:
       prompt: "§eWrite new name in chat (or cancel):"
       cancelled: "§cCancelled."
       success: "§aSettlement renamed to: §6{name}"
+
+# Rent protection & plot management messages
+rent:
+  display-rented-text: "§a[Rented Plot]\n§7Owner: §f{owner}\n§7Expires in: §e{days} days"
+  protection-deny: "§cYou do not have permission to build or break blocks on this rented plot!"
+  success-rented: "§aYou have successfully rented a plot in §6{settlement}§a!"
+  success-renewed: "§aYou have successfully extended your land lease!"
+  evicted-broadcast: "§cYour lease on the plot in §6{settlement} §chas expired and was evicted!"
+  no-plots-owned: "§cYou do not own any rented plots!"
+  member-added: "§aPlayer §b{player} §ahas been added as a member to your rented plot!"
+  member-removed: "§aPlayer §b{player} §ahas been removed from your rented plot members!"
 
 # Locate structure command override messages.
 locate-structure:
@@ -250,6 +262,7 @@ interaction-menu:
   party-invite-button: "Invite To Group"
   party-control-button: "§bManage Companion"
   party-kick-button: "§4Dismiss"
+  rent-button: "§aRent Land Plot"
 
 command-error-message:
   player-not-found: "§cError! Player not found: §e{playerName} §c(online only)."

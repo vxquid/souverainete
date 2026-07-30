@@ -29,7 +29,8 @@ enum class VanillaBuildingType(
     MEETING_POINT("MEETING_POINT", "village/plains/town_centers/plains_meeting_point_2", 6, 6, 5, Material.BELL, "Gathering Place"),
     CARTOGRAPHER("CARTOGRAPHER", "village/plains/houses/plains_cartographer_1", 9, 9, 6, Material.CARTOGRAPHY_TABLE, "Cartographer House"),
     MINE("MINE", "custom/mine", 7, 7, 6, Material.SMITHING_TABLE, "Stone Quarry"),
-    IRON_GOLEM("IRON_GOLEM", "custom/iron_golem", 3, 3, 3, Material.IRON_BLOCK, "Iron Golem Blueprint");
+    IRON_GOLEM("IRON_GOLEM", "custom/iron_golem", 3, 3, 3, Material.IRON_BLOCK, "Iron Golem Blueprint"),
+    RENT_FOUNDATION("RENT_FOUNDATION", "custom/rent_foundation", 10, 10, 4, Material.STONE_BRICKS, "Rent Foundation");
 
     companion object {
         fun byTypeName(name: String): VanillaBuildingType? {

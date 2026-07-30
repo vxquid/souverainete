@@ -26,6 +26,7 @@ import vx.sv.gameplay.GameplayManager
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
+import vx.sv.gameplay.settlement.rent.RentManager
 import vx.sv.gameplay.trade.ScoreCalculator
 import vx.sv.nms.entity.ai.construct.BuilderSafetyListener
 import vx.sv.nms.entity.ai.construct.SettlementPlanner
@@ -89,6 +90,14 @@ class Souverainete : JavaPlugin(), Listener {
         this.translationManager = TranslationManager(this, providerManager.client, providerManager.config.language)
         this.server.pluginManager.registerEvents(this, this)
         this.server.pluginManager.registerEvents(VillageGenerationListener(), this)
+
+        // Регистрация слушателя и таймера привата/аренды
+        server.pluginManager.registerEvents(RentManager(), this)
+
+        // Загрузка данных аренды при включении плагина
+        Bukkit.getWorlds().forEach { world ->
+            RentManager.loadWorldRentData(world)
+        }
 
         // Translate language.yml using cache. Must be async.
         this.server.scheduler.runTaskAsynchronously(this) { _ ->

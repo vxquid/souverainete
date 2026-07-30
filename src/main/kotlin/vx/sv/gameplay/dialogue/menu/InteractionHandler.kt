@@ -46,8 +46,11 @@ import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.getLedSettlementId
+import vx.sv.gameplay.settlement.isSettlementLeader
+import vx.sv.gameplay.settlement.rent.RentManager
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
+import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.MenuControlMode
 import vx.sv.persistent.PlayerPreferencesManager.preferences
 import vx.sv.persistent.QuestDialogueLength
@@ -372,10 +375,80 @@ class InteractionHandler : Listener {
 //            }
 //        }
 
+        // === [КНОПКА АРЕНДЫ У МЭРА] ===
+        val settlement = villager.settlement
+        if (settlement != null && villager.isSettlementLeader()) {
+            val repScore = settlement.data.reputation[player.uniqueId] ?: 0
+            val isFriendly = repScore >= plugin.gameplayConfig.reputation.friendlyRequired
+            val has64Currency = RentManager.hasRaceCurrency(player, settlement, plugin.gameplayConfig.settlement.rentCurrencyCost)
+
+            if (isFriendly && has64Currency) {
+                val availablePlots = RentManager.getRentPlotsForSettlement(settlement)
+                if (availablePlots.isNotEmpty()) {
+                    val rentBtnText = plugin.language.getString("interaction-menu.rent-button") ?: "§aRent Land Plot"
+                    builder.button(rentBtnText, isRainbow = true) {
+                        this.showRentSelectionMenu(player, villager, settlement)
+                    }
+                }
+            }
+        }
+
         builder.button(plugin.language.getString("interaction-menu.close-button") ?: "Close") { menu ->
             menu.destroy()
         }
 
+        builder.build()
+    }
+
+    private fun showRentSelectionMenu(player: Player, villager: Villager, settlement: Settlement) {
+        val builder = Builder(villager, player)
+        val plots = RentManager.getRentPlotsForSettlement(settlement)
+
+        var index = 1
+        for (pair in plots) {
+            val record = pair.first
+            val plotData = pair.second
+
+            val label = if (plotData.ownerId == null) {
+                "§aPlot #$index (Available)"
+            } else if (plotData.ownerId == player.uniqueId) {
+                "§ePlot #$index (Rented by You - Renew)"
+            } else {
+                "§cPlot #$index (Occupied)"
+            }
+
+            builder.button(label) { menu ->
+                if (plotData.ownerId == null) {
+                    if (RentManager.rentPlot(player, settlement, record, plotData)) {
+                        val msg = plugin.language.getString("rent.success-rented")
+                            ?.replace("{settlement}", settlement.data.settlementName)
+                            ?: "§aYou have successfully rented a plot in ${settlement.data.settlementName}!"
+                        player.sendFormattedMessage(msg)
+                        player.playSound(player.location, Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f)
+                    } else {
+                        player.sendFormattedMessage("§cFailed to pay currency for rent!")
+                    }
+                } else if (plotData.ownerId == player.uniqueId) {
+                    if (RentManager.renewPlotRent(player, settlement, plotData)) {
+                        val msg = plugin.language.getString("rent.success-renewed")
+                            ?: "§aYou have successfully extended your land lease!"
+                        player.sendFormattedMessage(msg)
+                        player.playSound(player.location, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0f, 1.0f)
+                    } else {
+                        player.sendFormattedMessage("§cFailed to pay currency to extend rent!")
+                    }
+                } else {
+                    player.sendFormattedMessage("§cThis plot is already occupied by another tenant!")
+                }
+                menu.destroy()
+            }
+            index++
+        }
+
+        builder.button(plugin.language.getString("interaction-menu.return-button") ?: "Return") { menu ->
+            menu.destroy()
+            this.showDefaultMenu(player, villager)
+        }
         builder.build()
     }
 

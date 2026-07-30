@@ -41,10 +41,10 @@ data class PlayerPreferences(
     var nametagMode: NametagMode = NametagMode.ADVANCED,
 
     @SerializedName("quest_dialogue_length")
-    var questDialogueLength: QuestDialogueLength = QuestDialogueLength.LONG
+    var questDialogueLength: QuestDialogueLength = QuestDialogueLength.LONG,
 
-    // Feel free to add more preferences here later.
-    // Example: var enableHolograms: Boolean = true
+    @SerializedName("show_rent_bossbar")
+    var showRentBossBar: Boolean = true
 )
 
 object PlayerPreferencesManager {

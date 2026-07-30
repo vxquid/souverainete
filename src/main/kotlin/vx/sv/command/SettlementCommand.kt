@@ -17,6 +17,7 @@ import vx.sv.gameplay.quest.QuestManager.Companion.addQuest
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.isSettlementLeader
+import vx.sv.gameplay.settlement.rent.RentManager
 import vx.sv.persistent.LivingEntityExtend.settlement
 
 @CommandAlias("settlement|s")
@@ -243,4 +244,113 @@ class SettlementCommand : BaseCommand() {
             player.sendFormattedMessage("§a[Debug] Leader highlight mode has been §cDISABLED§a.")
         }
     }
+
+    @Subcommand("rent addmember")
+    @CommandCompletion("@players")
+    fun onRentAddMember(player: Player, targetName: String) {
+        val rentedPlots = RentManager.getRentedPlotsByPlayer(player)
+        if (rentedPlots.isEmpty()) {
+            player.sendFormattedMessage(plugin.language.getString("rent.no-plots-owned") ?: "§cYou do not own any rented plots!")
+            return
+        }
+
+        @Suppress("DEPRECATION")
+        val target = Bukkit.getOfflinePlayer(targetName)
+        if (!target.hasPlayedBefore() && !target.isOnline) {
+            player.sendFormattedMessage(plugin.language.getString("command-error-message.player-not-found")?.replace("{playerName}", targetName) ?: "§cPlayer not found!")
+            return
+        }
+
+        for (pair in rentedPlots) {
+            pair.second.members.add(target.uniqueId)
+        }
+        RentManager.saveAll()
+
+        val msg = plugin.language.getString("rent.member-added")
+            ?.replace("{player}", target.name ?: targetName)
+            ?: "§aPlayer {player} has been added to your plot members!"
+        player.sendFormattedMessage(msg)
+    }
+
+    @Subcommand("rent removemember")
+    @CommandCompletion("@players")
+    fun onRentRemoveMember(player: Player, targetName: String) {
+        val rentedPlots = RentManager.getRentedPlotsByPlayer(player)
+        if (rentedPlots.isEmpty()) {
+            player.sendFormattedMessage(plugin.language.getString("rent.no-plots-owned") ?: "§cYou do not own any rented plots!")
+            return
+        }
+
+        @Suppress("DEPRECATION")
+        val target = Bukkit.getOfflinePlayer(targetName)
+
+        for (pair in rentedPlots) {
+            pair.second.members.remove(target.uniqueId)
+        }
+        RentManager.saveAll()
+
+        val msg = plugin.language.getString("rent.member-removed")
+            ?.replace("{player}", target.name ?: targetName)
+            ?: "§aPlayer {player} has been removed from your plot members!"
+        player.sendFormattedMessage(msg)
+    }
+
+    @Subcommand("rent info")
+    fun onRentInfo(player: Player) {
+        val rentedPlots = RentManager.getRentedPlotsByPlayer(player)
+        if (rentedPlots.isEmpty()) {
+            player.sendFormattedMessage(plugin.language.getString("rent.no-plots-owned") ?: "§cYou do not own any rented plots!")
+            return
+        }
+
+        for (pair in rentedPlots) {
+            val record = pair.first
+            val data = pair.second
+            val settlement = SettlementManager.getById(data.settlementId)
+            val settlementName = settlement?.data?.settlementName ?: "Unknown"
+
+            val remainingTicks = data.rentExpiryGameTime - (settlement?.world?.gameTime ?: 0L)
+            val remainingDays = (remainingTicks / 24000L).coerceAtLeast(0L)
+
+            val memberNames = data.members.mapNotNull { Bukkit.getOfflinePlayer(it).name }.joinToString(", ")
+                .ifEmpty { "None" }
+
+            val msg = """
+                §6=== Plot Info (${record.type}) ===
+                §7Settlement: §f$settlementName
+                §7Expires in: §e$remainingDays in-game days
+                §7Members: §b$memberNames
+            """.trimIndent()
+
+            player.sendMessage(msg)
+        }
+    }
+
+    @Subcommand("rent pay")
+    fun onRentPay(player: Player) {
+        val rentedPlots = RentManager.getRentedPlotsByPlayer(player)
+        if (rentedPlots.isEmpty()) {
+            player.sendFormattedMessage(plugin.language.getString("rent.no-plots-owned") ?: "§cYou do not own any rented plots!")
+            return
+        }
+
+        var paidCount = 0
+        for (pair in rentedPlots) {
+            val data = pair.second
+            val settlement = SettlementManager.getById(data.settlementId) ?: continue
+
+            if (RentManager.renewPlotRent(player, settlement, data)) {
+                paidCount++
+            }
+        }
+
+        if (paidCount > 0) {
+            val msg = plugin.language.getString("rent.success-renewed")
+                ?: "§aYou have successfully extended your land lease!"
+            player.sendFormattedMessage(msg)
+        } else {
+            player.sendFormattedMessage("§cYou do not have enough race currency to pay rent!")
+        }
+    }
+
 }

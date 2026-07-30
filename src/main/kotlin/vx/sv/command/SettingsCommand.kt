@@ -123,6 +123,28 @@ class SettingsGUI(val player: Player) : InventoryHolder {
 
         questBtnItem.itemMeta = questBtnMeta
         inv.setItem(12, questBtnItem)
+
+        // === Rent BossBar Toggle Button (Slot 13) ===
+        val showBar = prefs.showRentBossBar
+        val barBtnMat = if (showBar) Material.ENCHANTED_BOOK else Material.BOOK
+
+        val barBtnItem = ItemStack(barBtnMat)
+        val barBtnMeta = barBtnItem.itemMeta
+
+        barBtnMeta?.setDisplayName(plugin.language.getString("settings.gui.rent-bar.name") ?: "§eRent Plot BossBar Info")
+
+        val enabledStr = plugin.language.getString("settings.gui.rent-bar.mode-enabled") ?: "§aEnabled"
+        val disabledStr = plugin.language.getString("settings.gui.rent-bar.mode-disabled") ?: "§cDisabled"
+        val currentBarStr = if (showBar) enabledStr else disabledStr
+
+        val barLore = plugin.language.getStringList("settings.gui.rent-bar.lore").takeIf { it.isNotEmpty() }
+            ?: listOf("§7Current status: {current}", "", "§eClick to toggle!")
+
+        barBtnMeta?.lore = barLore.map { it.replace("{current}", currentBarStr) }
+        barBtnMeta?.addItemFlags(ItemFlag.HIDE_ATTRIBUTES)
+
+        barBtnItem.itemMeta = barBtnMeta
+        inv.setItem(13, barBtnItem)
     }
 }
 
@@ -155,6 +177,15 @@ class SettingsGUIListener : Listener {
             12 -> { // Quest Dialogue Length
                 prefs.questDialogueLength = if (prefs.questDialogueLength == QuestDialogueLength.LONG) QuestDialogueLength.SHORT else QuestDialogueLength.LONG
                 player.preferences = prefs
+                player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.8f, 1.2f)
+                gui.render()
+            }
+            13 -> { // Rent BossBar Toggle
+                prefs.showRentBossBar = !prefs.showRentBossBar
+                player.preferences = prefs
+                if (!prefs.showRentBossBar) {
+                    vx.sv.gameplay.settlement.rent.RentManager.removeBossBar(player)
+                }
                 player.playSound(player.location, Sound.UI_BUTTON_CLICK, 0.8f, 1.2f)
                 gui.render()
             }

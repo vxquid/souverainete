@@ -46,11 +46,11 @@ import org.bukkit.craftbukkit.inventory.CraftItemStack
 import org.bukkit.entity.Player
 import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
+import vx.sv.Souverainete.Companion.plugin
 import vx.sv.event.VillagerKillTargetEvent
 import vx.sv.gameplay.humanoid.FarmerBehavior
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.settlement.Settlement
-import vx.sv.nms.VersionSpecificHumanoidEntityProvider.Companion.plugin
 import vx.sv.nms.entity.EntityProvider.Humanoid
 import vx.sv.nms.entity.ai.*
 import vx.sv.nms.entity.ai.construct.*
@@ -124,7 +124,8 @@ class HumanoidVillager(
                 this.populateStarterItems(bukkitVillager)
             }
 
-            bukkitVillager.isCollidable = false
+            // Управление коллизиями из конфига
+            bukkitVillager.isCollidable = plugin.gameplayConfig.humanoid.villagerCollisions
             bukkitVillager.canPickupItems = true
         }
 
