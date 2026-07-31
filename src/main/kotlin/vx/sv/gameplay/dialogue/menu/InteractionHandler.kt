@@ -23,6 +23,7 @@ import vx.sv.Souverainete.Companion.sendFormattedMessage
 import vx.sv.config.GameplayConfiguration.DialogueConfig.DialogueFormat
 import vx.sv.event.VillagerKillTargetEvent
 import vx.sv.event.VillagerStartFightEvent
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.dialogue.DialogueManager
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundAlpha
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.dialogueBackgroundBlue
@@ -46,11 +47,8 @@ import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.getLedSettlementId
-import vx.sv.gameplay.settlement.isSettlementLeader
-import vx.sv.gameplay.settlement.rent.RentManager
 import vx.sv.gameplay.trade.TradeManager.Companion.openTradeMenu
 import vx.sv.persistent.LivingEntityExtend.quests
-import vx.sv.persistent.LivingEntityExtend.settlement
 import vx.sv.persistent.MenuControlMode
 import vx.sv.persistent.PlayerPreferencesManager.preferences
 import vx.sv.persistent.QuestDialogueLength
@@ -183,7 +181,10 @@ class InteractionHandler : Listener {
             return
         }
 
+        // Проверка на убийство жителя игроком -> ачивка villain (villager_killer)
         if (event.finalDamage >= entity.health) {
+            AchievementManager.grant(player, "villager_killer")
+
             if (entity.equipment?.getItem(EquipmentSlot.OFF_HAND)?.type == Material.TOTEM_OF_UNDYING) {
                 val message = entity.race.phrases.totemResurrection.randomOrNull()
                 message?.let {
@@ -213,6 +214,13 @@ class InteractionHandler : Listener {
     @EventHandler
     private fun onVillagerKillTarget(event: VillagerKillTargetEvent) {
         val villager = event.villager
+        val victim = event.victim
+
+        // Если житель убил игрока -> ачивка villager_victim
+        if (victim is Player) {
+            AchievementManager.grant(victim, "villager_victim")
+        }
+
         if (!plugin.gameplayManager.allowedWorlds.contains(villager.world)) return
 
         val phrases = when (event.killType) {
@@ -350,6 +358,7 @@ class InteractionHandler : Listener {
             builder.button(inviteText) { menu ->
                 if (partyManager.addMember(player, villager)) {
                     player.playSound(player.location, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1f, 1f)
+                    AchievementManager.grant(player, "party_starter")
                     menu.destroy()
                 } else {
                     player.sendFormattedMessage(plugin.language.getString("party.full") ?: "Your party is full!")
@@ -366,89 +375,10 @@ class InteractionHandler : Listener {
             }
         }
 
-        // === [DEBUG] КНОПКА ОТКРЫТИЯ ИНВЕНТАРЯ ЖИТЕЛЯ ===
-//        if (player.isOp) {
-//            builder.button("§c[DEBUG] Проверить инвентарь") { menu ->
-//                player.openInventory(villager.inventory)
-//                player.playSound(player.location, Sound.BLOCK_CHEST_OPEN, 1.0f, 1.0f)
-//                menu.destroy()
-//            }
-//        }
-
-        // === [КНОПКА АРЕНДЫ У МЭРА] ===
-        val settlement = villager.settlement
-        if (settlement != null && villager.isSettlementLeader()) {
-            val repScore = settlement.data.reputation[player.uniqueId] ?: 0
-            val isFriendly = repScore >= plugin.gameplayConfig.reputation.friendlyRequired
-            val has64Currency = RentManager.hasRaceCurrency(player, settlement, plugin.gameplayConfig.settlement.rentCurrencyCost)
-
-            if (isFriendly && has64Currency) {
-                val availablePlots = RentManager.getRentPlotsForSettlement(settlement)
-                if (availablePlots.isNotEmpty()) {
-                    val rentBtnText = plugin.language.getString("interaction-menu.rent-button") ?: "§aRent Land Plot"
-                    builder.button(rentBtnText, isRainbow = true) {
-                        this.showRentSelectionMenu(player, villager, settlement)
-                    }
-                }
-            }
-        }
-
         builder.button(plugin.language.getString("interaction-menu.close-button") ?: "Close") { menu ->
             menu.destroy()
         }
 
-        builder.build()
-    }
-
-    private fun showRentSelectionMenu(player: Player, villager: Villager, settlement: Settlement) {
-        val builder = Builder(villager, player)
-        val plots = RentManager.getRentPlotsForSettlement(settlement)
-
-        var index = 1
-        for (pair in plots) {
-            val record = pair.first
-            val plotData = pair.second
-
-            val label = if (plotData.ownerId == null) {
-                "§aPlot #$index (Available)"
-            } else if (plotData.ownerId == player.uniqueId) {
-                "§ePlot #$index (Rented by You - Renew)"
-            } else {
-                "§cPlot #$index (Occupied)"
-            }
-
-            builder.button(label) { menu ->
-                if (plotData.ownerId == null) {
-                    if (RentManager.rentPlot(player, settlement, record, plotData)) {
-                        val msg = plugin.language.getString("rent.success-rented")
-                            ?.replace("{settlement}", settlement.data.settlementName)
-                            ?: "§aYou have successfully rented a plot in ${settlement.data.settlementName}!"
-                        player.sendFormattedMessage(msg)
-                        player.playSound(player.location, Sound.ENTITY_PLAYER_LEVELUP, 1.0f, 1.0f)
-                    } else {
-                        player.sendFormattedMessage("§cFailed to pay currency for rent!")
-                    }
-                } else if (plotData.ownerId == player.uniqueId) {
-                    if (RentManager.renewPlotRent(player, settlement, plotData)) {
-                        val msg = plugin.language.getString("rent.success-renewed")
-                            ?: "§aYou have successfully extended your land lease!"
-                        player.sendFormattedMessage(msg)
-                        player.playSound(player.location, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, 1.0f, 1.0f)
-                    } else {
-                        player.sendFormattedMessage("§cFailed to pay currency to extend rent!")
-                    }
-                } else {
-                    player.sendFormattedMessage("§cThis plot is already occupied by another tenant!")
-                }
-                menu.destroy()
-            }
-            index++
-        }
-
-        builder.button(plugin.language.getString("interaction-menu.return-button") ?: "Return") { menu ->
-            menu.destroy()
-            this.showDefaultMenu(player, villager)
-        }
         builder.build()
     }
 
@@ -469,6 +399,7 @@ class InteractionHandler : Listener {
                 plugin.language.getString("party.order.response-follow") ?: "Right behind you."
 
             villager.talk(player, response, followDuringDialogue = false, displaySize = 0.4f)
+            AchievementManager.grant(player, "tactician")
             menu.destroy()
             this.showPartyMenu(player, villager)
         }
@@ -489,6 +420,7 @@ class InteractionHandler : Listener {
                 CombatTactic.RANGED -> plugin.language.getString("party.tactic.response-ranged") ?: "I'll keep my distance and shoot."
             }
             villager.talk(player, response, followDuringDialogue = false, displaySize = 0.4f)
+            AchievementManager.grant(player, "tactician")
             menu.destroy()
             this.showPartyMenu(player, villager)
         }
@@ -532,6 +464,9 @@ class InteractionHandler : Listener {
             if (!villager.openTradeMenu(player)) {
                 val message = villager.race.phrases.noItemsToTrade.randomOrNull()
                 message?.let { villager.talk(player, it, followDuringDialogue = false) }
+            } else {
+                // Если у жителя открылся кастомный/уникальный трейд -> ачивка unique_item_buyer
+                AchievementManager.grant(player, "unique_item_buyer")
             }
         }, 1L)
     }

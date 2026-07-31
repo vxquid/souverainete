@@ -23,6 +23,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.nms.entity.HumanoidVillager
 import java.util.*
@@ -150,7 +151,7 @@ class ConstructionBehavior(
         return material.name.contains("LEAVES")
     }
 
-    private fun removeWholeTree(startBlock: Block, settlement: Settlement?) {
+    private fun removeWholeTree(startBlock: Block, settlement: Settlement?, villager: HumanoidVillager) {
         val settlementId = settlement?.data?.id
         val protectedBlocks = mutableSetOf<BlockPos>()
         val completedBoxes = mutableListOf<BoundingBox>()
@@ -324,6 +325,11 @@ class ConstructionBehavior(
 
         targetLogs.forEach { it.breakNaturally() }
         validLeaves.forEach { it.type = Material.AIR }
+
+        // ВЫДАЕМ АЧИВКУ ЛЕСОРУБА ИГРОКАМ В РАДИУСЕ
+        world.getNearbyPlayers(startBlock.location, 32.0).forEach { player ->
+            AchievementManager.grant(player, "lumberjack")
+        }
     }
 
     private fun findConnectedTrunk(startBlock: Block, settlement: Settlement?): Block? {
@@ -615,7 +621,7 @@ class ConstructionBehavior(
 
             if (!block.isIgnorableObstacle() && !isPathTransformation && !isFarmlandTransformation) {
                 if (isLogBlock(block.type)) {
-                    removeWholeTree(block, settlement)
+                    removeWholeTree(block, settlement, villager)
 
                     assignedBlockTicksMap.remove(villager)
                     villager.digTicks = 0
@@ -641,6 +647,13 @@ class ConstructionBehavior(
                 val baseBreakDuration = plugin.gameplayConfig.settlement.baseBlockBreakDuration
                 val breakDuration = if (block.type.hardness > 2.0) baseBreakDuration * 2 else baseBreakDuration
                 if (villager.digTicks >= breakDuration) {
+                    // Проверка на шахту/минер ачивку
+                    if (block.type == Material.STONE || block.type.name.contains("ORE")) {
+                        bukkitWorld.getNearbyPlayers(block.location, 16.0).forEach { player ->
+                            AchievementManager.grant(player, "miner_lord")
+                        }
+                    }
+
                     block.breakNaturally()
                     villager.digTicks = 0
                     villager.nextBuildAvailableTime = world.gameTime + plugin.gameplayConfig.settlement.taskSwitchCooldownTicks
@@ -748,6 +761,13 @@ class ConstructionBehavior(
                         }
 
                         job.completeBlock(assigned)
+                    }
+
+                    // Если постройка задания завершена — выдаем ачивку мастер-строителя игрокам рядом
+                    if (job.isFinished()) {
+                        bukkitWorld.getNearbyPlayers(block.location, 32.0).forEach { player ->
+                            AchievementManager.grant(player, "master_builder")
+                        }
                     }
 
                     villager.assignedBlock = null

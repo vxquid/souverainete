@@ -2,12 +2,14 @@ package vx.sv.gameplay.settlement.rent
 
 import com.google.gson.reflect.TypeToken
 import org.bukkit.Bukkit
+import org.bukkit.Color
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.boss.BarColor
 import org.bukkit.boss.BarStyle
 import org.bukkit.boss.BossBar
 import org.bukkit.entity.Player
+import org.bukkit.entity.TextDisplay
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
@@ -20,6 +22,7 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
@@ -145,6 +148,9 @@ class RentManager : Listener {
             plotData.ownerId = player.uniqueId
             plotData.rentExpiryGameTime = settlement.world.gameTime + durationTicks
             plotData.members.clear()
+
+            // ВЫДАЕМ АЧИВКУ ЛЭНДЛОРД
+            AchievementManager.grant(player, "landlord")
 
             saveAll()
             return true

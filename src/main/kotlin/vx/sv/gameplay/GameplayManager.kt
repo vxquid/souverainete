@@ -8,6 +8,7 @@ import org.bukkit.event.world.WorldLoadEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.config.GameplayConfiguration
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.death.DeathManager
 import vx.sv.gameplay.dialogue.DialogueManager
 import vx.sv.gameplay.dialogue.PartyChatManager
@@ -61,6 +62,7 @@ class GameplayManager(val firstWorld: World) : Listener {
     val partChatManager    = PartyChatManager()
     val deathManager       = DeathManager()
     val versionBridge      = VersionBridge(plugin)
+    val achievementManager = AchievementManager()
 
     @EventHandler
     private fun onWorldLoad(event: WorldLoadEvent) {

@@ -15,6 +15,7 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.potion.PotionEffect
 import org.bukkit.potion.PotionEffectType
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.humanoid.NametagDisplayManager
 import vx.sv.gameplay.humanoid.race.RaceManager
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
@@ -686,12 +687,18 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 val msg = msgVictoryChat.replace("{defender}", defender.data.settlementName)
                 broadcastGlobalMessage(msg)
 
+                // ВЫДАЕМ АЧИВКУ ЗАЩИТНИКАМ (всем игрокам в территории поселения)
+                viewingPlayers.forEach { player ->
+                    if (defender.territory.contains(player.location.toVector())) {
+                        AchievementManager.grant(player, "defender")
+                    }
+                }
+
                 primaryText = msgVictoryPrimary
                 secondaryText = msgVictorySecondary
                 primaryColor = NamedTextColor.GREEN
                 secondaryColor = NamedTextColor.GREEN
 
-                // Дополнительная проверка на случай, если последний житель погиб сразу после победы
                 val aliveCount = defender.villagers.count { !it.isDead && it.isValid }
                 if (aliveCount == 0) {
                     SettlementManager.destroySettlement(defender)
@@ -751,7 +758,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                     primaryColor = NamedTextColor.DARK_RED
                     secondaryColor = NamedTextColor.DARK_RED
 
-                    // Ликвидируем вымершее поселение
                     SettlementManager.destroySettlement(defender)
                 }
             }
@@ -767,7 +773,6 @@ class SettlementRaid(val defender: Settlement, val data: Settlement.RaidData) {
                 }
                 data.aliveRaiders.clear()
 
-                // Если рейд остановлен, а живых жителей не осталось, поселение уничтожается
                 val aliveCount = defender.villagers.count { !it.isDead && it.isValid }
                 if (aliveCount == 0) {
                     SettlementManager.destroySettlement(defender)

@@ -22,6 +22,7 @@ import org.bukkit.map.MapView
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.event.MerchantTradeEvent
 import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
 import vx.sv.gameplay.reputation.ReputationManager.Companion.opinionOn
@@ -71,6 +72,9 @@ class TradeManager : Listener {
                 }
 
                 val recipe = villager.recipes.find { it.result.isSimilar(rewardItem) && it.ingredients[0].isSimilar(firstTrade) } ?: throw NullPointerException("Null recipe on successful trade.")
+
+                // ВЫДАЕМ АЧИВКУ КОЛЛЕКЦИОНЕРА ЗА ПОКУПКУ УНИКАЛЬНОГО АРТЕФАКТА / ТОРГОВЛЮ
+                AchievementManager.grant(player, "unique_item_buyer")
 
                 Bukkit.getServer().scheduler.runTask(plugin) { _ ->
                     Bukkit.getServer().pluginManager.callEvent(MerchantTradeEvent(villager, player, recipe))

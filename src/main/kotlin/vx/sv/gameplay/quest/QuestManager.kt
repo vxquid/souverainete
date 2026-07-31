@@ -19,6 +19,7 @@ import org.bukkit.util.io.BukkitObjectOutputStream
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.sendFormattedMessage
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.dialogue.DialogueManager.Companion.talk
 import vx.sv.gameplay.event.MerchantTradeEvent
 import vx.sv.gameplay.event.PlayerAcceptQuestEvent
@@ -51,10 +52,6 @@ import java.io.ByteArrayOutputStream
 import java.net.URL
 import java.util.*
 
-/**
- * Manages the entire quest lifecycle in the game, including generation via AI,
- * assignment to NPCs, player acceptance, progress tracking, and completion/failure events.
- */
 class QuestManager : Listener {
 
     val progressTracker = ProgressTracker()
@@ -71,15 +68,12 @@ class QuestManager : Listener {
     init {
         plugin.server.pluginManager.registerEvents(this, plugin)
 
-        // TODO; Don't forget to enable quest tick. I don't need it right now.
         plugin.server.scheduler.runTaskTimer(plugin, Runnable { tick() }, 0, plugin.gameplayManager.config.quest.intervalTicks)
         plugin.server.scheduler.runTaskTimer(plugin, Runnable { politicalTick() }, 100L, plugin.gameplayManager.config.quest.intervalTicks)
 
         gatheringDescription = plugin.prompts.getString("quest-family.gathering.quest-description")
             ?: "To complete the quest, the player will need to obtain an item `{questItem}` in the amount of {questItemAmount} and bring it to the NPC. The NPC promises a reward ({rewardItem}) for the assistance, without specifying what exactly it will be. When generating the quest, be sure to thoughtfully consider this information. In addition to the previous requirements, follow these guidelines during the generation: {taskDescription}."
 
-        // Added {targetLeader} explicitly so AI knows WHO the receiver is in the base text.
-        // Diplomatic info is moved exclusively to the DIPLOMATIC CONTEXT block to prevent redundancy.
         deliveryDescription = plugin.prompts.getString("quest-family.delivery.quest-description")
             ?: "The player must deliver a highly important sealed political package to {targetLeader}, the leader of {targetSettlement}. The NPC promises a reward ({rewardItem}) upon delivery. {taskDescription}."
 
@@ -97,14 +91,13 @@ class QuestManager : Listener {
         val world = plugin.gameplayManager.allowedWorlds.filter { it.entities.filterIsInstance<Villager>().isNotEmpty() }.randomOrNull() ?: return
         val villager = this.selectRandomVillager(world) ?: return
 
-        if (Bukkit.getOnlinePlayers().count() == 0) return // No quest gen with zero players
+        if (Bukkit.getOnlinePlayers().count() == 0) return
         if (villager.profession == Profession.NONE) return
         if (villager.quests().size > plugin.gameplayManager.config.quest.npcQuestBase + villager.villagerLevel) return
 
         val allowedQuests = mutableListOf(QuestType.PROFESSION_ITEM_GATHERING, QuestType.BOOZE, QuestType.MUSIC_DISC)
             .filter { it in allowedQuestTypes }.toMutableList()
 
-        // Check combined storage (personal + settlement virtual inventory) for food
         val hasEdible = villager.hasEdibleItem() || (villager.settlement?.villageInventory?.any { it.type.isEdible } == true)
 
         val questType = if (villager.hunger <= plugin.gameplayManager.config.hunger.questThreshold && !hasEdible && QuestType.FOOD_SEARCH in allowedQuestTypes) {
@@ -161,7 +154,6 @@ class QuestManager : Listener {
 
         val targetLeaderId = targetSettlement.data.leaderId ?: return
 
-        // Robust fallback: Check actual entity name if string is null (backward compatibility for old saves)
         val targetLeaderName = targetSettlement.data.leaderName
             ?: targetSettlement.villagers.find { it.uniqueId == targetLeaderId }?.customName
             ?: "Unknown Leader"
@@ -213,7 +205,6 @@ class QuestManager : Listener {
 
             val finalItem = generator.questItem.item.clone()
 
-            // If it's a delivery quest, dynamically create the sealed package
             if (type == QuestType.MESSAGE_DELIVERY) {
                 val meta = finalItem.itemMeta as? SkullMeta
                 if (meta != null) {
@@ -238,7 +229,6 @@ class QuestManager : Listener {
                         )
                     }
 
-                    // Apply the "Extinct Mining Lootbox" custom texture
                     try {
                         val profile = Bukkit.createPlayerProfile(UUID.randomUUID())
                         val textures = profile.textures
@@ -249,7 +239,6 @@ class QuestManager : Listener {
                         plugin.logger.warning("Failed to apply package texture: ${e.message}")
                     }
 
-                    // Generate the AI written letter
                     val defaultSender = plugin.language.getString("quest.delivery.default-sender") ?: "Leader"
                     val bookTitleFormat = plugin.language.getString("quest.delivery.book-title") ?: "§6Letter from {sender}"
                     val senderName = questGiver.customName ?: defaultSender
@@ -261,16 +250,14 @@ class QuestManager : Listener {
 
                     val defaultLetterContent = plugin.language.getString("quest.delivery.default-letter-content") ?: "We must stand together."
                     val content = data.letterContent ?: defaultLetterContent
-                    bookMeta.pages = content.chunked(250) // Chunk long text to fit on pages
+                    bookMeta.pages = content.chunked(250)
                     letterBook.itemMeta = bookMeta
 
-                    // Generate random internal loot
                     val loot = mutableListOf<ItemStack>(letterBook)
                     if (Math.random() > 0.5) loot.add(ItemStack(Material.DIAMOND, (1..3).random()))
                     if (Math.random() > 0.3) loot.add(ItemStack(Material.GOLD_INGOT, (3..10).random()))
                     if (Math.random() > 0.7) loot.add(ItemStack(Material.EMERALD, (1..5).random()))
 
-                    // Serialize the loot and store it inside the item's PersistentDataContainer
                     meta.persistentDataContainer.set(NamespacedKey(plugin, "package_contents"), PersistentDataType.STRING, serializeItems(loot))
                     finalItem.itemMeta = meta
                 }
@@ -297,9 +284,6 @@ class QuestManager : Listener {
         }
     }
 
-    /**
-     * Intercepts Right-Clicks to prevent placing the package and to handle breaking the seal.
-     */
     @EventHandler
     fun onPackageInteract(event: PlayerInteractEvent) {
         if (event.action != Action.RIGHT_CLICK_AIR && event.action != Action.RIGHT_CLICK_BLOCK) return
@@ -310,13 +294,12 @@ class QuestManager : Listener {
         val packageKey = NamespacedKey(plugin, "package_contents")
 
         if (meta.persistentDataContainer.has(packageKey, PersistentDataType.STRING)) {
-            event.isCancelled = true // Prevent placing the head as a block
+            event.isCancelled = true
 
             val questId = meta.persistentDataContainer.get(NamespacedKey(plugin, "quest_id"), PersistentDataType.LONG)
             val contentsRaw = meta.persistentDataContainer.get(packageKey, PersistentDataType.STRING)
 
             if (contentsRaw != null) {
-                // Deserialize and drop the hidden loot to the player
                 val items = deserializeItems(contentsRaw)
                 items.forEach { event.player.world.dropItemNaturally(event.player.location, it) }
             }
@@ -325,23 +308,22 @@ class QuestManager : Listener {
             val msg = plugin.language.getString("quest.seal-broken") ?: "§cYou broke the seal and stole the contents!"
             event.player.sendFormattedMessage(msg)
 
-            item.amount -= 1 // Consume the package
+            item.amount -= 1
 
-            // If it belongs to an active quest, mark it as SEAL BROKEN (-2.0)
             if (questId != null) {
                 val player = event.player
                 val quest = player.quests().find { it.id == questId }
                 if (quest != null) {
-                    quest.progress = -2.0 // -2.0 specifically indicates Betrayal / Seal Broken
+                    quest.progress = -2.0
 
-                    // SEVERE PENALTY: Check if broken in sender's territory
+                    // ВЫДАЕМ АЧИВКУ КУРЬЕРА-ПРЕДАТЕЛЯ
+                    AchievementManager.grant(player, "courier_betrayal")
+
                     val giverSettlementId = quest.giverSettlementId
                     if (giverSettlementId != null) {
                         val giverSettlement = SettlementManager.getById(giverSettlementId)
                         if (giverSettlement != null && giverSettlement.territory.contains(player.location.toVector())) {
                             player.sendFormattedMessage("§4[!] §cYou were caught breaking the seal within ${giverSettlement.data.settlementName}'s territory! They are outraged!")
-
-                            // Change settlement-wide reputation properly using ReputationManager overloaded method
                             plugin.gameplayManager.reputationManager.addReputation(giverSettlement, player, -1000)
                         }
                     }
@@ -383,13 +365,10 @@ class QuestManager : Listener {
         if (questGiver is Villager) questGiver.villagerExperience += villagerExperience
         player.giveExp(playerExperience)
 
-        // UPDATE REPUTATION GLOBALLY FOR THE SETTLEMENT
         val settlement = questGiver.settlement
         if (settlement != null) {
-            // This safely adds the reputation and triggers standard notifications & UI
             plugin.gameplayManager.reputationManager.addReputation(settlement, player, playerReputation)
         } else {
-            // Fallback for homeless/independent NPCs
             plugin.gameplayManager.reputationManager.addReputation(questGiver, player, playerReputation)
         }
 
@@ -404,8 +383,6 @@ class QuestManager : Listener {
             val giverSettlement = SettlementManager.getById(quest.giverSettlementId!!)
             val targetSettlement = SettlementManager.getById(quest.targetSettlementId!!)
             if (giverSettlement != null && targetSettlement != null) {
-
-                // SIGNIFICANT POLITICAL SHIFT ON SUCCESS (Shift UP by 1 Relation Level)
                 val currentRelation = SettlementManager.getRelation(giverSettlement, targetSettlement)
                 val levels = Settlement.RelationLevel.entries.toTypedArray()
                 val newLevel = levels[minOf(levels.size - 1, currentRelation.ordinal + 1)]
@@ -417,17 +394,25 @@ class QuestManager : Listener {
                 val record = "SUCCESS: Player '${player.name}' successfully delivered '$itemName'. Relations improved to ${newLevel.name}."
                 SettlementManager.recordDiplomaticEvent(giverSettlement, targetSettlement, record)
 
-                // NOTIFY PLAYER OF DIPLOMATIC IMPACT (SUCCESS)
                 val impactMsg = plugin.language.getString("quest.diplomatic-success")
                     ?.replace("{settlementA}", giverSettlement.data.settlementName)
                     ?.replace("{settlementB}", targetSettlement.data.settlementName)
                     ?: "§6[Diplomacy] §eYour actions have positively influenced the relations between §b${giverSettlement.data.settlementName} §eand §b${targetSettlement.data.settlementName}§e!"
                 player.sendFormattedMessage(impactMsg)
+
+                // ВЫДАЕМ АЧИВКУ МЕДИАТОРА (ЗА УСПЕШНУЮ ДОСТАВКУ)
+                AchievementManager.grant(player, "peacemaker")
             }
         }
 
         player.questsCompleted += 1
         player.experienceEarnedByQuests += playerExperience
+
+        // ВЫДАЕМ АЧИВКИ ЗА КВЕСТЫ (НОВИЧОК И МАСТЕР)
+        AchievementManager.grant(player, "quest_novice")
+        if (player.questsCompleted >= 10) {
+            AchievementManager.grant(player, "quest_master")
+        }
 
         onFinish.invoke()
         this.invalidateQuest(quest, QuestInvalidationEvent.Reason.FINISHED_BY_SOMEONE_ELSE)
@@ -446,7 +431,6 @@ class QuestManager : Listener {
             event.player.closeInventory()
             when (quest.type) {
                 QuestType.PROFESSION_ITEM_GATHERING, QuestType.SMITHING_TEMPLATE_ORDER, QuestType.ENCHANTED_BOOK_ORDER, QuestType.TREASURE_HUNT, QuestType.MESSAGE_DELIVERY -> {
-                    // Move received items to global virtual inventory if villager has a settlement
                     val settlement = villager.settlement
                     if (settlement != null) {
                         val personalInv = villager.inventory
@@ -503,7 +487,6 @@ class QuestManager : Listener {
                     }
                     playRecordFollowingNpc(villager, recordKey)
 
-                    // Transfer music disc to shared virtual storage
                     val settlement = villager.settlement
                     if (settlement != null) {
                         val personalInv = villager.inventory
@@ -541,7 +524,6 @@ class QuestManager : Listener {
                         humanoid.consume(villager.world, potion, Sound.ENTITY_GENERIC_DRINK, 7, villager.location, 7) {
                             effect?.let { villager.addPotionEffect(it) }
 
-                            // Check and consume from combined inventory
                             val inv = villager.inventory
                             val found = inv.filterNotNull().find { it.isSimilar(potion) }
                             if (found != null) {
@@ -596,16 +578,12 @@ class QuestManager : Listener {
     private fun handleItemDestruction(questId: Long) {
         val player = Bukkit.getOnlinePlayers().find { p -> p.quests().any { it.id == questId } } ?: return
         val quest = player.quests().find { it.id == questId } ?: return
-        quest.progress = -1.0 // -1.0 flag for destroyed item
+        quest.progress = -1.0
         plugin.server.scheduler.runTask(plugin, Runnable {
             invalidateQuest(quest, QuestInvalidationEvent.Reason.NOT_ACTUAL)
         })
     }
 
-    /**
-     * Handles the logic for when a quest becomes invalid or is failed by the player.
-     * Decreases relations between settlements robustly upon delivery failures.
-     */
     @EventHandler
     private fun onQuestInvalidation(event: QuestInvalidationEvent) {
         val player = event.player
@@ -618,11 +596,9 @@ class QuestManager : Listener {
             QuestInvalidationEvent.Reason.NOT_ACTUAL -> plugin.language.getString("quest.failed.notActual")
         }
 
-        // Apply severe penalties if a political delivery quest is failed
         if (event.quest.type == QuestType.MESSAGE_DELIVERY) {
             var reasonStr = "Unknown reason"
 
-            // Override messages based on the specific failure type
             if (event.quest.progress == -1.0) {
                 message = plugin.language.getString("quest.failed.destroyed") ?: "Quest §6{quest} §7was failed; your quest item was destroyed!"
                 reasonStr = "Item was destroyed"
@@ -642,7 +618,6 @@ class QuestManager : Listener {
                 val defaultItemName = plugin.language.getString("quest.delivery.default-item-name") ?: "Sealed Package"
                 val itemName = event.quest.data.questItemName ?: defaultItemName
 
-                // SIGNIFICANT POLITICAL SHIFT ON FAILURE (Shift DOWN strictly by 1 Relation Level)
                 val currentRelation = SettlementManager.getRelation(giverSettlement, targetSettlement)
                 val levels = Settlement.RelationLevel.entries.toTypedArray()
 
@@ -650,11 +625,9 @@ class QuestManager : Listener {
 
                 SettlementManager.setRelation(giverSettlement, targetSettlement, newLevel)
 
-                // Record the failure in Diplomatic History
                 val record = "FAILURE: Player '${player.name}' failed to deliver '$itemName' ($reasonStr). Relations worsened to ${newLevel.name}."
                 SettlementManager.recordDiplomaticEvent(giverSettlement, targetSettlement, record)
 
-                // NOTIFY PLAYER OF DIPLOMATIC IMPACT (FAILURE)
                 val impactMsg = plugin.language.getString("quest.diplomatic-fail")
                     ?.replace("{settlementA}", giverSettlement.data.settlementName)
                     ?.replace("{settlementB}", targetSettlement.data.settlementName)
@@ -695,7 +668,7 @@ class QuestManager : Listener {
             npc.removeQuest(quest)
             plugin.gameplayManager.actualQuests.remove(quest.id)
 
-            quest.timeLimit = 2 * 60 * 60 * 1000L // 2 hours
+            quest.timeLimit = 2 * 60 * 60 * 1000L
             quest.deadline = System.currentTimeMillis() + quest.timeLimit
         }
 
@@ -903,7 +876,7 @@ class QuestManager : Listener {
                                                val extraShortTaskDescription: String,
                                                val shortRequiredQuestItemDescription: String,
                                                val questDescription: String,
-                                               val shortQuestDescription: String? = null, // Added short version
+                                               val shortQuestDescription: String? = null,
                                                val questFinisherDialogue: String,
                                                val questItemName: String? = null,
                                                val questItemDescription: String? = null,

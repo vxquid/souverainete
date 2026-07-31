@@ -23,6 +23,7 @@ import vx.sv.config.lib.ConfigurationManager
 import vx.sv.config.GameplayConfiguration
 import vx.sv.config.lib.TranslationManager
 import vx.sv.gameplay.GameplayManager
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlementsWorldKey
@@ -91,58 +92,57 @@ class Souverainete : JavaPlugin(), Listener {
         this.server.pluginManager.registerEvents(this, this)
         this.server.pluginManager.registerEvents(VillageGenerationListener(), this)
 
-        // Регистрация слушателя и таймера привата/аренды
         server.pluginManager.registerEvents(RentManager(), this)
 
-        // Загрузка данных аренды при включении плагина
         Bukkit.getWorlds().forEach { world ->
             RentManager.loadWorldRentData(world)
         }
 
-        // Translate language.yml using cache. Must be async.
+        // Перевод language.yml через ИИ / Кэш в асинхронном потоке
         this.server.scheduler.runTaskAsynchronously(this) { _ ->
             val languageFile = File(dataFolder, "language.yml")
             language = translationManager.getTranslated(languageFile)
+
+            // РЕГИСТРИРУЕМ АЧИВКИ СТРОГО ПОСЛЕ ТОГО, КАК ПЕРЕВОД ПРИМЕНИЛСЯ К `language`
+            this.server.scheduler.runTask(this, Runnable {
+                AchievementManager.registerAll()
+                for (player in Bukkit.getOnlinePlayers()) {
+                    AchievementManager.syncPlayerAdvancements(player)
+                }
+            })
         }
 
         // --- BSTATS METRICS ---
         val metrics = Metrics(this, 27976)
 
-        // 1. AI Provider
         metrics.addCustomChart(Metrics.SimplePie("ai_provider") {
             providerManager.config.providerType.name
         })
 
-        // 2. AI Language
         metrics.addCustomChart(Metrics.SimplePie("ai_language") {
             providerManager.config.language
         })
 
-        // 3. Dialogue Format
         metrics.addCustomChart(Metrics.SimplePie("dialogue_format") {
             if (::gameplayManager.isInitialized) gameplayManager.config.dialogue.dialogueFormat.name else "Unknown"
         })
 
-        // 4. Party Death Strategy
         metrics.addCustomChart(Metrics.SimplePie("death_strategy") {
             if (::gameplayManager.isInitialized) gameplayManager.config.party.deathHandleStrategy else "Unknown"
         })
 
-        // 5. Custom Skin Status
         metrics.addCustomChart(Metrics.SimplePie("humanoid_npcs") {
             if (::gameplayManager.isInitialized) {
                 if (gameplayManager.config.humanoid.humanoidVillagers) "Enabled" else "Disabled"
             } else "Unknown"
         })
 
-        // 6. Vanilla Trading Status
         metrics.addCustomChart(Metrics.SimplePie("vanilla_trading") {
             if (::gameplayManager.isInitialized) {
                 if (gameplayManager.config.general.vanillaTrading) "Enabled" else "Disabled"
             } else "Unknown"
         })
 
-        // 7. Total Settlements Count
         metrics.addCustomChart(Metrics.SingleLineChart("total_settlements") {
             if (::gameplayManager.isInitialized) {
                 settlements.values.sumOf { it.size }
@@ -150,7 +150,6 @@ class Souverainete : JavaPlugin(), Listener {
         })
         // --- END OF METRICS ---
 
-        // Update checking.
         UpdateChecker(121059).getVersion { remoteVersion ->
             @Suppress("DEPRECATION") val currentVersion = description.version
             val comparison = UpdateChecker.compareVersions(currentVersion, remoteVersion)
@@ -184,16 +183,13 @@ class Souverainete : JavaPlugin(), Listener {
             this.gameplayManager = GameplayManager(event.world)
             this.commandManager = PaperCommandManager(this)
 
-            // Command registration
             commandManager.registerCommand(QuestCommand())
             commandManager.registerCommand(TranslateCommand())
             commandManager.registerCommand(SettlementCommand())
             commandManager.registerCommand(SettingsCommand())
 
-            // Register GUI listener
             server.pluginManager.registerEvents(SettingsGUIListener(), this)
 
-            // build save and listeners
             server.pluginManager.registerEvents(WoodFarmManager(), this)
             server.pluginManager.registerEvents(BuilderSafetyListener(), this)
             server.pluginManager.registerEvents(LocateCommandOverrideListener(), this)
@@ -204,16 +200,14 @@ class Souverainete : JavaPlugin(), Listener {
     fun onWorldSave(event: WorldSaveEvent) {
         val world = event.world
 
-        // 1. Сохраняем все 3D-данные планировщика (разметку зданий, очереди задач и активные сессии)
         SettlementPlanner.saveBuildingsToWorld(world)
-
-        // 2. Сохраняем основные данные поселений (жителей, репутацию, дипломатию)
         SettlementManager.saveSettlements(world)
     }
 
     @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
-        // Handle admin updates alert
+        AchievementManager.syncPlayerAdvancements(event.player)
+
         if (event.player.hasPermission("sv.update")) {
             if (latestVersion != null && updateAvailable) {
                 val updateMsg = language.getString("update.new-version-available", "§cA new version of §6Souverainete §cis available: §e{newVersion}§c! Please update.")
@@ -222,7 +216,6 @@ class Souverainete : JavaPlugin(), Listener {
             }
         }
 
-        // --- Settings Welcome Hint ---
         val welcomeMsg = language.getString(
             "info-messages.welcome-settings",
             "§8[Souverainete] §7Server is running Souverainete. Customize your experience using §e/s settings§7."

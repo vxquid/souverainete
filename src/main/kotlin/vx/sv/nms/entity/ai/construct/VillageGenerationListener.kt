@@ -12,10 +12,12 @@ import org.bukkit.event.Listener
 import org.bukkit.event.block.BlockBreakEvent
 import org.bukkit.event.entity.EntityDamageEvent
 import org.bukkit.event.entity.EntityInteractEvent
+import org.bukkit.event.player.PlayerJoinEvent
 import org.bukkit.event.world.AsyncStructureSpawnEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
@@ -71,6 +73,13 @@ class VillageGenerationListener : Listener {
                 }
             }
         }.runTaskTimer(plugin, 40L, 40L)
+    }
+
+    @EventHandler
+    fun onPlayerJoin(event: PlayerJoinEvent) {
+        // Синхронизируем все ачивки и выдаем базовые элементы мира при каждом входе
+        AchievementManager.syncPlayerAdvancements(event.player)
+        AchievementManager.grant(event.player, "first_steps_world")
     }
 
     private fun loadDormantSites(world: World): MutableSet<DormantSite> {
@@ -265,7 +274,6 @@ class VillageGenerationListener : Listener {
         val chunkX = centerX shr 4
         val chunkZ = centerZ shr 4
 
-        // Подгружаем чанк асинхронно через Paper API
         world.getChunkAtAsync(chunkX, chunkZ).thenAccept { _ ->
             Bukkit.getScheduler().runTask(plugin, Runnable {
                 val worldSettlements = SettlementManager.settlements[world] ?: emptyList()
@@ -339,6 +347,12 @@ class VillageGenerationListener : Listener {
                 }
 
                 val centerLoc = Location(world, bestX.toDouble(), bestY.toDouble(), bestZ.toDouble())
+
+                world.getPlayers().forEach { player ->
+                    if (player.location.distanceSquared(centerLoc) <= 65536.0) {
+                        AchievementManager.grant(player, "first_visit_village")
+                    }
+                }
 
                 val groundY = SettlementPlanner.getHighestGroundYAt(world, bestX + 4, bestZ)
                 val safeCampfireLoc = Location(world, bestX.toDouble() + 4.0, (if (groundY != -999) groundY else bestY).toDouble() + 1.0, bestZ.toDouble())

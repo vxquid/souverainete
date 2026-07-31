@@ -15,28 +15,25 @@ import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.sendFormattedMessage
 import vx.sv.debug.LeaderHighlightManager
+import vx.sv.gameplay.achievement.AchievementManager
 import vx.sv.gameplay.quest.QuestManager
 import vx.sv.gameplay.quest.QuestManager.Companion.addQuest
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.isSettlementLeader
-import vx.sv.gameplay.settlement.rent.RentManager
 import vx.sv.nms.entity.ai.construct.SettlementPlanner
 import vx.sv.nms.entity.ai.construct.VanillaBuildingType
 import vx.sv.persistent.LivingEntityExtend.settlement
-import java.util.UUID
+import java.util.*
 
 @CommandAlias("settlement|s")
 class SettlementCommand : BaseCommand() {
 
     init {
-        // Регистрация кастомного контекстного сопоставителя для Settlement.
-        // Он склеивает аргументы до нахождения точного совпадения названия поселения (поддерживает пробелы).
         plugin.commandManager.commandContexts.registerContext(Settlement::class.java) { c ->
             val argList = mutableListOf<String>()
             var resolvedSettlement: Settlement? = null
 
-            // Исправлено: используем getFirstArg() != null для безопасной peek-проверки наличия аргументов
             while (c.getFirstArg() != null) {
                 argList.add(c.popFirstArg())
                 val testName = argList.joinToString(" ")
@@ -60,7 +57,6 @@ class SettlementCommand : BaseCommand() {
             resolvedSettlement
         }
 
-        // Registering a custom completion that returns a list of all settlement names
         plugin.commandManager.commandCompletions.registerCompletion("settlements") {
             SettlementManager.settlements.values.flatten().map { it.data.settlementName }
         }
@@ -70,7 +66,6 @@ class SettlementCommand : BaseCommand() {
     @CommandPermission("sv.settlement.teleport")
     @CommandCompletion("@settlements")
     fun onTeleport(player: Player, settlement: Settlement) {
-        // Teleport player to the center of the settlement
         player.teleport(settlement.data.center)
 
         val teleportMsg = plugin.language.getString(
@@ -84,7 +79,6 @@ class SettlementCommand : BaseCommand() {
     @CommandPermission("sv.settlement.reputation")
     @CommandCompletion("@settlements @players")
     fun onReputation(player: Player, settlement: Settlement, targetPlayerName: String, amount: Int) {
-        // Fetch offline player to allow changing reputation even if they are offline
         @Suppress("DEPRECATION")
         val targetPlayer = Bukkit.getOfflinePlayer(targetPlayerName)
 
@@ -97,7 +91,6 @@ class SettlementCommand : BaseCommand() {
             return
         }
 
-        // Apply new reputation score
         settlement.data.reputation[targetPlayer.uniqueId] = amount
         SettlementManager.saveSettlements(settlement.world)
 
@@ -124,7 +117,6 @@ class SettlementCommand : BaseCommand() {
             return
         }
 
-        // Establish the new relationship between both settlements
         SettlementManager.setRelation(settlementA, settlementB, level)
 
         val relationSetMsg = plugin.language.getString(
@@ -160,10 +152,7 @@ class SettlementCommand : BaseCommand() {
             return
         }
 
-        // Temporarily override relationship to WAR just to make the raid logically sound for testing
         SettlementManager.setRelation(attacker, defender, Settlement.RelationLevel.WAR)
-
-        // Trigger the raid manually.
         plugin.gameplayManager.raidManager.startRaid(attacker, defender)
 
         val broadcastRaidMessage = plugin.language.getString("raid.chat.started-broadcast")
@@ -186,7 +175,6 @@ class SettlementCommand : BaseCommand() {
             return
         }
 
-        // Проверяем существование расы
         val race = vx.sv.gameplay.humanoid.race.RaceManager.racesRegistry[raceName.lowercase()]
         if (race == null) {
             val availableRaces = vx.sv.gameplay.humanoid.race.RaceManager.racesRegistry.keys.joinToString(", ")
@@ -200,7 +188,6 @@ class SettlementCommand : BaseCommand() {
             centerLoc.y = groundY.toDouble() + 1.0
         }
 
-        // Проверка пересечения границ (территория поселения имеет радиус ~126 блоков)
         val newTerritoryRadius = 126.0
         val newTerritoryBox = BoundingBox.of(centerLoc, newTerritoryRadius, 128.0, newTerritoryRadius)
 
@@ -215,14 +202,13 @@ class SettlementCommand : BaseCommand() {
             }
         }
 
-        // Проверяем, не состоит ли игрок уже где-то или нет ли рядом жителей, но здесь создаем принудительно
         centerLoc.block.type = Material.CAMPFIRE
 
-        val citizens = mutableSetOf<org.bukkit.entity.Villager>()
-        for (i in 0 until 5) { // Стартовый набор из 5 жителей
+        val citizens = mutableSetOf<Villager>()
+        for (i in 0 until 5) {
             val spawnLoc = centerLoc.clone().add((i - 2).toDouble(), 1.0, 0.0)
-            val v = world.spawn(spawnLoc, org.bukkit.entity.Villager::class.java) { villager ->
-                villager.profession = org.bukkit.entity.Villager.Profession.NONE
+            val v = world.spawn(spawnLoc, Villager::class.java) { villager ->
+                villager.profession = Villager.Profession.NONE
                 villager.villagerLevel = 1
             }
             citizens.add(v)
@@ -239,7 +225,7 @@ class SettlementCommand : BaseCommand() {
 
         val settlement = Settlement(newData, citizens)
         val manager = SettlementManager()
-        manager.generateSettlementName(settlement) // Либо сразу применяем имя
+        manager.generateSettlementName(settlement)
         settlement.data.settlementName = name
 
         val planner = SettlementPlanner(settlement)
@@ -251,6 +237,9 @@ class SettlementCommand : BaseCommand() {
         worldSettlementsList.add(settlement)
         SettlementManager.saveSettlements(world)
 
+        // ВЫДАЕМ АЧИВКУ ФОУНДЕР
+        AchievementManager.grant(player, "founder")
+
         val successMsg = plugin.language.getString("info-messages.settlement-command.created-success")
             ?.replace("{settlement}", name)
             ?: "§aSuccessfully founded the settlement §6{settlement}§a!"
@@ -258,123 +247,74 @@ class SettlementCommand : BaseCommand() {
         player.playSound(player.location, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f)
     }
 
+    @Subcommand("forcequest")
+    @CommandPermission("sv.settlement.forcequest")
+    fun onForceQuest(player: Player) {
+        val targetEntity = player.getTargetEntity(10)
+
+        if (targetEntity !is Villager) {
+            player.sendFormattedMessage("§cYou must be looking directly at a Villager.")
+            return
+        }
+
+        if (!targetEntity.isSettlementLeader()) {
+            player.sendFormattedMessage("§cThe villager you are looking at is not a settlement leader.")
+            return
+        }
+
+        val giverSettlement = targetEntity.settlement ?: run {
+            player.sendFormattedMessage("§cThis leader does not belong to a valid settlement.")
+            return
+        }
+
+        val worldSettlements = SettlementManager.settlements[player.world] ?: emptyList()
+        val targetSettlement = worldSettlements
+            .filter { it.data.id != giverSettlement.data.id && it.data.leaderId != null }
+            .minByOrNull { it.data.center.distance(giverSettlement.data.center) }
+
+        if (targetSettlement == null) {
+            player.sendFormattedMessage("§cNo other settlements with a leader found to send the message to.")
+            return
+        }
+
+        val leaderName = targetEntity.customName ?: "Leader"
+        player.sendFormattedMessage("§eGenerating a political quest for $leaderName... Please wait, AI is processing.")
+
+        plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
+            try {
+                val quest = plugin.gameplayManager.questManager.generateQuest(
+                    QuestManager.QuestType.MESSAGE_DELIVERY,
+                    targetEntity,
+                    targetSettlement.data.leaderId,
+                    targetSettlement.data.leaderName,
+                    targetSettlement.data.id,
+                    giverSettlement.data.id
+                )
+
+                if (quest != null) {
+                    plugin.server.scheduler.runTask(plugin, Runnable {
+                        plugin.gameplayManager.actualQuests.add(quest.id)
+                        targetEntity.addQuest(quest)
+                        player.sendFormattedMessage("§aSuccessfully generated a political quest targeting ${targetSettlement.data.settlementName}!")
+                    })
+                } else {
+                    player.sendFormattedMessage("§cFailed to generate the quest (AI returned null).")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                player.sendFormattedMessage("§cAn error occurred while generating the quest. Check console for details.")
+            }
+        })
+    }
+
     @Subcommand("highlight|hl")
     @CommandPermission("sv.settlement.highlight")
     fun onHighlight(player: Player) {
         val isEnabled = LeaderHighlightManager.toggleHighlight(player)
         if (isEnabled) {
-            player.sendFormattedMessage("§aLeader highlight mode has been §eENABLED§a. Leaders will now glow for you.")
+            player.sendFormattedMessage("§a[Debug] Leader highlight mode has been §eENABLED§a. Leaders will now glow for you.")
         } else {
-            player.sendFormattedMessage("§aLeader highlight mode has been §cDISABLED§a.")
+            player.sendFormattedMessage("§a[Debug] Leader highlight mode has been §cDISABLED§a.")
         }
     }
-
-    @Subcommand("rent addmember")
-    @CommandCompletion("@players")
-    fun onRentAddMember(player: Player, targetName: String) {
-        val rentedPlots = RentManager.getRentedPlotsByPlayer(player)
-        if (rentedPlots.isEmpty()) {
-            player.sendFormattedMessage(plugin.language.getString("rent.no-plots-owned") ?: "§cYou do not own any rented plots!")
-            return
-        }
-
-        @Suppress("DEPRECATION")
-        val target = Bukkit.getOfflinePlayer(targetName)
-        if (!target.hasPlayedBefore() && !target.isOnline) {
-            player.sendFormattedMessage(plugin.language.getString("command-error-message.player-not-found")?.replace("{playerName}", targetName) ?: "§cPlayer not found!")
-            return
-        }
-
-        for (pair in rentedPlots) {
-            pair.second.members.add(target.uniqueId)
-        }
-        RentManager.saveAll()
-
-        val msg = plugin.language.getString("rent.member-added")
-            ?.replace("{player}", target.name ?: targetName)
-            ?: "§aPlayer {player} has been added to your plot members!"
-        player.sendFormattedMessage(msg)
-    }
-
-    @Subcommand("rent removemember")
-    @CommandCompletion("@players")
-    fun onRentRemoveMember(player: Player, targetName: String) {
-        val rentedPlots = RentManager.getRentedPlotsByPlayer(player)
-        if (rentedPlots.isEmpty()) {
-            player.sendFormattedMessage(plugin.language.getString("rent.no-plots-owned") ?: "§cYou do not own any rented plots!")
-            return
-        }
-
-        @Suppress("DEPRECATION")
-        val target = Bukkit.getOfflinePlayer(targetName)
-
-        for (pair in rentedPlots) {
-            pair.second.members.remove(target.uniqueId)
-        }
-        RentManager.saveAll()
-
-        val msg = plugin.language.getString("rent.member-removed")
-            ?.replace("{player}", target.name ?: targetName)
-            ?: "§aPlayer {player} has been removed from your plot members!"
-        player.sendFormattedMessage(msg)
-    }
-
-    @Subcommand("rent info")
-    fun onRentInfo(player: Player) {
-        val rentedPlots = RentManager.getRentedPlotsByPlayer(player)
-        if (rentedPlots.isEmpty()) {
-            player.sendFormattedMessage(plugin.language.getString("rent.no-plots-owned") ?: "§cYou do not own any rented plots!")
-            return
-        }
-
-        for (pair in rentedPlots) {
-            val record = pair.first
-            val data = pair.second
-            val settlement = SettlementManager.getById(data.settlementId)
-            val settlementName = settlement?.data?.settlementName ?: "Unknown"
-
-            val remainingTicks = data.rentExpiryGameTime - (settlement?.world?.gameTime ?: 0L)
-            val remainingDays = (remainingTicks / 24000L).coerceAtLeast(0L)
-
-            val memberNames = data.members.mapNotNull { Bukkit.getOfflinePlayer(it).name }.joinToString(", ")
-                .ifEmpty { "None" }
-
-            val msg = """
-                §6=== Plot Info (${record.type}) ===
-                §7Settlement: §f$settlementName
-                §7Expires in: §e$remainingDays in-game days
-                §7Members: §b$memberNames
-            """.trimIndent()
-
-            player.sendMessage(msg)
-        }
-    }
-
-    @Subcommand("rent pay")
-    fun onRentPay(player: Player) {
-        val rentedPlots = RentManager.getRentedPlotsByPlayer(player)
-        if (rentedPlots.isEmpty()) {
-            player.sendFormattedMessage(plugin.language.getString("rent.no-plots-owned") ?: "§cYou do not own any rented plots!")
-            return
-        }
-
-        var paidCount = 0
-        for (pair in rentedPlots) {
-            val data = pair.second
-            val settlement = SettlementManager.getById(data.settlementId) ?: continue
-
-            if (RentManager.renewPlotRent(player, settlement, data)) {
-                paidCount++
-            }
-        }
-
-        if (paidCount > 0) {
-            val msg = plugin.language.getString("rent.success-renewed")
-                ?: "§aYou have successfully extended your land lease!"
-            player.sendFormattedMessage(msg)
-        } else {
-            player.sendFormattedMessage("§cYou do not have enough race currency to pay rent!")
-        }
-    }
-
 }
