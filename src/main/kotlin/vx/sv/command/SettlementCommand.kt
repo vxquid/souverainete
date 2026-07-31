@@ -7,8 +7,11 @@ import co.aikar.commands.annotation.CommandCompletion
 import co.aikar.commands.annotation.CommandPermission
 import co.aikar.commands.annotation.Subcommand
 import org.bukkit.Bukkit
+import org.bukkit.Material
+import org.bukkit.Sound
 import org.bukkit.entity.Player
 import org.bukkit.entity.Villager
+import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.sendFormattedMessage
 import vx.sv.debug.LeaderHighlightManager
@@ -18,7 +21,10 @@ import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.isSettlementLeader
 import vx.sv.gameplay.settlement.rent.RentManager
+import vx.sv.nms.entity.ai.construct.SettlementPlanner
+import vx.sv.nms.entity.ai.construct.VanillaBuildingType
 import vx.sv.persistent.LivingEntityExtend.settlement
+import java.util.UUID
 
 @CommandAlias("settlement|s")
 class SettlementCommand : BaseCommand() {
@@ -170,68 +176,86 @@ class SettlementCommand : BaseCommand() {
         }
     }
 
-    @Subcommand("forcequest")
-    @CommandPermission("sv.settlement.forcequest")
-    fun onForceQuest(player: Player) {
-        // Fetch the entity the player is looking at within 10 blocks
-        val targetEntity = player.getTargetEntity(10)
-
-        if (targetEntity !is Villager) {
-            player.sendFormattedMessage("§cYou must be looking directly at a Villager.")
+    @Subcommand("create")
+    @CommandPermission("sv.settlement.create")
+    @CommandCompletion("@nothing")
+    fun onCreateSettlement(player: Player, name: String, raceName: String) {
+        val world = player.world
+        if (!plugin.gameplayConfig.worlds.allowedWorlds.contains(world.name)) {
+            player.sendFormattedMessage("§cSettlements cannot be created in this world!")
             return
         }
 
-        if (!targetEntity.isSettlementLeader()) {
-            player.sendFormattedMessage("§cThe villager you are looking at is not a settlement leader.")
+        // Проверяем существование расы
+        val race = vx.sv.gameplay.humanoid.race.RaceManager.racesRegistry[raceName.lowercase()]
+        if (race == null) {
+            val availableRaces = vx.sv.gameplay.humanoid.race.RaceManager.racesRegistry.keys.joinToString(", ")
+            player.sendFormattedMessage("§cRace '$raceName' not found! Available races: §e$availableRaces")
             return
         }
 
-        val giverSettlement = targetEntity.settlement ?: run {
-            player.sendFormattedMessage("§cThis leader does not belong to a valid settlement.")
-            return
+        val centerLoc = player.location.clone()
+        val groundY = SettlementPlanner.getHighestGroundYAt(world, centerLoc.blockX, centerLoc.blockZ)
+        if (groundY != -999) {
+            centerLoc.y = groundY.toDouble() + 1.0
         }
 
-        // Find the closest other settlement with a valid leader
-        val worldSettlements = SettlementManager.settlements[player.world] ?: emptyList()
-        val targetSettlement = worldSettlements
-            .filter { it.data.id != giverSettlement.data.id && it.data.leaderId != null }
-            .minByOrNull { it.data.center.distance(giverSettlement.data.center) }
+        // Проверка пересечения границ (территория поселения имеет радиус ~126 блоков)
+        val newTerritoryRadius = 126.0
+        val newTerritoryBox = BoundingBox.of(centerLoc, newTerritoryRadius, 128.0, newTerritoryRadius)
 
-        if (targetSettlement == null) {
-            player.sendFormattedMessage("§cNo other settlements with a leader found to send the message to.")
-            return
-        }
-
-        val leaderName = targetEntity.customName ?: "Leader"
-        player.sendFormattedMessage("§eGenerating a political quest for $leaderName... Please wait, AI is processing.")
-
-        // Generate the quest asynchronously
-        plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
-            try {
-                val quest = plugin.gameplayManager.questManager.generateQuest(
-                    QuestManager.QuestType.MESSAGE_DELIVERY,
-                    targetEntity,
-                    targetSettlement.data.leaderId,
-                    targetSettlement.data.leaderName,
-                    targetSettlement.data.id,
-                    giverSettlement.data.id
-                )
-
-                if (quest != null) {
-                    // Return to the main thread to apply Bukkit changes
-                    plugin.server.scheduler.runTask(plugin, Runnable {
-                        plugin.gameplayManager.actualQuests.add(quest.id)
-                        targetEntity.addQuest(quest)
-                        player.sendFormattedMessage("§aSuccessfully generated a political quest targeting ${targetSettlement.data.settlementName}!")
-                    })
-                } else {
-                    player.sendFormattedMessage("§cFailed to generate the quest (AI returned null).")
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-                player.sendFormattedMessage("§cAn error occurred while generating the quest. Check console for details.")
+        val worldSettlements = SettlementManager.settlements[world] ?: emptyList()
+        for (existing in worldSettlements) {
+            if (existing.territory.overlaps(newTerritoryBox) || existing.data.center.distanceSquared(centerLoc) < 80000.0) {
+                val errorMsg = plugin.language.getString("info-messages.settlement-command.overlap")
+                    ?.replace("{settlement}", existing.data.settlementName)
+                    ?: "§cCannot create settlement here! The territory overlaps with §6{settlement}§c."
+                player.sendFormattedMessage(errorMsg)
+                return
             }
-        })
+        }
+
+        // Проверяем, не состоит ли игрок уже где-то или нет ли рядом жителей, но здесь создаем принудительно
+        centerLoc.block.type = Material.CAMPFIRE
+
+        val citizens = mutableSetOf<org.bukkit.entity.Villager>()
+        for (i in 0 until 5) { // Стартовый набор из 5 жителей
+            val spawnLoc = centerLoc.clone().add((i - 2).toDouble(), 1.0, 0.0)
+            val v = world.spawn(spawnLoc, org.bukkit.entity.Villager::class.java) { villager ->
+                villager.profession = org.bukkit.entity.Villager.Profession.NONE
+                villager.villagerLevel = 1
+            }
+            citizens.add(v)
+        }
+
+        val newData = Settlement.SettlementData(
+            UUID.randomUUID(),
+            world.uid,
+            name,
+            centerLoc,
+            System.currentTimeMillis(),
+            race.name
+        )
+
+        val settlement = Settlement(newData, citizens)
+        val manager = SettlementManager()
+        manager.generateSettlementName(settlement) // Либо сразу применяем имя
+        settlement.data.settlementName = name
+
+        val planner = SettlementPlanner(settlement)
+        planner.planMeetingPointAtCenter()
+        planner.planBuilding(VanillaBuildingType.TOWN_HALL)
+        planner.planBuilding(VanillaBuildingType.FARM)
+
+        val worldSettlementsList = SettlementManager.settlements.computeIfAbsent(world) { java.util.concurrent.CopyOnWriteArrayList() }
+        worldSettlementsList.add(settlement)
+        SettlementManager.saveSettlements(world)
+
+        val successMsg = plugin.language.getString("info-messages.settlement-command.created-success")
+            ?.replace("{settlement}", name)
+            ?: "§aSuccessfully founded the settlement §6{settlement}§a!"
+        player.sendFormattedMessage(successMsg)
+        player.playSound(player.location, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f)
     }
 
     @Subcommand("highlight|hl")
@@ -239,9 +263,9 @@ class SettlementCommand : BaseCommand() {
     fun onHighlight(player: Player) {
         val isEnabled = LeaderHighlightManager.toggleHighlight(player)
         if (isEnabled) {
-            player.sendFormattedMessage("§a[Debug] Leader highlight mode has been §eENABLED§a. Leaders will now glow for you.")
+            player.sendFormattedMessage("§aLeader highlight mode has been §eENABLED§a. Leaders will now glow for you.")
         } else {
-            player.sendFormattedMessage("§a[Debug] Leader highlight mode has been §cDISABLED§a.")
+            player.sendFormattedMessage("§aLeader highlight mode has been §cDISABLED§a.")
         }
     }
 

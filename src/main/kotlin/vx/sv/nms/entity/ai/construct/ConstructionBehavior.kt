@@ -48,6 +48,11 @@ class ConstructionBehavior(
     }
 
     private fun handleDebugVisuals(world: ServerLevel, villager: HumanoidVillager, block: Block) {
+        if (!plugin.gameplayConfig.settlement.enableBuilderDebugVisuals) {
+            clearDebugVisuals(villager)
+            return
+        }
+
         val bukkitWorld = world.world
         val playersWithSpyglass = bukkitWorld.players.any {
             it.inventory.itemInMainHand.type == Material.SPYGLASS ||
@@ -113,35 +118,6 @@ class ConstructionBehavior(
         val displays = debugVisualsMap.remove(villager.uuid)
         displays?.first?.remove()
         displays?.second?.remove()
-    }
-
-    private fun takeItem(inventory: Inventory, material: Material, amount: Int) {
-        val index = inventory.first(material)
-        if (index != -1) {
-            val item = inventory.getItem(index) ?: return
-            if (item.amount <= amount) {
-                inventory.setItem(index, null)
-            } else {
-                item.amount -= amount
-                inventory.setItem(index, item)
-            }
-        }
-    }
-
-    private fun addItemsSmart(inventory: Inventory, material: Material, amount: Int) {
-        val maxStack = material.maxStackSize
-        if (maxStack == 1) {
-            if (!inventory.contains(material)) {
-                inventory.addItem(ItemStack(material, 1))
-            }
-        } else {
-            val currentAmount = inventory.filterNotNull()
-                .filter { it.type == material }
-                .sumOf { it.amount }
-            if (currentAmount < amount) {
-                inventory.addItem(ItemStack(material, amount - currentAmount))
-            }
-        }
     }
 
     private fun clearConstructionBlocks(inventory: Inventory) {
@@ -590,7 +566,8 @@ class ConstructionBehavior(
         }
 
         val idleTicks = world.gameTime - villager.lastBuildActionTime
-        if (idleTicks > 240L || pursuitTicks > 300) {
+        val stuckTimeout = plugin.gameplayConfig.settlement.builderStuckTimeoutTicks
+        if (idleTicks > stuckTimeout || pursuitTicks > (stuckTimeout + 60)) {
             assignedBlockTicksMap.remove(villager)
             villager.isBuildDistanceHackActive = false
             job.unclaimBlock(assigned)
@@ -661,11 +638,12 @@ class ConstructionBehavior(
                 }
 
                 villager.digTicks++
-                val breakDuration = if (block.type.hardness > 2.0) 20 else 10
+                val baseBreakDuration = plugin.gameplayConfig.settlement.baseBlockBreakDuration
+                val breakDuration = if (block.type.hardness > 2.0) baseBreakDuration * 2 else baseBreakDuration
                 if (villager.digTicks >= breakDuration) {
                     block.breakNaturally()
                     villager.digTicks = 0
-                    villager.nextBuildAvailableTime = world.gameTime + 2L
+                    villager.nextBuildAvailableTime = world.gameTime + plugin.gameplayConfig.settlement.taskSwitchCooldownTicks
 
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
@@ -681,14 +659,14 @@ class ConstructionBehavior(
                         if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
                         villager.buildTicks++
 
-                        if (villager.buildTicks >= 10) {
+                        if (villager.buildTicks >= plugin.gameplayConfig.settlement.blockPlacementDelayTicks) {
                             block.type = Material.AIR
                             bukkitWorld.playSound(block.location, Sound.ITEM_BUCKET_FILL, 1.0f, 1.0f)
 
                             job.completeBlock(assigned)
                             villager.assignedBlock = null
                             villager.buildTicks = 0
-                            villager.nextBuildAvailableTime = world.gameTime + 2L
+                            villager.nextBuildAvailableTime = world.gameTime + plugin.gameplayConfig.settlement.taskSwitchCooldownTicks
 
                             villager.isBuildDistanceHackActive = false
                             villager.lastBuildActionTime = world.gameTime
@@ -701,7 +679,7 @@ class ConstructionBehavior(
                         job.completeBlock(assigned)
                         villager.assignedBlock = null
                         villager.buildTicks = 0
-                        villager.nextBuildAvailableTime = world.gameTime + 2L
+                        villager.nextBuildAvailableTime = world.gameTime + plugin.gameplayConfig.settlement.taskSwitchCooldownTicks
 
                         villager.isBuildDistanceHackActive = false
                         villager.lastBuildActionTime = world.gameTime
@@ -748,7 +726,8 @@ class ConstructionBehavior(
                 if (villager.buildTicks % 5 == 0) villager.swing(InteractionHand.MAIN_HAND)
                 villager.buildTicks++
 
-                if (villager.buildTicks >= 10) {
+                val placementDelay = plugin.gameplayConfig.settlement.blockPlacementDelayTicks
+                if (villager.buildTicks >= placementDelay) {
                     if (isFarmlandTransformation) {
                         block.type = Material.FARMLAND
                         bukkitWorld.playSound(block.location, Sound.ITEM_HOE_TILL, 1.0f, 1.0f)
@@ -773,7 +752,7 @@ class ConstructionBehavior(
 
                     villager.assignedBlock = null
                     villager.buildTicks = 0
-                    villager.nextBuildAvailableTime = world.gameTime + 2L
+                    villager.nextBuildAvailableTime = world.gameTime + plugin.gameplayConfig.settlement.taskSwitchCooldownTicks
 
                     villager.isBuildDistanceHackActive = false
                     villager.lastBuildActionTime = world.gameTime
@@ -830,108 +809,5 @@ class ConstructionBehavior(
         }
         villager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
         villager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
-    }
-}
-
-class BuilderSafetyListener : Listener {
-
-    @EventHandler
-    fun onNpcDamage(event: EntityDamageEvent) {
-        val villager = event.entity as? BukkitVillager ?: return
-        val nmsVillager = (villager as? CraftVillager)?.handle as? HumanoidVillager ?: return
-
-        val cause = event.cause
-        val isSuffocation = cause == EntityDamageEvent.DamageCause.SUFFOCATION
-        val isDrowning = cause == EntityDamageEvent.DamageCause.DROWNING
-
-        if (isSuffocation || isDrowning) {
-            event.isCancelled = true
-
-            if (isDrowning) {
-                villager.remainingAir = villager.maximumAir
-            }
-
-            val settlement = nmsVillager.settlement
-            val safeLoc = if (settlement != null) {
-                val center = settlement.data.center
-
-                var targetY = center.blockY
-                var targetX = center.blockX + 2
-                var targetZ = center.blockZ + 2
-
-                val world = center.world!!
-                var foundSafeSpot = false
-                for (ox in listOf(2, -2, 3, -3, 1, -1)) {
-                    for (oz in listOf(2, -2, 3, -3, 1, -1)) {
-                        val tx = center.blockX + ox
-                        val tz = center.blockZ + oz
-                        val gy = world.getHighestBlockYAt(tx, tz)
-
-                        if (gy <= center.blockY + 1) {
-                            val feetBlock = world.getBlockAt(tx, gy + 1, tz)
-                            val headBlock = world.getBlockAt(tx, gy + 2, tz)
-                            if (feetBlock.type.isAir && headBlock.type.isAir) {
-                                targetX = tx
-                                targetY = gy
-                                targetZ = tz
-                                foundSafeSpot = true
-                                break
-                            }
-                        }
-                    }
-                    if (foundSafeSpot) break
-                }
-                Location(world, targetX + 0.5, targetY + 1.0, targetZ + 0.5)
-            } else {
-                val loc = villager.location
-                val highestY = loc.world.getHighestBlockYAt(loc.blockX, loc.blockZ)
-                Location(loc.world, loc.x, highestY + 1.0, loc.z, loc.yaw, loc.pitch)
-            }
-
-            val job = nmsVillager.activeBuildJob
-            val assigned = nmsVillager.assignedBlock
-            if (assigned != null && job != null) {
-                job.unclaimBlock(assigned)
-            }
-
-            nmsVillager.assignedBlock = null
-            nmsVillager.digTicks = 0
-            nmsVillager.buildTicks = 0
-            nmsVillager.isBuildDistanceHackActive = false
-            nmsVillager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-            nmsVillager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
-
-            villager.teleport(safeLoc)
-
-            villager.world.playSound(safeLoc, Sound.ENTITY_VILLAGER_HURT, 1.0f, 1.0f)
-            villager.world.spawnParticle(Particle.ANGRY_VILLAGER, safeLoc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
-            return
-        }
-
-        if (nmsVillager.activeBuildJob != null) {
-            if (cause == EntityDamageEvent.DamageCause.ENTITY_ATTACK ||
-                cause == EntityDamageEvent.DamageCause.PROJECTILE) {
-
-                val job = nmsVillager.activeBuildJob
-                val assigned = nmsVillager.assignedBlock
-
-                if (assigned != null && job != null) {
-                    job.unclaimBlock(assigned)
-                }
-
-                nmsVillager.assignedBlock = null
-                nmsVillager.digTicks = 0
-                nmsVillager.buildTicks = 0
-                nmsVillager.isBuildDistanceHackActive = false
-                nmsVillager.lastBuildActionTime = nmsVillager.level().gameTime
-
-                nmsVillager.brain.eraseMemory(MemoryModuleType.WALK_TARGET)
-                nmsVillager.brain.eraseMemory(MemoryModuleType.LOOK_TARGET)
-                nmsVillager.refreshBrain(nmsVillager.level() as ServerLevel)
-
-                val loc = villager.location
-                loc.world.spawnParticle(Particle.HAPPY_VILLAGER, loc.clone().add(0.0, 1.5, 0.0), 5, 0.2, 0.2, 0.2)
-            }
-        }
     }
 }

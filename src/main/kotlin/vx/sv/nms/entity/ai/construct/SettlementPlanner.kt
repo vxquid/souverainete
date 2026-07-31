@@ -668,9 +668,11 @@ class SettlementPlanner(val settlement: Settlement) {
                 (it as? CraftVillager)?.handle as? HumanoidVillager
             }
 
+            val maxBuilders = plugin.gameplayConfig.settlement.maxBuildersPerProject
+
             val availableActiveJob = activeList.find { job ->
                 val workersCount = builders.count { it.activeBuildJob?.jobId == job.jobId }
-                workersCount < 4
+                workersCount < maxBuilders
             }
 
             if (availableActiveJob != null) {

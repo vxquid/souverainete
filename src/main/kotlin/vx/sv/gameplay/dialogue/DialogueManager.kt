@@ -11,7 +11,7 @@ import org.bukkit.util.Transformation
 import org.joml.AxisAngle4f
 import org.joml.Vector3f
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.config.lib.GameplayConfiguration.DialogueConfig.DialogueFormat
+import vx.sv.config.GameplayConfiguration.DialogueConfig.DialogueFormat
 import vx.sv.persistent.LivingEntityExtend.getVoicePitch
 import vx.sv.persistent.LivingEntityExtend.getVoiceSound
 import java.util.concurrent.ConcurrentHashMap

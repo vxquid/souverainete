@@ -20,7 +20,7 @@ import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.Souverainete.Companion.premium
 import vx.sv.Souverainete.Companion.sendFormattedMessage
-import vx.sv.config.lib.GameplayConfiguration.DialogueConfig.DialogueFormat
+import vx.sv.config.GameplayConfiguration.DialogueConfig.DialogueFormat
 import vx.sv.event.VillagerKillTargetEvent
 import vx.sv.event.VillagerStartFightEvent
 import vx.sv.gameplay.dialogue.DialogueManager

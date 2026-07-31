@@ -246,6 +246,8 @@ info-messages:
     same-settlement-raid: "§cA settlement cannot raid itself!"
     already-raided: "§cSettlement {settlement} is already under attack!"
     raid-started: "§aSuccessfully started a raid! Attacker: {attacker}, Defender: {defender}."
+    overlap: "§cCannot create settlement here! The territory overlaps with §6{settlement}§c."
+    created-success: "§aSuccessfully founded the settlement §6{settlement}§a!"
 
 interaction-menu:
   quests-button: "Quests"

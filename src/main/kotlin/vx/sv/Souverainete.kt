@@ -20,7 +20,7 @@ import vx.sv.ai.ProviderManager
 import vx.sv.command.*
 import vx.sv.command.override.LocateCommandOverrideListener
 import vx.sv.config.lib.ConfigurationManager
-import vx.sv.config.lib.GameplayConfiguration
+import vx.sv.config.GameplayConfiguration
 import vx.sv.config.lib.TranslationManager
 import vx.sv.gameplay.GameplayManager
 import vx.sv.gameplay.settlement.SettlementManager

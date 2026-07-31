@@ -10,6 +10,7 @@ import org.bukkit.block.data.type.Stairs
 import org.bukkit.craftbukkit.block.CraftBlockEntityState
 import org.bukkit.craftbukkit.block.CraftJigsaw
 import org.bukkit.util.BlockVector
+import vx.sv.Souverainete.Companion.plugin
 import vx.sv.util.RelativeBlock
 
 data class EntranceCandidate(val pos: BlockPos, val facing: BlockFace?, val weight: Double)
@@ -24,7 +25,8 @@ object VanillaStructureLoader {
             return BlockVector(3, 3, 3)
         }
         if (structurePath == "custom/rent_foundation") {
-            return BlockVector(10, 4, 10)
+            val size = try { plugin.gameplayConfig.settlement.rentFoundationSize } catch (_: Exception) { 10 }
+            return BlockVector(size, 4, size)
         }
         val key = NamespacedKey.minecraft(structurePath)
         val structureManager = Bukkit.getStructureManager()
@@ -126,13 +128,12 @@ object VanillaStructureLoader {
         val cobble = Material.COBBLESTONE.createBlockData()
         val air = Material.AIR.createBlockData()
 
-        val width = 10
-        val length = 10
+        val size = try { plugin.gameplayConfig.settlement.rentFoundationSize } catch (_: Exception) { 10 }
         val height = 4
 
-        for (x in 0 until width) {
-            for (z in 0 until length) {
-                val isBorder = x == 0 || x == width - 1 || z == 0 || z == length - 1
+        for (x in 0 until size) {
+            for (z in 0 until size) {
+                val isBorder = x == 0 || x == size - 1 || z == 0 || z == size - 1
                 val floorData = if (isBorder) stoneBricks else cobble
 
                 blocks.add(RelativeBlock(BlockPos(x, 0, z), floorData))
@@ -243,7 +244,8 @@ object VanillaStructureLoader {
             return listOf(EntranceCandidate(BlockPos(1, 0, 0), BlockFace.NORTH, 100.0))
         }
         if (structurePath == "custom/rent_foundation") {
-            return listOf(EntranceCandidate(BlockPos(5, 0, 0), BlockFace.NORTH, 100.0))
+            val size = try { plugin.gameplayConfig.settlement.rentFoundationSize } catch (_: Exception) { 10 }
+            return listOf(EntranceCandidate(BlockPos(size / 2, 0, 0), BlockFace.NORTH, 100.0))
         }
 
         val key = NamespacedKey.minecraft(structurePath)

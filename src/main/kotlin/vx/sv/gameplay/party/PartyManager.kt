@@ -11,7 +11,7 @@ import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDeathEvent
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.plugin.java.JavaPlugin
-import vx.sv.config.lib.GameplayConfiguration
+import vx.sv.config.GameplayConfiguration
 
 import java.util.*
 

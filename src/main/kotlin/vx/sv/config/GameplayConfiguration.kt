@@ -1,4 +1,4 @@
-package vx.sv.config.lib
+package vx.sv.config
 
 import org.bukkit.entity.Display
 import vx.sv.config.lib.annotations.Comment
@@ -159,11 +159,32 @@ class GameplayConfiguration {
         @Comment("Maximum number of rent foundation plots allowed per settlement.")
         var maxRentFoundations: Int = 3
 
+        @Comment("Default size (width and length) of the rent foundation plot. Default is 10 (10x10).")
+        var rentFoundationSize: Int = 10
+
         @Comment("Rent duration in Minecraft in-game days (1 day = 24000 ticks). Default 30 days = 720000 ticks.")
         var rentDurationDays: Long = 30L
 
         @Comment("Amount of racial currency required to pay for rent.")
         var rentCurrencyCost: Int = 64
+
+        @Comment("Maximum number of builder villagers that can work on the exact same building job simultaneously.")
+        var maxBuildersPerProject: Int = 4
+
+        @Comment("Base ticks required for a builder to break an obstacle block (multiplied for harder blocks).")
+        var baseBlockBreakDuration: Int = 15
+
+        @Comment("Ticks delay between individual block placements by a builder.")
+        var blockPlacementDelayTicks: Long = 10L
+
+        @Comment("Cooldown ticks before a builder can pick up a new block task after finishing the previous one.")
+        var taskSwitchCooldownTicks: Long = 2L
+
+        @Comment("How many ticks a builder can be idle or stuck before abandoning the current block and resetting pathfinding.")
+        var builderStuckTimeoutTicks: Long = 240L
+
+        @Comment("Enable debug visuals (particles/lines) when players hold a spyglass and look at active builders.")
+        var enableBuilderDebugVisuals: Boolean = true
     }
 
     class RaidConfig {

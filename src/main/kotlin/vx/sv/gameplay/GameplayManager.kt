@@ -7,7 +7,7 @@ import org.bukkit.event.Listener
 import org.bukkit.event.world.WorldLoadEvent
 import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.plugin
-import vx.sv.config.lib.GameplayConfiguration
+import vx.sv.config.GameplayConfiguration
 import vx.sv.gameplay.death.DeathManager
 import vx.sv.gameplay.dialogue.DialogueManager
 import vx.sv.gameplay.dialogue.PartyChatManager
