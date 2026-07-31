@@ -57,6 +57,7 @@ class TranslateCommand : BaseCommand(), Listener {
         const val STEP_4_PROMPT = "${STEP_PREFIX}§fType the §6Naming Style §f(e.g., Fantasy Names, Nordic):"
 
         const val MSG_LOCALIZING = "$SETUP_PREFIX§7Setup complete! Localizing §elanguage.yml §7to §b{lang}§7. Please wait..."
+        const val MSG_SKIPPED_DEFAULT = "$SETUP_PREFIX§7Setup complete! Target language is set to default (§b{lang}§7). AI translation skipped."
         const val MSG_SUCCESS = "§a[AI Setup] Configuration complete! Provider: §6{provider} §a| Model: §e{model}"
         const val MSG_SUGGESTION = "$SETUP_PREFIX§7It's recommended to translate the plugin content using §e/s translate§7."
 
@@ -82,32 +83,24 @@ class TranslateCommand : BaseCommand(), Listener {
     @Subcommand("disable ai")
     @CommandPermission("sv.admin.setup")
     fun onDisableAI(player: Player) {
-        // Cancel active setup sessions if any
         if (setupSessions.containsKey(player.uniqueId)) {
             setupSessions.remove(player.uniqueId)
         }
 
         val config = plugin.providerManager.config
-
-        // Set disable marker in API Key
         config.apiKey = "DISABLED"
-
-        // Save configuration
         ConfigurationManager.save(plugin, config)
 
-        // Inform the player about the mode
         player.sendFormattedMessage(MSG_DISABLED_HEADER)
         player.sendFormattedMessage(MSG_DISABLED_MODE)
         player.sendFormattedMessage(MSG_DISABLED_INFO_1)
         player.sendFormattedMessage(MSG_DISABLED_INFO_2)
         player.sendFormattedMessage(MSG_DISABLED_INFO_3)
 
-        // Show premium ad if the user is on the free version
         if (!premium) {
             player.sendFormattedMessage(MSG_PREMIUM_AD)
         }
     }
-    // ---------------------------------------
 
     @Subcommand("provider")
     @CommandPermission("sv.admin.setup")
@@ -118,7 +111,6 @@ class TranslateCommand : BaseCommand(), Listener {
             return
         }
 
-        // Configuration and URL mapping
         val (url, defaultModel) = when (providerType) {
             ProviderType.CEREBRAS -> "https://cloud.cerebras.ai" to "gpt-oss-120b"
             ProviderType.GEMINI -> "https://aistudio.google.com/app/apikey" to "gemini-3.1-flash-lite"
@@ -129,7 +121,6 @@ class TranslateCommand : BaseCommand(), Listener {
             ProviderType.ANYTHINGLLM -> "Workspace API settings" to "gpt-3.5-turbo"
         }
 
-        // Automatically set the recommended model for the provider
         plugin.providerManager.config.model = defaultModel
         plugin.providerManager.config.providerType = providerType
 
@@ -175,7 +166,6 @@ class TranslateCommand : BaseCommand(), Listener {
             SetupStep.NAMING -> {
                 config.namingStyle = input
 
-                // Final save
                 ConfigurationManager.save(plugin, config)
                 setupSessions.remove(player.uniqueId)
 
@@ -187,7 +177,12 @@ class TranslateCommand : BaseCommand(), Listener {
                         plugin.providerManager.config.language
                     )
 
-                    player.sendFormattedMessage(MSG_LOCALIZING.replace("{lang}", config.language))
+                    val isDefault = TranslationManager.isDefaultLanguage(config.language)
+                    if (isDefault) {
+                        player.sendFormattedMessage(MSG_SKIPPED_DEFAULT.replace("{lang}", config.language))
+                    } else {
+                        player.sendFormattedMessage(MSG_LOCALIZING.replace("{lang}", config.language))
+                    }
 
                     plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
                         val languageFile = File(plugin.dataFolder, "language.yml")
@@ -197,9 +192,11 @@ class TranslateCommand : BaseCommand(), Listener {
                             player.sendFormattedMessage(MSG_SUCCESS
                                 .replace("{provider}", config.providerType.name)
                                 .replace("{model}", config.model))
-                            player.sendFormattedMessage(MSG_SUGGESTION)
 
-                            // Show premium ad if the user is on the free version
+                            if (!isDefault) {
+                                player.sendFormattedMessage(MSG_SUGGESTION)
+                            }
+
                             if (!premium) {
                                 player.sendFormattedMessage(MSG_PREMIUM_AD)
                             }
@@ -220,6 +217,11 @@ class TranslateCommand : BaseCommand(), Listener {
             return
         }
 
+        if (TranslationManager.isDefaultLanguage(plugin.providerManager.config.language)) {
+            player.sendFormattedMessage("§e[AI Setup] §7Target language is set to default (§b${plugin.providerManager.config.language}§7). Translation is not required!")
+            return
+        }
+
         if (queueFile.exists()) {
             player.sendFormattedMessage(plugin.language.getString("command-message.translate.resume-info")!!)
         }
@@ -236,6 +238,11 @@ class TranslateCommand : BaseCommand(), Listener {
     @CommandPermission("sv.admin.translate")
     fun onAccept(player: Player) {
         if (isRunning.get()) return
+
+        if (TranslationManager.isDefaultLanguage(plugin.providerManager.config.language)) {
+            player.sendFormattedMessage("§e[AI Setup] §7Target language is set to default (§b${plugin.providerManager.config.language}§7). Translation is not required!")
+            return
+        }
 
         if (!queueFile.exists()) {
             val config = YamlConfiguration()

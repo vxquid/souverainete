@@ -328,7 +328,7 @@ achievements:
   unlocked: "§e✦ Achievement Unlocked: §6{title} §7- §f{description}"
   list:
     root:
-      title: "§0Souverainete"
+      title: "Souverainete"
       description: "Chronicles of your journey across settlements."
     first_steps_world:
       title: "§2Wilderness"

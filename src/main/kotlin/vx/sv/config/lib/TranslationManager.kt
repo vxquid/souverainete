@@ -17,6 +17,17 @@ class TranslationManager(
 
     enum class TranslationResult { SUCCESS, SKIPPED, QUOTA_LIMIT, ERROR }
 
+    companion object {
+        /**
+         * Проверяет, является ли язык стандартным (английским).
+         */
+        fun isDefaultLanguage(language: String): Boolean {
+            val lang = language.trim().lowercase()
+            return lang in setOf("english", "en", "eng", "default", "none") ||
+                    lang.startsWith("en-") || lang.startsWith("en_")
+        }
+    }
+
     /**
      * Translates language.yml. Used during plugin startup.
      */
@@ -40,6 +51,12 @@ class TranslationManager(
             }
         }
 
+        // Если выбран дефолтный язык (English) — пропускаем обращение к ИИ
+        if (isDefaultLanguage(targetLanguage)) {
+            plugin.logger.info("Target language is set to default ($targetLanguage). Skipping AI translation for language.yml.")
+            return YamlConfiguration.loadConfiguration(originalFile)
+        }
+
         if (client is DummyClient) {
             plugin.logger.info("Language.yml translation attempt failed. AI features is DISABLED in provider.yml!")
             return YamlConfiguration.loadConfiguration(originalFile)
@@ -56,7 +73,6 @@ class TranslationManager(
 
         plugin.logger.info("Trying to translate language.yml.")
         // Попытка перевода ИИ.
-        // Если используется DummyClient (или лимит исчерпан), translated будет null
         val translated = client.translate(YamlConfiguration.loadConfiguration(originalFile))
         if (translated != null) {
             cacheFile.parentFile.mkdirs()
@@ -66,8 +82,6 @@ class TranslationManager(
         }
 
         plugin.logger.info("Language.yml translation attempt failed. Result is null. Default localization will be used.")
-        // Если ИИ отключен или недоступен (возвращен null) — просто возвращаем
-        // локальный файл, в который УЖЕ добавлены все новые ключи на предыдущем шаге.
         return YamlConfiguration.loadConfiguration(originalFile)
     }
 
@@ -75,6 +89,11 @@ class TranslationManager(
      * Translates a specific file (names.yml or phrases.yml) with state tracking.
      */
     fun translateFileWithState(sourceFile: File, relativePath: String): TranslationResult {
+        // Если выбран дефолтный язык, пропускаем генерацию файлов
+        if (isDefaultLanguage(targetLanguage)) {
+            return TranslationResult.SKIPPED
+        }
+
         val cacheFile = cacheDir.resolve("$relativePath.yml")
         val hashFile = cacheDir.resolve("${relativePath}_hash.txt")
 
@@ -97,7 +116,7 @@ class TranslationManager(
                 hashFile.writeText(sourceHash)
                 TranslationResult.SUCCESS
             } else {
-                TranslationResult.QUOTA_LIMIT // Обработка DummyClient возврата null (можно поменять на другой статус)
+                TranslationResult.QUOTA_LIMIT
             }
         } catch (e: Exception) {
             val msg = e.message?.lowercase() ?: ""
@@ -119,7 +138,6 @@ class TranslationManager(
     /**
      * Читает оригинальный ресурс плагина как текст, чтобы сохранить все комментарии и отступы,
      * и подставляет в него значения, которые уже настроил пользователь.
-     * Если у юзера нет какого-то ключа, останется дефолтное значение из JAR.
      */
     private fun updateConfigPreservingStructure(file: File, defaultConfig: YamlConfiguration, existingConfig: YamlConfiguration) {
         val resourceStream = plugin.getResource("language.yml") ?: return
@@ -129,7 +147,6 @@ class TranslationManager(
         var skipIndent = -1
 
         for (line in defaultLines) {
-            // Если мы находимся в процессе пропуска многострочного значения (например списков) из дефолтного файла
             if (skipIndent != -1) {
                 if (line.isBlank()) {
                     outLines.add(line)
@@ -138,10 +155,10 @@ class TranslationManager(
                 val matchKey = Regex("^(\\s*)([a-zA-Z0-9_-]+):").find(line)
                 if (matchKey != null) {
                     val currentIndent = matchKey.groupValues[1].length
-                    if (currentIndent <= skipIndent) skipIndent = -1 // Вышли из узла
-                    else continue // Продолжаем пропускать вложенные
+                    if (currentIndent <= skipIndent) skipIndent = -1
+                    else continue
                 } else {
-                    continue // Пропускаем элементы списка
+                    continue
                 }
             }
 
@@ -150,22 +167,19 @@ class TranslationManager(
                 val indent = match.groupValues[1].length
                 val keyName = match.groupValues[2]
 
-                // Поддерживаем корректный путь до ключа (например, raid.bossbar.init)
                 pathStack.removeAll { it.first >= indent }
                 pathStack.add(indent to keyName)
 
                 val currentPath = pathStack.joinToString(".") { it.second }
 
-                // Если ключ есть у юзера, и это финальное значение (не секция) - меняем строку
                 if (existingConfig.isSet(currentPath) && !defaultConfig.isConfigurationSection(currentPath)) {
                     val temp = YamlConfiguration()
                     temp.set(keyName, existingConfig.get(currentPath))
 
                     var yamlStr = temp.saveToString().trimEnd()
                     val startIndex = yamlStr.indexOf("$keyName:")
-                    if (startIndex != -1) yamlStr = yamlStr.substring(startIndex) // Защита от мусорных заголовков Bukkit
+                    if (startIndex != -1) yamlStr = yamlStr.substring(startIndex)
 
-                    // Применяем отступ эталонного файла к многострочным значениям
                     val replacedLines = yamlStr.lines().map { match.groupValues[1] + it }
                     outLines.addAll(replacedLines)
 
@@ -173,11 +187,9 @@ class TranslationManager(
                     continue
                 }
             }
-            // Добавляем строку без изменений (будут сохранены пустые строки, комменты и новые ключи)
             outLines.add(line)
         }
 
-        // Перезаписываем файл сохраненным текстом
         file.writeText(outLines.joinToString("\n"))
     }
 }
