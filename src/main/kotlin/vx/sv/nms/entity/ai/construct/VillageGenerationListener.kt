@@ -18,6 +18,8 @@ import org.bukkit.persistence.PersistentDataType
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
 import vx.sv.gameplay.achievement.AchievementManager
+import vx.sv.gameplay.humanoid.race.RaceManager.Companion.race
+import vx.sv.gameplay.humanoid.race.RaceManager.Race
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
@@ -77,7 +79,6 @@ class VillageGenerationListener : Listener {
 
     @EventHandler
     fun onPlayerJoin(event: PlayerJoinEvent) {
-        // Синхронизируем все ачивки и выдаем базовые элементы мира при каждом входе
         AchievementManager.syncPlayerAdvancements(event.player)
         AchievementManager.grant(event.player, "first_steps_world")
     }
@@ -368,13 +369,16 @@ class VillageGenerationListener : Listener {
                     citizens.add(v)
                 }
 
+                // ДИНАМИЧЕСКИЙ РАСЧЕТ ДОМИНИРУЮЩЕЙ РАСЫ ВМЕСТО ХАРДКОДА "VILLAGER_RACE"
+                val dominantRace = citizens.groupingBy { it.race }.eachCount().maxByOrNull { it.value }?.key ?: Race.VILLAGER_RACE
+
                 val newData = Settlement.SettlementData(
                     UUID.randomUUID(),
                     world.uid,
                     "Settlement",
                     centerLoc,
                     System.currentTimeMillis(),
-                    "VILLAGER_RACE"
+                    dominantRace.name
                 )
 
                 val settlement = Settlement(newData, citizens)

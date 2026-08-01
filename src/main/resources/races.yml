@@ -4,6 +4,10 @@
 # Dwarves are the first race added. Why? Because dwarves rules!
 dwarf:
 
+  # Determines the style in which villagers will build their homes.
+  # Possible values: snowy, desert, taiga, plains, savanna.
+  building-style: "snowy"
+
   # Targeted entity type.
   target-entity-type: VILLAGER
 
@@ -60,6 +64,10 @@ dwarf:
 # Orcs are almost as cool as dwarves. Lok'tar ogar!
 orc:
 
+  # Determines the style in which villagers will build their homes.
+  # Possible values: snowy, desert, taiga, plains, savanna.
+  building-style: "desert"
+
   # Targeted entity type.
   target-entity-type: VILLAGER
 
@@ -113,6 +121,10 @@ orc:
 # Elves replace the villagers of the taiga.
 elf:
 
+  # Determines the style in which villagers will build their homes.
+  # Possible values: snowy, desert, taiga, plains, savanna.
+  building-style: "taiga"
+
   # Targeted entity type.
   target-entity-type: VILLAGER
 
@@ -165,6 +177,10 @@ elf:
 
 # Humans replace the villagers of the plains.
 human:
+
+  # Determines the style in which villagers will build their homes.
+  # Possible values: snowy, desert, taiga, plains, savanna.
+  building-style: "plains"
 
   # Targeted entity type.
   target-entity-type: VILLAGER
@@ -223,6 +239,10 @@ human:
 
 # Goblin race. Greedy, smart and annoying. Live in savannas.
 goblin:
+
+  # Determines the style in which villagers will build their homes.
+  # Possible values: snowy, desert, taiga, plains, savanna.
+  building-style: "savanna"
 
   # Targeted entity type.
   target-entity-type: VILLAGER

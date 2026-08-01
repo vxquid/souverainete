@@ -11,6 +11,7 @@ import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.gson
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.gameplay.humanoid.race.RaceManager
 import vx.sv.gameplay.settlement.Settlement
 import vx.sv.gameplay.settlement.SettlementManager
 import vx.sv.gameplay.settlement.SettlementManager.Companion.settlements
@@ -258,7 +259,11 @@ class SettlementPlanner(val settlement: Settlement) {
                     minRadius = 18
                     maxAttempts = if (isCritical) 600 else 400
 
-                    val structureSize = VanillaStructureLoader.getStructureSize(reqType!!.vanillaPath)
+                    val race = RaceManager.racesRegistry[reqSettlement!!.data.dominantRace]
+                    val style = race?.buildingStyle ?: "plains"
+                    val structurePath = reqType!!.getStructurePath(style)
+
+                    val structureSize = VanillaStructureLoader.getStructureSize(structurePath)
                     rawWidth = structureSize.blockX
                     rawLength = structureSize.blockZ
                     buildingHeight = structureSize.blockY
@@ -267,7 +272,7 @@ class SettlementPlanner(val settlement: Settlement) {
                     recordsListCopy = buildings[settlementId]?.toList() ?: emptyList()
                     roadsCopy = settlementRoads[settlementId]?.toSet() ?: emptySet()
 
-                    val jigsawPos = VanillaStructureLoader.getRawEntranceCandidates(reqType!!.vanillaPath)
+                    val jigsawPos = VanillaStructureLoader.getRawEntranceCandidates(structurePath)
                     entrancePos = if (jigsawPos.isNotEmpty()) {
                         jigsawPos.maxByOrNull { it.weight }?.pos ?: BlockPos(rawWidth / 2, 0, 0)
                     } else {
@@ -655,6 +660,28 @@ class SettlementPlanner(val settlement: Settlement) {
                             settlement.world.spawnParticle(Particle.CLOUD, loc.clone().add(0.0, 1.0, 0.0), 20, 0.5, 0.5, 0.5, 0.1)
 
                             records.remove(golemRecord)
+                        }
+
+                        val rentRecord = synchronized(records) {
+                            records.find { it.jobId == job.jobId && it.type.startsWith("RENT_FOUNDATION") }
+                        }
+                        if (rentRecord != null) {
+                            val loc = rentRecord.box.center.toLocation(settlement.world)
+                            loc.y = rentRecord.box.minY + 4.5
+
+                            val alreadyHasDisplay = settlement.world.getNearbyEntities(loc, 2.5, 2.5, 2.5).any { it is TextDisplay }
+                            if (!alreadyHasDisplay) {
+                                val rawText = plugin.language.getString(
+                                    "settlement.rent-foundation-text",
+                                    "§e[Free Plot for Construction]\n§fPurchase from the settlement mayor"
+                                )
+                                settlement.world.spawn(loc, TextDisplay::class.java) { display ->
+                                    display.text = rawText
+                                    display.billboard = Display.Billboard.CENTER
+                                    display.isPersistent = true
+                                    display.backgroundColor = Color.fromARGB(160, 0, 0, 0)
+                                }
+                            }
                         }
                     }
 
@@ -1064,7 +1091,6 @@ class SettlementPlanner(val settlement: Settlement) {
         }
 
         var groundY = getHighestGroundYAt(world, cx, cz)
-
         if (groundY <= world.minHeight + 5 || groundY == -999) {
             groundY = world.getHighestBlockYAt(cx, cz)
             if (groundY <= world.minHeight + 5) {
@@ -1253,11 +1279,14 @@ class SettlementPlanner(val settlement: Settlement) {
         val center = settlement.data.center
         val airData = Material.AIR.createBlockData()
 
-        val structureSize = VanillaStructureLoader.getStructureSize(type.vanillaPath)
+        val race = RaceManager.racesRegistry[settlement.data.dominantRace]
+        val style = race?.buildingStyle ?: "plains"
+        val vanillaPath = type.getStructurePath(style)
+
+        val structureSize = VanillaStructureLoader.getStructureSize(vanillaPath)
         val rawWidth = structureSize.blockX
         val rawLength = structureSize.blockZ
         val height = structureSize.blockY
-        val vanillaPath = type.vanillaPath
 
         val width = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawLength else rawWidth
         val length = if (rotation == StructureRotation.CLOCKWISE_90 || rotation == StructureRotation.COUNTERCLOCKWISE_90) rawWidth else rawLength

@@ -28,12 +28,25 @@ object VanillaStructureLoader {
             val size = try { plugin.gameplayConfig.settlement.rentFoundationSize } catch (_: Exception) { 10 }
             return BlockVector(size, 4, size)
         }
-        val key = NamespacedKey.minecraft(structurePath)
-        val structureManager = Bukkit.getStructureManager()
-        val structure = structureManager.getStructure(key)
-            ?: structureManager.loadStructure(key)
-            ?: return BlockVector(10, 10, 10)
-        return structure.size
+
+        var key = NamespacedKey.minecraft(structurePath)
+        var structure = Bukkit.getStructureManager().getStructure(key)
+            ?: Bukkit.getStructureManager().loadStructure(key)
+
+        // Универсальный фоллбэк на plains, если нужная вариация здания отсутствует в биоме
+        if (structure == null && !structurePath.contains("/plains/")) {
+            val styleMatch = Regex("village/([a-z_]+)/").find(structurePath)
+            if (styleMatch != null) {
+                val style = styleMatch.groupValues[1]
+                val plainsFallback = structurePath.replace("village/$style/", "village/plains/")
+                    .replace("/${style}_", "/plains_")
+                val fallbackKey = NamespacedKey.minecraft(plainsFallback)
+                structure = Bukkit.getStructureManager().getStructure(fallbackKey)
+                    ?: Bukkit.getStructureManager().loadStructure(fallbackKey)
+            }
+        }
+
+        return structure?.size ?: BlockVector(10, 10, 10)
     }
 
     fun loadVanillaStructure(structurePath: String): List<RelativeBlock> {
@@ -47,12 +60,23 @@ object VanillaStructureLoader {
             return generateCustomRentFoundation()
         }
 
-        val key = NamespacedKey.minecraft(structurePath)
-        val structureManager = Bukkit.getStructureManager()
+        var key = NamespacedKey.minecraft(structurePath)
+        var structure = Bukkit.getStructureManager().getStructure(key)
+            ?: Bukkit.getStructureManager().loadStructure(key)
 
-        val structure = structureManager.getStructure(key)
-            ?: structureManager.loadStructure(key)
-            ?: return emptyList()
+        if (structure == null && !structurePath.contains("/plains/")) {
+            val styleMatch = Regex("village/([a-z_]+)/").find(structurePath)
+            if (styleMatch != null) {
+                val style = styleMatch.groupValues[1]
+                val plainsFallback = structurePath.replace("village/$style/", "village/plains/")
+                    .replace("/${style}_", "/plains_")
+                val fallbackKey = NamespacedKey.minecraft(plainsFallback)
+                structure = Bukkit.getStructureManager().getStructure(fallbackKey)
+                    ?: Bukkit.getStructureManager().loadStructure(fallbackKey)
+            }
+        }
+
+        if (structure == null) return emptyList()
 
         val relativeBlocks = mutableListOf<RelativeBlock>()
         val palette = structure.palettes.firstOrNull() ?: return emptyList()
@@ -248,11 +272,23 @@ object VanillaStructureLoader {
             return listOf(EntranceCandidate(BlockPos(size / 2, 0, 0), BlockFace.NORTH, 100.0))
         }
 
-        val key = NamespacedKey.minecraft(structurePath)
-        val structureManager = Bukkit.getStructureManager()
-        val structure = structureManager.getStructure(key)
-            ?: structureManager.loadStructure(key)
-            ?: return emptyList()
+        var key = NamespacedKey.minecraft(structurePath)
+        var structure = Bukkit.getStructureManager().getStructure(key)
+            ?: Bukkit.getStructureManager().loadStructure(key)
+
+        if (structure == null && !structurePath.contains("/plains/")) {
+            val styleMatch = Regex("village/([a-z_]+)/").find(structurePath)
+            if (styleMatch != null) {
+                val style = styleMatch.groupValues[1]
+                val plainsFallback = structurePath.replace("village/$style/", "village/plains/")
+                    .replace("/${style}_", "/plains_")
+                val fallbackKey = NamespacedKey.minecraft(plainsFallback)
+                structure = Bukkit.getStructureManager().getStructure(fallbackKey)
+                    ?: Bukkit.getStructureManager().loadStructure(fallbackKey)
+            }
+        }
+
+        if (structure == null) return emptyList()
         val palette = structure.palettes.firstOrNull() ?: return emptyList()
 
         val candidates = mutableListOf<EntranceCandidate>()

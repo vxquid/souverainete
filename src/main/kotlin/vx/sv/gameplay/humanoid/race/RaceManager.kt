@@ -33,13 +33,10 @@ class RaceManager : Listener {
 
     @EventHandler
     fun onVillagerBreed(event: EntityBreedEvent) {
-        // We only care about villagers breeding
         val baby = event.entity as? Villager ?: return
         val mother = event.mother as? Villager ?: return
         val father = event.father as? Villager ?: return
 
-        // Prevent vanilla biome-based race mutation.
-        // The baby will randomly inherit the genetic Villager.Type (Race) of either the mother or the father.
         val inheritedType = if (Random.nextBoolean()) mother.villagerType else father.villagerType
         baby.villagerType = inheritedType
     }
@@ -56,6 +53,16 @@ class RaceManager : Listener {
             val targetVillagerType = section.getString("target-villager-type")
                 ?.let { Registry.VILLAGER_TYPE.get(NamespacedKey.minecraft(it.lowercase())) }
                 ?: Registry.VILLAGER_TYPE.get(NamespacedKey.minecraft("plains"))!!
+
+            // Определение архитектурного стиля расы (по конфигу или автоопределение по типу жителя)
+            val buildingStyle = section.getString("building-style")?.lowercase()
+                ?: when (targetVillagerType.key.key.lowercase()) {
+                    "desert" -> "desert"
+                    "savanna" -> "savanna"
+                    "taiga" -> "taiga"
+                    "snow", "snowy" -> "snowy"
+                    else -> "plains"
+                }
 
             val spawnItems = mutableListOf<SpawnItemStack>()
             section.getStringList("spawn-items").forEach { item ->
@@ -106,7 +113,6 @@ class RaceManager : Listener {
             val raceFolder = File(plugin.dataFolder, "races/$name")
 
             fun loadRaceResource(fileName: String): YamlConfiguration {
-                // Пытаемся найти переведенный файл в кэше
                 val cachePath = "races/$name/${fileName.substringBeforeLast(".")}"
                 val cacheFile = File(plugin.dataFolder, "cache/$cachePath.yml")
 
@@ -114,7 +120,6 @@ class RaceManager : Listener {
                     return YamlConfiguration.loadConfiguration(cacheFile)
                 }
 
-                // Стандартная логика загрузки из ресурсов плагина или папки
                 val file = File(raceFolder, fileName)
                 val resourcePath = "races/$name/$fileName"
 
@@ -184,6 +189,7 @@ class RaceManager : Listener {
                 name,
                 leaderTitle,
                 XEntityType.valueOf(targetEntityType), targetVillagerType,
+                buildingStyle,
                 maleVoices, femaleVoices,
                 maleHurtSound, maleDeathSound, femaleHurtSound, femaleDeathSound,
                 spawnItems, attributes,
@@ -218,6 +224,7 @@ class RaceManager : Listener {
         val leaderTitle: String,
         val targetEntityType: XEntityType,
         val targetVillagerType: Villager.Type,
+        val buildingStyle: String = "plains",
         val maleVoices: List<PitchedSound>,
         val femaleVoices: List<PitchedSound>,
         val maleHurtSound: PitchedSound,
@@ -244,7 +251,6 @@ class RaceManager : Listener {
         }
 
         fun randomName(gender: Gender): String {
-
             val nameList = if (gender == Gender.MALE) maleFirstNames else femaleFirstNames
             val fallbackName = if (gender == Gender.MALE) "John" else "Jane"
 
@@ -262,6 +268,7 @@ class RaceManager : Listener {
 
             val VILLAGER_RACE = Race(
                 "villager", "Mayor", XEntityType.VILLAGER, Villager.Type.PLAINS,
+                "plains",
                 voices, voices,
                 PitchedSound(XSound.ENTITY_VILLAGER_HURT, 1.0, 1.0),
                 PitchedSound(XSound.ENTITY_VILLAGER_DEATH, 1.0, 1.0),
@@ -286,7 +293,6 @@ class RaceManager : Listener {
         val LivingEntity.race: Race get() {
             val config = plugin.gameplayManager.config.humanoid
 
-            // One race mode
             if (config.oneRaceMode) {
                 val forcedRace = racesRegistry[config.globalRace]
                 if (forcedRace != null) return forcedRace
@@ -294,6 +300,5 @@ class RaceManager : Listener {
 
             return racesRegistry.values.find { it.matching(this) } ?: Race.VILLAGER_RACE
         }
-
     }
 }
