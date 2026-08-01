@@ -261,7 +261,7 @@ class SettlementPlanner(val settlement: Settlement) {
 
                     val race = RaceManager.racesRegistry[reqSettlement!!.data.dominantRace]
                     val style = race?.buildingStyle ?: "plains"
-                    val structurePath = reqType!!.getStructurePath(style)
+                    val structurePath = reqType!!.getValidStructurePath(style)
 
                     val structureSize = VanillaStructureLoader.getStructureSize(structurePath)
                     rawWidth = structureSize.blockX
@@ -1091,6 +1091,7 @@ class SettlementPlanner(val settlement: Settlement) {
         }
 
         var groundY = getHighestGroundYAt(world, cx, cz)
+
         if (groundY <= world.minHeight + 5 || groundY == -999) {
             groundY = world.getHighestBlockYAt(cx, cz)
             if (groundY <= world.minHeight + 5) {
@@ -1279,9 +1280,9 @@ class SettlementPlanner(val settlement: Settlement) {
         val center = settlement.data.center
         val airData = Material.AIR.createBlockData()
 
-        val race = RaceManager.racesRegistry[settlement.data.dominantRace]
+        val race = vx.sv.gameplay.humanoid.race.RaceManager.racesRegistry[settlement.data.dominantRace]
         val style = race?.buildingStyle ?: "plains"
-        val vanillaPath = type.getStructurePath(style)
+        val vanillaPath = type.getValidStructurePath(style)
 
         val structureSize = VanillaStructureLoader.getStructureSize(vanillaPath)
         val rawWidth = structureSize.blockX

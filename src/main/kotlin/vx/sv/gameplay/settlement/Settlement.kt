@@ -114,6 +114,8 @@ class Settlement(val data: SettlementData, villagersSet: Set<Villager> = emptySe
         synchronized(data.serializedInventory) {
             data.serializedInventory.clear()
             for (item in itemsCopy) {
+                // Защита от NullPointerException и пустых блоков (AIR), чтобы сериализация не падала
+                if (item == null || item.type.isAir) continue
                 try {
                     val maxStack = item.type.maxStackSize
                     if (item.amount > maxStack) {

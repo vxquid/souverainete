@@ -339,84 +339,63 @@ achievements:
     founder:
       title: "§aFirst Steps"
       description: "Found your very first settlement."
-      reward: "§a+ 500 XP / Welcome to statecraft!"
     landlord:
       title: "§6Landlord"
       description: "Successfully rent a land plot in a settlement."
-      reward: "§aYou are now an official landowner."
     defender:
       title: "§cHero of the Village"
       description: "Successfully repel a hostile raid on your settlement."
-      reward: "§aCitizens revere your military prowess!"
     first_contact:
       title: "§bFirst Contact"
       description: "Witness the first meeting between two independent settlements."
-      reward: "§aThe world is expanding!"
     peacemaker:
       title: "§dPeacemaker"
       description: "Improve diplomatic relations between two settlements through a delivery quest."
-      reward: "§aDiplomacy is stronger than steel."
     warmonger:
       title: "§4Warmonger"
       description: "Directly trigger or participate in declaring war on a foreign settlement."
-      reward: "§cLet slip the dogs of war."
     exiled:
       title: "§cPersona Non Grata"
       description: "Reach the Exiled reputation status with any settlement."
-      reward: "§cYou are unwelcome here."
     exalted_hero:
       title: "§eLiving Legend"
       description: "Achieve Exalted reputation status in a settlement."
-      reward: "§aYour name will be sung in legends."
     quest_novice:
       title: "§fOdd Jobs"
       description: "Complete your very first village quest."
-      reward: "§aA good start."
     quest_master:
       title: "§6Quest Master"
       description: "Successfully complete 10 quests for villagers."
-      reward: "§aTrusted helper of the people."
     courier_betrayal:
       title: "§4Broken Seal"
       description: "Break the seal of a diplomatic delivery package and steal its contents."
-      reward: "§cA treacherous path chosen."
     master_builder:
       title: "§bMaster Builder"
       description: "Watch your villagers successfully complete a complex building project."
-      reward: "§aThe architecture grows."
     lumberjack:
       title: "§2Timber!"
       description: "Assist in clearing out wood or trees for settlement expansion."
-      reward: "§aResourceful."
     miner_lord:
       title: "§5Deep Depths"
       description: "Establish and utilize a stone quarry / mine structure."
-      reward: "§aRiches from below."
     party_starter:
       title: "§aCompanion"
       description: "Recruit your first villager follower into your group."
-      reward: "§aNever travel alone."
     tactician:
       title: "§eTactical Mind"
       description: "Change your companion's combat tactic or behavior order."
-      reward: "§aAdapt and overcome."
     commander:
       title: "§6Army of One"
       description: "Reach the maximum party size limit with elite equipped companions."
-      reward: "§aA formidable force."
     villager_killer:
       title: "§4Villain"
       description: "Commit murder by killing an innocent villager."
-      reward: "§cYour hands are stained."
     villager_victim:
       title: "§cHumbled"
       description: "Get brutally eliminated by a villager NPC."
-      reward: "§7Don't mess with locals."
     unique_item_buyer:
       title: "§dCollector"
       description: "Purchase a unique artifact from a settlement trader."
-      reward: "§aA fine addition to your collection."
     expensive_gift:
       title: "§ePhilanthropist"
       description: "Gift an extremely valuable item to a villager."
-      reward: "§aGenerosity rewarded."

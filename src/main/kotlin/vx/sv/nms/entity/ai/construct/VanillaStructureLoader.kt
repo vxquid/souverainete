@@ -29,22 +29,9 @@ object VanillaStructureLoader {
             return BlockVector(size, 4, size)
         }
 
-        var key = NamespacedKey.minecraft(structurePath)
-        var structure = Bukkit.getStructureManager().getStructure(key)
+        val key = NamespacedKey.minecraft(structurePath)
+        val structure = Bukkit.getStructureManager().getStructure(key)
             ?: Bukkit.getStructureManager().loadStructure(key)
-
-        // Универсальный фоллбэк на plains, если нужная вариация здания отсутствует в биоме
-        if (structure == null && !structurePath.contains("/plains/")) {
-            val styleMatch = Regex("village/([a-z_]+)/").find(structurePath)
-            if (styleMatch != null) {
-                val style = styleMatch.groupValues[1]
-                val plainsFallback = structurePath.replace("village/$style/", "village/plains/")
-                    .replace("/${style}_", "/plains_")
-                val fallbackKey = NamespacedKey.minecraft(plainsFallback)
-                structure = Bukkit.getStructureManager().getStructure(fallbackKey)
-                    ?: Bukkit.getStructureManager().loadStructure(fallbackKey)
-            }
-        }
 
         return structure?.size ?: BlockVector(10, 10, 10)
     }
@@ -60,21 +47,9 @@ object VanillaStructureLoader {
             return generateCustomRentFoundation()
         }
 
-        var key = NamespacedKey.minecraft(structurePath)
-        var structure = Bukkit.getStructureManager().getStructure(key)
+        val key = NamespacedKey.minecraft(structurePath)
+        val structure = Bukkit.getStructureManager().getStructure(key)
             ?: Bukkit.getStructureManager().loadStructure(key)
-
-        if (structure == null && !structurePath.contains("/plains/")) {
-            val styleMatch = Regex("village/([a-z_]+)/").find(structurePath)
-            if (styleMatch != null) {
-                val style = styleMatch.groupValues[1]
-                val plainsFallback = structurePath.replace("village/$style/", "village/plains/")
-                    .replace("/${style}_", "/plains_")
-                val fallbackKey = NamespacedKey.minecraft(plainsFallback)
-                structure = Bukkit.getStructureManager().getStructure(fallbackKey)
-                    ?: Bukkit.getStructureManager().loadStructure(fallbackKey)
-            }
-        }
 
         if (structure == null) return emptyList()
 
@@ -272,21 +247,9 @@ object VanillaStructureLoader {
             return listOf(EntranceCandidate(BlockPos(size / 2, 0, 0), BlockFace.NORTH, 100.0))
         }
 
-        var key = NamespacedKey.minecraft(structurePath)
-        var structure = Bukkit.getStructureManager().getStructure(key)
+        val key = NamespacedKey.minecraft(structurePath)
+        val structure = Bukkit.getStructureManager().getStructure(key)
             ?: Bukkit.getStructureManager().loadStructure(key)
-
-        if (structure == null && !structurePath.contains("/plains/")) {
-            val styleMatch = Regex("village/([a-z_]+)/").find(structurePath)
-            if (styleMatch != null) {
-                val style = styleMatch.groupValues[1]
-                val plainsFallback = structurePath.replace("village/$style/", "village/plains/")
-                    .replace("/${style}_", "/plains_")
-                val fallbackKey = NamespacedKey.minecraft(plainsFallback)
-                structure = Bukkit.getStructureManager().getStructure(fallbackKey)
-                    ?: Bukkit.getStructureManager().loadStructure(fallbackKey)
-            }
-        }
 
         if (structure == null) return emptyList()
         val palette = structure.palettes.firstOrNull() ?: return emptyList()

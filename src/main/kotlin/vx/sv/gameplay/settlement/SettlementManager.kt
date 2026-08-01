@@ -513,10 +513,35 @@ class SettlementManager : Listener {
 
         fun saveSettlements(world: World) {
             val list = settlements[world]?.toList() ?: return
-            if (list.isEmpty()) return
+
+            if (list.isEmpty()) {
+                val clearTask = Runnable {
+                    world.persistentDataContainer.remove(settlementsWorldKey)
+                }
+                if (Bukkit.isPrimaryThread()) clearTask.run() else Bukkit.getScheduler().runTask(plugin, clearTask)
+                SettlementPlanner.saveBuildingsToWorld(world)
+                return
+            }
 
             list.forEach { it.syncToData() }
-            val dataSnapshot = list.map { it.data }
+
+            // СОЗДАЕМ БЕЗОПАСНЫЙ СНАПШОТ ДЛЯ GSON, ИЗБЕГАЯ ConcurrentModificationException (CME)
+            val dataSnapshot = list.map { settlement ->
+                val orig = settlement.data
+                val safeInventory = synchronized(orig.serializedInventory) { orig.serializedInventory.toList() }
+
+                val safeHistory = ConcurrentHashMap<UUID, MutableList<String>>()
+                orig.diplomaticHistory?.forEach { (k, v) ->
+                    safeHistory[k] = synchronized(v) { v.toMutableList() }
+                }
+
+                orig.copy(
+                    reputation = ConcurrentHashMap(orig.reputation),
+                    relations = ConcurrentHashMap(orig.relations),
+                    diplomaticHistory = safeHistory,
+                    serializedInventory = Collections.synchronizedList(safeInventory.toMutableList())
+                )
+            }
 
             val processSave = {
                 try {
@@ -528,6 +553,7 @@ class SettlementManager : Listener {
                     })
                 } catch (e: Exception) {
                     plugin.logger.severe("Error saving settlements for world ${world.name}: ${e.message}")
+                    e.printStackTrace()
                 }
             }
 
