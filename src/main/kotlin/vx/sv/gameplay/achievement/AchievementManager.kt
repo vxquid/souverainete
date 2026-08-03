@@ -213,11 +213,6 @@ class AchievementManager {
                 }
             }
 
-            if (def.id != "root") {
-                player.playSound(player.location, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f)
-                def.rewardMessage?.let { player.sendFormattedMessage(it) }
-            }
-
             return true
         }
     }
