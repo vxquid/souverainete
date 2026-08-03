@@ -662,24 +662,26 @@ class SettlementPlanner(val settlement: Settlement) {
                             records.remove(golemRecord)
                         }
 
-                        val rentRecord = synchronized(records) {
-                            records.find { it.jobId == job.jobId && it.type.startsWith("RENT_FOUNDATION") }
-                        }
-                        if (rentRecord != null) {
-                            val loc = rentRecord.box.center.toLocation(settlement.world)
-                            loc.y = rentRecord.box.minY + 4.5
+                        if (plugin.gameplayConfig.settlement.enableRentPlots) {
+                            val rentRecord = synchronized(records) {
+                                records.find { it.jobId == job.jobId && it.type.startsWith("RENT_FOUNDATION") }
+                            }
+                            if (rentRecord != null) {
+                                val loc = rentRecord.box.center.toLocation(settlement.world)
+                                loc.y = rentRecord.box.minY + 4.5
 
-                            val alreadyHasDisplay = settlement.world.getNearbyEntities(loc, 2.5, 2.5, 2.5).any { it is TextDisplay }
-                            if (!alreadyHasDisplay) {
-                                val rawText = plugin.language.getString(
-                                    "settlement.rent-foundation-text",
-                                    "§e[Free Plot for Construction]\n§fPurchase from the settlement mayor"
-                                )
-                                settlement.world.spawn(loc, TextDisplay::class.java) { display ->
-                                    display.text = rawText
-                                    display.billboard = Display.Billboard.CENTER
-                                    display.isPersistent = true
-                                    display.backgroundColor = Color.fromARGB(160, 0, 0, 0)
+                                val alreadyHasDisplay = settlement.world.getNearbyEntities(loc, 2.5, 2.5, 2.5).any { it is TextDisplay }
+                                if (!alreadyHasDisplay) {
+                                    val rawText = plugin.language.getString(
+                                        "settlement.rent-foundation-text",
+                                        "§e[Free Plot for Construction]\n§fPurchase from the settlement mayor"
+                                    )
+                                    settlement.world.spawn(loc, TextDisplay::class.java) { display ->
+                                        display.text = rawText
+                                        display.billboard = Display.Billboard.CENTER
+                                        display.isPersistent = true
+                                        display.backgroundColor = Color.fromARGB(160, 0, 0, 0)
+                                    }
                                 }
                             }
                         }
@@ -1174,7 +1176,7 @@ class SettlementPlanner(val settlement: Settlement) {
 
         val existingCounts = allTypes.groupingBy { it }.eachCount()
 
-        val maxRent = plugin.gameplayConfig.settlement.maxRentFoundations
+        val maxRent = if (plugin.gameplayConfig.settlement.enableRentPlots) plugin.gameplayConfig.settlement.maxRentFoundations else 0
 
         val coreBuildings = listOf(
             Pair(VanillaBuildingType.MEETING_POINT, 1),

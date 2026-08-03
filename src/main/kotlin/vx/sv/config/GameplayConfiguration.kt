@@ -156,6 +156,9 @@ class GameplayConfiguration {
         )
         var maxActiveBuildingSettlements: Int = 3
 
+        @Comment("Enable rent foundation plots and their protections. If false, villagers won't build them and claims are disabled.")
+        var enableRentPlots: Boolean = true
+
         @Comment("Maximum number of rent foundation plots allowed per settlement.")
         var maxRentFoundations: Int = 3
 
@@ -432,5 +435,4 @@ class GameplayConfiguration {
             var minScoreForSocialInvite: Int = 250
         }
     }
-
 }
