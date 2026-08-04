@@ -2,14 +2,12 @@ package vx.sv.gameplay.settlement.rent
 
 import com.google.gson.reflect.TypeToken
 import org.bukkit.Bukkit
-import org.bukkit.Color
 import org.bukkit.Material
 import org.bukkit.NamespacedKey
 import org.bukkit.boss.BarColor
 import org.bukkit.boss.BarStyle
 import org.bukkit.boss.BossBar
 import org.bukkit.entity.Player
-import org.bukkit.entity.TextDisplay
 import org.bukkit.event.EventHandler
 import org.bukkit.event.EventPriority
 import org.bukkit.event.Listener
@@ -149,7 +147,6 @@ class RentManager : Listener {
             plotData.rentExpiryGameTime = settlement.world.gameTime + durationTicks
             plotData.members.clear()
 
-            // ВЫДАЕМ АЧИВКУ ЛЭНДЛОРД
             AchievementManager.grant(player, "landlord")
 
             saveAll()
@@ -180,10 +177,8 @@ class RentManager : Listener {
             if (oldOwnerId != null) {
                 val player = Bukkit.getPlayer(oldOwnerId)
                 if (player != null && player.isOnline) {
-                    val msg = plugin.language.getString("rent.evicted-broadcast")
-                        ?.replace("{settlement}", settlement.data.settlementName)
-                        ?: "§cYour lease on the plot in ${settlement.data.settlementName} has expired!"
-                    player.sendMessage(msg)
+                    val rawMsg = plugin.language.getString("rent.evicted-broadcast") ?: "§cYour lease on the plot in §6{settlement} §chas expired and was evicted!"
+                    player.sendMessage(rawMsg.replace("{settlement}", settlement.data.settlementName))
                 }
             }
             saveAll()
@@ -207,9 +202,9 @@ class RentManager : Listener {
                     val color: BarColor
 
                     if (plotData.ownerId == null) {
-                        title = plugin.language.getString("rent.bossbar.free")
-                            ?.replace("{settlement}", settlementName)
-                            ?: "§e[Free Plot] §fAvailable for rent ({settlement})"
+                        val rawTitle = plugin.language.getString("rent.bossbar.free") ?: "§e[Free Plot] §fAvailable for rent ({settlement})"
+                        title = rawTitle.replace("{settlement}", settlementName)
+
                         progress = 1.0f
                         color = BarColor.GREEN
                     } else {
@@ -218,10 +213,8 @@ class RentManager : Listener {
                         val remainingDays = (remainingTicks / 24000L).coerceAtLeast(0L)
                         val maxDays = plugin.gameplayConfig.settlement.rentDurationDays.toFloat()
 
-                        title = plugin.language.getString("rent.bossbar.rented")
-                            ?.replace("{owner}", ownerName)
-                            ?.replace("{days}", remainingDays.toString())
-                            ?: "§a[Rented Plot] §7Owner: §f{owner} §7(Expires in: §e{days} days§7)"
+                        val rawTitle = plugin.language.getString("rent.bossbar.rented") ?: "§a[Rented Plot] §7Owner: §f{owner} §7(Expires in: §e{days} days§7)"
+                        title = rawTitle.replace("{owner}", ownerName).replace("{days}", remainingDays.toString())
 
                         progress = (remainingDays.toFloat() / maxDays).coerceIn(0.0f, 1.0f)
                         color = if (remainingDays <= 3) BarColor.RED else BarColor.YELLOW
@@ -325,8 +318,7 @@ class RentManager : Listener {
         val block = event.block
         if (!canModifyPlot(player, block.location)) {
             event.isCancelled = true
-            val msg = plugin.language.getString("rent.protection-deny")
-                ?: "§cYou do not have permission to build or break blocks on this rented plot!"
+            val msg = plugin.language.getString("rent.protection-deny") ?: "§cYou do not have permission to build or break blocks on this rented plot!"
             player.sendMessage(msg)
         }
     }
@@ -337,8 +329,7 @@ class RentManager : Listener {
         val block = event.block
         if (!canModifyPlot(player, block.location)) {
             event.isCancelled = true
-            val msg = plugin.language.getString("rent.protection-deny")
-                ?: "§cYou do not have permission to build or break blocks on this rented plot!"
+            val msg = plugin.language.getString("rent.protection-deny") ?: "§cYou do not have permission to build or break blocks on this rented plot!"
             player.sendMessage(msg)
         }
     }
@@ -349,8 +340,7 @@ class RentManager : Listener {
         val player = event.player
         if (!canModifyPlot(player, block.location)) {
             event.isCancelled = true
-            val msg = plugin.language.getString("rent.protection-deny")
-                ?: "§cYou do not have permission to build or break blocks on this rented plot!"
+            val msg = plugin.language.getString("rent.protection-deny") ?: "§cYou do not have permission to build or break blocks on this rented plot!"
             player.sendMessage(msg)
         }
     }

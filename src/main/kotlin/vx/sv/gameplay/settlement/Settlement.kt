@@ -8,6 +8,7 @@ import org.bukkit.inventory.ItemStack
 import org.bukkit.persistence.PersistentDataType
 import org.bukkit.util.BoundingBox
 import vx.sv.Souverainete.Companion.plugin
+import vx.sv.nms.entity.ai.construct.SettlementPlanner
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArraySet
@@ -79,32 +80,33 @@ class Settlement(val data: SettlementData, villagersSet: Set<Villager> = emptySe
 
     fun refreshCachedBeds() {
         cachedBeds.clear()
-        val radius = plugin.gameplayManager.config.settlement.detectionDistance.toInt()
-        val center = data.center
-        val centerCX = center.blockX shr 4
-        val centerCZ = center.blockZ shr 4
-        val cRadius = radius shr 4
 
-        for (cx in (centerCX - cRadius)..(centerCX + cRadius)) {
-            for (cz in (centerCZ - cRadius)..(centerCZ + cRadius)) {
-                if (!world.isChunkLoaded(cx, cz)) continue
-                try {
-                    val chunk = world.getChunkAt(cx, cz)
-                    chunk.tileEntities.forEach { tile ->
-                        val block = tile.block
+        // Кровати не являются TileEntities, поэтому сканируем только внутри коробок зданий
+        val records = SettlementPlanner.buildings[data.id]?.toList() ?: return
+
+        for (record in records) {
+            val box = record.box
+            val minX = box.minX.toInt()
+            val minY = box.minY.toInt()
+            val minZ = box.minZ.toInt()
+            val maxX = box.maxX.toInt()
+            val maxY = box.maxY.toInt()
+            val maxZ = box.maxZ.toInt()
+
+            for (x in minX..maxX) {
+                for (y in minY..maxY) {
+                    for (z in minZ..maxZ) {
+                        if (!world.isChunkLoaded(x shr 4, z shr 4)) continue
+
+                        val block = world.getBlockAt(x, y, z)
                         if (block.type.name.endsWith("_BED")) {
-                            val bedData = block.blockData as? org.bukkit.block.data.type.Bed ?: return@forEach
+                            val bedData = block.blockData as? org.bukkit.block.data.type.Bed ?: continue
                             if (bedData.part == org.bukkit.block.data.type.Bed.Part.HEAD) {
-                                if (block.location.distanceSquared(center) <= radius * radius) {
-                                    if (block.lightLevel < 5) return@forEach
-                                    if (world.getHighestBlockYAt(block.x, block.z) < block.y) return@forEach
-
-                                    cachedBeds.add(BlockPos(block.x, block.y, block.z))
-                                }
+                                cachedBeds.add(BlockPos(x, y, z))
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                }
             }
         }
     }
@@ -114,7 +116,6 @@ class Settlement(val data: SettlementData, villagersSet: Set<Villager> = emptySe
         synchronized(data.serializedInventory) {
             data.serializedInventory.clear()
             for (item in itemsCopy) {
-                // Защита от NullPointerException и пустых блоков (AIR), чтобы сериализация не падала
                 if (item == null || item.type.isAir) continue
                 try {
                     val maxStack = item.type.maxStackSize

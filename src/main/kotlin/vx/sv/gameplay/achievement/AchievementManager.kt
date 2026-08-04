@@ -43,7 +43,6 @@ class AchievementManager {
         @Volatile private var isInitialized = false
 
         private fun convertColorsToJsonComponent(text: String): String {
-            // Принудительно приводим все § к & для надёжного парсинга LegacyComponentSerializer
             val normalized = text.replace("§", "&")
             val component = LegacyComponentSerializer.legacyAmpersand().deserialize(normalized)
             return GsonComponentSerializer.gson().serialize(component)
@@ -69,8 +68,6 @@ class AchievementManager {
             // --- ВЕТКА 3: АРЕНДА И СТРОИТЕЛЬСТВО ---
             register(AchievementDefinition(id = "landlord", icon = Material.STONE_BRICKS, parentId = "founder"))
             register(AchievementDefinition(id = "master_builder", icon = Material.SCAFFOLDING, parentId = "landlord", frame = AchievementDefinition.FrameType.GOAL))
-            register(AchievementDefinition(id = "lumberjack", icon = Material.OAK_LOG, parentId = "master_builder"))
-            register(AchievementDefinition(id = "miner_lord", icon = Material.DIAMOND_ORE, parentId = "master_builder"))
 
             // --- ВЕТКА 4: КОМПАНЬОНЫ И ПАТИ ---
             register(AchievementDefinition(id = "party_starter", icon = Material.LEAD, parentId = "first_visit_village"))
@@ -99,7 +96,6 @@ class AchievementManager {
             try {
                 val nsKey = NamespacedKey(plugin, def.id.lowercase())
 
-                // Пересоздаём ачивку с чистым кэшем, если она уже была сломана
                 if (Bukkit.getAdvancement(nsKey) != null) {
                     try {
                         Bukkit.getUnsafe().removeAdvancement(nsKey)
@@ -114,7 +110,6 @@ class AchievementManager {
                     icon.addProperty("id", def.icon.key.toString())
                     display.add("icon", icon)
 
-                    // Конвертация в валидные Json-компоненты с цветами
                     val titleJsonString = convertColorsToJsonComponent(def.title)
                     display.add("title", JsonParser.parseString(titleJsonString))
 
@@ -126,9 +121,8 @@ class AchievementManager {
                     display.addProperty("announce_to_chat", def.id != "root")
                     display.addProperty("hidden", false)
 
-                    // ИСПРАВЛЕНО: Верный путь к текстуре со словом textures!
                     if (def.id == "root") {
-                        display.addProperty("background", "minecraft:block/stone")
+                        display.addProperty("background", "minecraft:textures/block/stone.png")
                     }
 
                     val criteria = JsonObject()
@@ -211,6 +205,11 @@ class AchievementManager {
                 for (criteria in progress.remainingCriteria) {
                     progress.awardCriteria(criteria)
                 }
+            }
+
+            if (def.id != "root") {
+                player.playSound(player.location, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1.0f, 1.0f)
+                def.rewardMessage?.let { player.sendFormattedMessage(it) }
             }
 
             return true

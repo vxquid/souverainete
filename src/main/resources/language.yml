@@ -372,12 +372,6 @@ achievements:
     master_builder:
       title: "§bMaster Builder"
       description: "Watch your villagers successfully complete a complex building project."
-    lumberjack:
-      title: "§2Timber!"
-      description: "Assist in clearing out wood or trees for settlement expansion."
-    miner_lord:
-      title: "§5Deep Depths"
-      description: "Establish and utilize a stone quarry / mine structure."
     party_starter:
       title: "§aCompanion"
       description: "Recruit your first villager follower into your group."

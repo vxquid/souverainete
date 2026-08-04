@@ -8,6 +8,7 @@ import org.bukkit.block.BlockFace
 import org.bukkit.craftbukkit.entity.CraftVillager
 import org.bukkit.entity.Pose
 import org.bukkit.entity.Villager
+import org.bukkit.entity.memory.MemoryKey
 import org.bukkit.event.EventHandler
 import org.bukkit.event.Listener
 import org.bukkit.event.entity.EntityDamageEvent
@@ -116,9 +117,9 @@ class HumanoidLeisureManager : Listener {
                 }
 
                 val isNight = isNightTime(npc.world.time)
-                if (isNight && session.preference == Preference.OUTDOOR) {
-                    val hasBed = hasNearbyBed(npc)
-                    if (hasBed) {
+                // Если наступила ночь, и у жителя ЕСТЬ кровать — прерываем посиделки у костра, пусть идет спать
+                if (isNight) {
+                    if (hasNearbyBed(npc)) {
                         standUp(npc, session)
                         iterator.remove()
                         continue
@@ -149,28 +150,8 @@ class HumanoidLeisureManager : Listener {
     }
 
     private fun hasNearbyBed(villager: Villager): Boolean {
-        val loc = villager.location
-        val world = villager.world
-        val centerChunk = loc.chunk
-
-        for (dx in -1..1) {
-            for (dz in -1..1) {
-                val cx = centerChunk.x + dx
-                val cz = centerChunk.z + dz
-                if (world.isChunkLoaded(cx, cz)) {
-                    val chunk = world.getChunkAt(cx, cz)
-                    for (tile in chunk.tileEntities) {
-                        if (tile.type.name.endsWith("_BED")) {
-                            val tileLoc = tile.location
-                            if (tileLoc.distanceSquared(loc) <= 576.0) {
-                                return true
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        return false
+        // Мгновенная и точная проверка: привязан ли житель к кровати в ванильном ИИ
+        return villager.getMemory(MemoryKey.HOME) != null
     }
 
     private fun isNightTime(time: Long): Boolean {
