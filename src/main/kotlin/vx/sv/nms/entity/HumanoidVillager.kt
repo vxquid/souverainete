@@ -660,20 +660,50 @@ class HumanoidVillager(
     @Suppress("UNCHECKED_CAST")
     private fun registerAttribute(entity: LivingEntity, attribute: Holder<Attribute>, value: Double) {
         try {
-            val attributesMapField = AttributeMap::class.java.getDeclaredFields().firstOrNull {
+            // 1. Если атрибут уже есть у моба — просто обновляем значение
+            val existing = entity.getAttribute(attribute)
+            if (existing != null) {
+                existing.baseValue = value
+                return
+            }
+
+            val attributeMap = entity.attributes
+
+            // 2. Получаем ссылку на существующий Map внутри AttributeMap (НЕ создаем новый HashMap!)
+            val mapField = AttributeMap::class.java.declaredFields.firstOrNull {
                 Map::class.java.isAssignableFrom(it.type)
             } ?: return
 
-            attributesMapField.isAccessible = true
-            val currentMap = attributesMapField.get(entity.attributes) as? Map<Holder<Attribute>, AttributeInstance> ?: return
+            mapField.isAccessible = true
+            val map = mapField.get(attributeMap) as? MutableMap<Holder<Attribute>, AttributeInstance> ?: return
 
-            val newMap = HashMap(currentMap)
-            if (!newMap.containsKey(attribute)) {
-                newMap[attribute] = AttributeInstance(attribute) { it.attribute }
+            // 3. Находим родной Consumer (onAttributeModified) внутри AttributeMap
+            val consumerField = AttributeMap::class.java.declaredFields.firstOrNull {
+                java.util.function.Consumer::class.java.isAssignableFrom(it.type)
             }
-            attributesMapField.set(entity.attributes, newMap)
+            consumerField?.isAccessible = true
 
-            entity.getAttribute(attribute)?.baseValue = value
+            val onModifiedConsumer = consumerField?.get(attributeMap) as? java.util.function.Consumer<AttributeInstance>
+                ?: java.util.function.Consumer { instance ->
+                    // Резервный вариант, если consumer не найден
+                    try {
+                        val dirtySetField = AttributeMap::class.java.declaredFields.firstOrNull {
+                            Set::class.java.isAssignableFrom(it.type)
+                        }
+                        dirtySetField?.isAccessible = true
+                        (dirtySetField?.get(attributeMap) as? MutableSet<AttributeInstance>)?.add(instance)
+                    } catch (_: Throwable) {}
+                }
+
+            // 4. Создаем AttributeInstance с РЕАЛЬНЫМ обработчиком событий
+            val newInstance = AttributeInstance(attribute, onModifiedConsumer)
+
+            // 5. Вставляем в существующую карту Leaf/Paper напрямую
+            map[attribute] = newInstance
+
+            // 6. Устанавливаем базовое значение (теперь оно корректно пометится как dirty для отправки клиенту)
+            newInstance.baseValue = value
+
         } catch (t: Throwable) {
             t.printStackTrace()
         }
