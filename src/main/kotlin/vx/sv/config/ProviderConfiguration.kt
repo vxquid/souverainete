@@ -20,7 +20,7 @@ class ProviderConfiguration {
 
     @Comment(
         "For CEREBRAS, default model is \"gpt-oss-120b\".",
-        "For GEMINI, default model is \"gemini-2.5-flash-lite\".",
+        "For GEMINI, default model is \"gemini-3.1-flash-lite\".",
         "For OPENROUTER, default model is \"google/gemini-2.5-flash-lite\".",
         "For GROQ, I recommend \"openai/gpt-oss-120b\".",
         "For DEEPSEEK, default model is \"deepseek-chat\".",
